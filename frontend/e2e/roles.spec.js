@@ -14,6 +14,15 @@ async function login(page, account) {
 }
 
 
+async function expectNoHorizontalOverflow(page) {
+  const widths = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }))
+  expect(widths.scroll).toBeLessThanOrEqual(widths.client)
+}
+
+
 test('登录表单提示完整，受保护页面登录后回到原路径', async ({ page }) => {
   await page.goto('/learning')
   await expect(page).toHaveURL(/\/login\?redirect=\/learning$/)
@@ -249,6 +258,59 @@ test('项目内 FFmpeg 生成的 HLS 可以在 Chromium 中播放', async ({ pag
     () => video.evaluate((element) => element.currentTime),
     { timeout: 15000 },
   ).toBeGreaterThan(0.25)
+})
+
+
+test('长课程文本在移动端卡片内换行且业务页面无横向溢出', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await login(page, 'e2e_student')
+
+  for (const item of [
+    ['课程中心', '发现适合你的课程'],
+    ['我的学习', '我的学习'],
+    ['课程作业', '课程作业'],
+    ['在线测验', '在线测验'],
+    ['数据概览', '学习数据'],
+  ]) {
+    await page.getByRole('link', { name: item[0], exact: true }).click()
+    await expect(page.getByRole('heading', { name: item[1], exact: true })).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+  }
+
+  await page.getByRole('link', { name: '课程中心', exact: true }).click()
+  const longCard = page.locator('.course-card').filter({ hasText: '端测超长课程名称' })
+  await expect(longCard).toBeVisible()
+  const textOverflows = await longCard.locator('h2, .course-description').evaluateAll((elements) =>
+    elements.map((element) => element.scrollWidth > element.clientWidth),
+  )
+  expect(textOverflows).toEqual([false, false])
+})
+
+
+test('无学习记录的学生可以看到明确空状态', async ({ page }) => {
+  await login(page, 'e2e_empty_student')
+  await page.getByRole('link', { name: '我的学习', exact: true }).click()
+  await expect(page.getByText('还没有加入课程，先去课程中心看看吧')).toBeVisible()
+
+  await page.getByRole('link', { name: '课程作业', exact: true }).click()
+  await expect(page.getByText('当前没有需要完成的课程作业')).toBeVisible()
+
+  await page.getByRole('link', { name: '在线测验', exact: true }).click()
+  await expect(page.getByText('当前没有可参加的课程测验')).toBeVisible()
+})
+
+
+test('慢速课程请求期间显示加载反馈并在完成后恢复内容', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.route(/\/api\/courses(?:\?.*)?$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    await route.continue()
+  })
+
+  await page.getByRole('link', { name: '课程中心', exact: true }).click()
+  await expect(page.getByText('正在加载课程…')).toBeVisible()
+  await expect(page.getByText(/^共 \d+ 门课程$/)).toBeVisible()
+  await expect(page.locator('.course-grid .el-loading-mask')).toBeHidden()
 })
 
 

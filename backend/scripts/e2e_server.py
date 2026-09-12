@@ -32,6 +32,12 @@ E2E_USERS = (
         "real_name": "端测管理员",
         "role": UserRole.ADMIN.value,
     },
+    {
+        "username": "e2e_empty_student",
+        "real_name": "空数据学生",
+        "role": UserRole.STUDENT.value,
+        "student_no": "E2ES002",
+    },
 )
 
 
@@ -99,7 +105,7 @@ def create_e2e_app():
         ]
         db.session.add_all([category, *users])
         db.session.flush()
-        student, teacher, _admin = users
+        student, teacher, _admin, _empty_student = users
         course = Course(
             teacher_id=teacher.id,
             category_id=category.id,
@@ -131,6 +137,20 @@ def create_e2e_app():
             status=True,
         )
         db.session.add_all([video, membership])
+        db.session.add(
+            Course(
+                teacher_id=teacher.id,
+                category_id=category.id,
+                name="端测超长课程名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789连续字符边界验证",
+                description=(
+                    "用于验证中文与连续英文混排时不会撑破卡片："
+                    "https://example.invalid/"
+                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                ),
+                status=CourseStatus.PUBLISHED.value,
+                published_at=utc_now(),
+            )
+        )
         db.session.commit()
     return app
 
