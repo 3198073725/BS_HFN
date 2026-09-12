@@ -1,12 +1,14 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 
 const auth = useAuthStore()
+const route = useRoute()
 const isTeacher = computed(() => auth.user?.role === 'TEACHER')
 const classrooms = ref([])
 const loading = ref(false)
@@ -25,6 +27,8 @@ const selectedClassId = ref(null)
 const classKeyword = ref('')
 const classStatistics = ref(null)
 const statisticsLoading = ref(false)
+const passwordResetRequests = ref([])
+const handlingResetId = ref(null)
 let requestSequence = 0
 let statisticsRequestSequence = 0
 
@@ -94,13 +98,18 @@ async function loadClasses() {
   const requestId = ++requestSequence
   loading.value = true
   try {
-    const [response, courseResponse] = await Promise.all([
+    const [response, courseResponse, resetResponse] = await Promise.all([
       api.get('/classes'),
       isTeacher.value ? api.get('/classes/course-options') : Promise.resolve({ data: [] }),
+      isTeacher.value ? api.get('/classes/password-reset-requests') : Promise.resolve({ data: [] }),
     ])
     if (requestId !== requestSequence) return
     classrooms.value = response.data
     teacherCourses.value = courseResponse.data
+    passwordResetRequests.value = resetResponse.data
+    const requestedId = Number(route.query.reset_request_id)
+    const requestedItem = passwordResetRequests.value.find((item) => item.id === requestedId)
+    if (requestedItem?.class_ids?.length) selectedClassId.value = requestedItem.class_ids[0]
     if (isTeacher.value && !classrooms.value.some((item) => item.id === selectedClassId.value)) {
       selectedClassId.value = classrooms.value[0]?.id || null
     }
@@ -110,6 +119,41 @@ async function loadClasses() {
     }
   } finally {
     if (requestId === requestSequence) loading.value = false
+  }
+}
+
+function resetRequestsForClass(classId) {
+  return passwordResetRequests.value.filter((item) => item.class_ids?.includes(classId))
+}
+
+async function reviewPasswordReset(item, action) {
+  if (handlingResetId.value !== null) return
+  const approved = action === 'APPROVED'
+  try {
+    await ElMessageBox.confirm(
+      approved
+        ? `同意后，“${item.student_name}”申请时填写的新密码将立即生效，确定继续吗？`
+        : `确定拒绝“${item.student_name}”的密码重置申请吗？`,
+      approved ? '同意密码重置' : '拒绝密码重置',
+      {
+        confirmButtonText: approved ? '确认同意' : '确认拒绝',
+        cancelButtonText: '取消',
+        type: approved ? 'warning' : 'info',
+      },
+    )
+  } catch {
+    return
+  }
+  handlingResetId.value = item.id
+  try {
+    const response = await api.put(`/classes/password-reset-requests/${item.id}`, { action })
+    passwordResetRequests.value = passwordResetRequests.value.filter((request) => request.id !== item.id)
+    ElMessage.success(response.message || (approved ? '已同意密码重置' : '已拒绝密码重置'))
+  } catch (error) {
+    ElMessage.error(error.message || '密码重置申请处理失败')
+    await loadClasses()
+  } finally {
+    handlingResetId.value = null
   }
 }
 
@@ -370,7 +414,13 @@ onBeforeUnmount(() => {
             @click="selectedClassId = classroom.id"
           >
             <span>{{ String(index + 1).padStart(2, '0') }}</span>
-            <div><strong>{{ classroom.name }}</strong><small>{{ classroom.member_count }} 名学生</small></div>
+            <div>
+              <strong>{{ classroom.name }}</strong>
+              <small>{{ classroom.member_count }} 名学生</small>
+              <em v-if="resetRequestsForClass(classroom.id).length">
+                {{ resetRequestsForClass(classroom.id).length }} 项密码申请
+              </em>
+            </div>
           </button>
           <el-empty v-if="!filteredClassrooms.length" :image-size="54" description="没有匹配的班级" />
         </div>
@@ -528,6 +578,47 @@ onBeforeUnmount(() => {
         </section>
 
         <template v-if="isTeacher">
+          <section
+            v-if="resetRequestsForClass(classroom.id).length"
+            class="classroom-reset-panel"
+            aria-label="学生密码重置申请"
+          >
+            <div class="classroom-reset-heading">
+              <div>
+                <strong>密码重置申请</strong>
+                <small>确认学生身份后再同意，新密码会立即生效</small>
+              </div>
+              <span>{{ resetRequestsForClass(classroom.id).length }} 项待处理</span>
+            </div>
+            <article
+              v-for="item in resetRequestsForClass(classroom.id)"
+              :key="item.id"
+              class="classroom-reset-item"
+            >
+              <div class="classroom-reset-student">
+                <span>{{ item.student_name.slice(0, 1) }}</span>
+                <p>
+                  <strong>{{ item.student_name }}</strong>
+                  <small>{{ item.student_no || item.username }} · {{ item.class_names.join('、') }}</small>
+                </p>
+              </div>
+              <time>申请于 {{ formatDate(item.requested_at) }}</time>
+              <div class="classroom-reset-actions">
+                <el-button
+                  :loading="handlingResetId === item.id"
+                  :disabled="handlingResetId !== null && handlingResetId !== item.id"
+                  @click="reviewPasswordReset(item, 'REJECTED')"
+                >拒绝</el-button>
+                <el-button
+                  type="primary"
+                  :loading="handlingResetId === item.id"
+                  :disabled="handlingResetId !== null && handlingResetId !== item.id"
+                  @click="reviewPasswordReset(item, 'APPROVED')"
+                >同意重置</el-button>
+              </div>
+            </article>
+          </section>
+
           <div class="classroom-member-toolbar">
             <div>
               <strong>学生名册</strong>

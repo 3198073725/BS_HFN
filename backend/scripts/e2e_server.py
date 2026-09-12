@@ -10,7 +10,17 @@ from app import create_app
 from app.constants import CourseStatus, UserRole, VideoStatus
 from app.datetime_utils import utc_now
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, CourseStudent, Notification, User, Video
+from app.models import (
+    Chapter,
+    Course,
+    CourseCategory,
+    CourseStudent,
+    Notification,
+    TeachingClass,
+    TeachingClassStudent,
+    User,
+    Video,
+)
 
 
 E2E_PASSWORD = "E2ePassword123!"
@@ -141,6 +151,16 @@ def create_e2e_app():
         db.session.add_all([category, *users])
         db.session.flush()
         student, teacher, _admin, _empty_student = users
+        reset_classroom = TeachingClass(
+            teacher_id=teacher.id,
+            name="端测密码审批班",
+            description="用于验证学生密码重置审批流程。",
+        )
+        db.session.add(reset_classroom)
+        db.session.flush()
+        db.session.add(
+            TeachingClassStudent(class_id=reset_classroom.id, student_id=student.id)
+        )
         course = Course(
             teacher_id=teacher.id,
             category_id=category.id,

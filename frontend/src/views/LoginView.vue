@@ -58,7 +58,7 @@ async function resetPassword() {
   }
   resetting.value = true
   try {
-    await api.post('/auth/reset-password', {
+    const response = await api.post('/auth/reset-password', {
       username: resetForm.username.trim(),
       verification: resetForm.verification.trim(),
       new_password: resetForm.new_password,
@@ -67,7 +67,7 @@ async function resetPassword() {
     form.password = ''
     resetDialog.value = false
     Object.assign(resetForm, { username: '', verification: '', new_password: '', confirm_password: '' })
-    ElMessage.success('密码已重置，请使用新密码登录')
+    ElMessage.success(response.message || '密码重置申请已提交')
   } catch (error) {
     ElMessage.error(error.message || '密码重置失败')
   } finally {
@@ -144,7 +144,7 @@ async function resetPassword() {
     </section>
 
     <el-dialog v-model="resetDialog" title="找回密码" width="min(520px, 94vw)" :close-on-click-modal="!resetting">
-      <p class="dialog-tip">学生或教师可使用注册邮箱、学号、工号或手机号核验身份。管理员账号请由另一位管理员在系统后台重置。</p>
+      <p class="dialog-tip">学生提交后需由所属班级教师同意，新密码才会生效；教师核验身份后可直接重置。管理员账号请由另一位管理员在系统后台处理。</p>
       <el-form label-position="top" @submit.prevent="resetPassword">
         <el-form-item label="用户名" required>
           <el-input v-model.trim="resetForm.username" maxlength="50" autocomplete="username" placeholder="请输入用户名" />
@@ -161,7 +161,7 @@ async function resetPassword() {
       </el-form>
       <template #footer>
         <el-button :disabled="resetting" @click="resetDialog = false">取消</el-button>
-        <el-button type="primary" :loading="resetting" @click="resetPassword">确认重置</el-button>
+        <el-button type="primary" :loading="resetting" @click="resetPassword">提交重置</el-button>
       </template>
     </el-dialog>
   </main>

@@ -2,7 +2,7 @@ from werkzeug.security import generate_password_hash
 
 from app.constants import UserRole
 from app.extensions import db
-from app.models import User
+from app.models import TeachingClass, TeachingClassStudent, User
 
 
 STUDENT = {
@@ -211,6 +211,32 @@ def test_password_recovery_and_admin_password_reset_are_verified(app, client):
     registered = client.post("/api/auth/register", json=STUDENT)
     assert registered.status_code == 201
 
+    with app.app_context():
+        student = db.session.scalar(db.select(User).where(User.username == STUDENT["username"]))
+        teacher = User(
+            username="password_teacher",
+            password_hash=generate_password_hash("Teacher123!"),
+            real_name="审批教师",
+            teacher_no="PT001",
+            role=UserRole.TEACHER.value,
+        )
+        other_teacher = User(
+            username="other_password_teacher",
+            password_hash=generate_password_hash("Teacher123!"),
+            real_name="其他教师",
+            teacher_no="PT002",
+            role=UserRole.TEACHER.value,
+        )
+        db.session.add_all([teacher, other_teacher])
+        db.session.flush()
+        classroom = TeachingClass(teacher_id=teacher.id, name="密码审批班")
+        db.session.add(classroom)
+        db.session.flush()
+        db.session.add(TeachingClassStudent(class_id=classroom.id, student_id=student.id))
+        db.session.commit()
+        teacher_username = teacher.username
+        other_teacher_username = other_teacher.username
+
     rejected = client.post(
         "/api/auth/reset-password",
         json={"username": STUDENT["username"], "verification": "wrong", "new_password": "NewStudy123!"},
@@ -224,7 +250,45 @@ def test_password_recovery_and_admin_password_reset_are_verified(app, client):
             "new_password": "NewStudy123!",
         },
     )
-    assert recovered.status_code == 200
+    assert recovered.status_code == 202
+    assert recovered.get_json()["data"]["status"] == "PENDING"
+    assert client.post(
+        "/api/auth/login",
+        json={"account": STUDENT["username"], "password": STUDENT["password"]},
+    ).status_code == 200
+    assert client.post(
+        "/api/auth/login",
+        json={"account": STUDENT["username"], "password": "NewStudy123!"},
+    ).status_code == 401
+
+    teacher_token = client.post(
+        "/api/auth/login", json={"account": teacher_username, "password": "Teacher123!"}
+    ).get_json()["data"]["access_token"]
+    other_teacher_token = client.post(
+        "/api/auth/login", json={"account": other_teacher_username, "password": "Teacher123!"}
+    ).get_json()["data"]["access_token"]
+    requests = client.get(
+        "/api/classes/password-reset-requests", headers=bearer(teacher_token)
+    )
+    assert requests.status_code == 200
+    request_item = requests.get_json()["data"][0]
+    assert request_item["student_no"] == STUDENT["student_no"]
+    assert request_item["class_names"] == ["密码审批班"]
+    assert client.get(
+        "/api/classes/password-reset-requests", headers=bearer(other_teacher_token)
+    ).get_json()["data"] == []
+    assert client.put(
+        f"/api/classes/password-reset-requests/{request_item['id']}",
+        headers=bearer(other_teacher_token),
+        json={"action": "APPROVED"},
+    ).status_code == 403
+    approved = client.put(
+        f"/api/classes/password-reset-requests/{request_item['id']}",
+        headers=bearer(teacher_token),
+        json={"action": "APPROVED"},
+    )
+    assert approved.status_code == 200
+    assert approved.get_json()["data"]["status"] == "APPROVED"
     assert client.post(
         "/api/auth/login",
         json={"account": STUDENT["username"], "password": "NewStudy123!"},
@@ -270,3 +334,23 @@ def test_password_recovery_and_admin_password_reset_are_verified(app, client):
         "/api/auth/login",
         json={"account": STUDENT["username"], "password": "AdminReset123!"},
     ).status_code == 200
+
+
+def test_student_password_reset_requires_a_current_class_teacher(app, client):
+    payload = {
+        **STUDENT,
+        "username": "unassigned_student",
+        "student_no": "S20269999",
+        "email": "unassigned@example.com",
+    }
+    assert client.post("/api/auth/register", json=payload).status_code == 201
+    response = client.post(
+        "/api/auth/reset-password",
+        json={
+            "username": payload["username"],
+            "verification": payload["student_no"],
+            "new_password": "NewStudy123!",
+        },
+    )
+    assert response.status_code == 409
+    assert response.get_json()["message"] == "账号尚未加入班级，请联系管理员重置密码"

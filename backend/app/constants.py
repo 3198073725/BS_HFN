@@ -43,3 +43,11 @@ class NoticeStatus(StrEnum):
     DRAFT = "DRAFT"
     PUBLISHED = "PUBLISHED"
     OFFLINE = "OFFLINE"
+
+
+class PasswordResetStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"

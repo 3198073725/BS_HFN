@@ -3192,3 +3192,28 @@ favorite
 - 用户只能读取和标记自己的通知，通知内容仍以作业、测验、答疑等业务表为最终依据。
 
 对应迁移版本为 `9c8d7e6f5a43`，上一版本为管理员审计迁移 `8b7c6d5e4f32`。
+
+# 60. 当前实现扩展：学生密码重置申请表
+
+为“学生申请、班级教师审批”的账号找回流程新增 `password_reset_request`。表中仅保存单向密码哈希，不保存学生填写的明文新密码或身份核验信息。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGINT UNSIGNED | 申请主键 |
+| student_id | BIGINT UNSIGNED | 申请学生，关联 `sys_user.id` |
+| requested_password_hash | VARCHAR(255) | 学生申请的新密码哈希，不对接口返回 |
+| status | VARCHAR(20) | `PENDING/APPROVED/REJECTED/EXPIRED/CANCELLED` |
+| reviewer_id | BIGINT UNSIGNED | 实际处理的教师或管理员 |
+| reviewed_at | DATETIME | 审批、过期确认或取消时间 |
+| expires_at | DATETIME | 申请失效时间，当前为提交后 24 小时 |
+| created_at | DATETIME | 申请时间；重复提交时更新为最近一次时间 |
+| updated_at | DATETIME | 最近更新时间 |
+
+约束与索引：
+
+- `(student_id, status)` 用于复用和查询学生当前待处理申请。
+- `(status, expires_at)` 用于教师端过滤仍有效的待办。
+- 教师审批时实时校验 `teaching_class_student` 与 `teaching_class.teacher_id`，不能仅凭申请编号操作其他班级学生。
+- 同意时才把申请中的哈希写入 `sys_user.password_hash`；拒绝、过期和取消均不修改现有密码。
+
+对应迁移版本为 `a1b2c3d4e5f6`，上一版本为站内通知迁移 `9c8d7e6f5a43`。

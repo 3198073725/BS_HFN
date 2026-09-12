@@ -27,7 +27,7 @@ Authorization: Bearer <access_token>
 | GET | `/api/health` | 公开 | 健康检查 |
 | POST | `/api/auth/register` | 公开 | 注册学生账号 |
 | POST | `/api/auth/login` | 公开 | 用户名、邮箱、学号或工号登录 |
-| POST | `/api/auth/reset-password` | 公开 | 使用用户名与已登记邮箱、学号、工号或手机号核验后设置新密码 |
+| POST | `/api/auth/reset-password` | 公开 | 使用用户名与已登记邮箱、学号、工号或手机号核验；学生生成待教师审批申请，教师账号直接重置 |
 | POST | `/api/auth/refresh` | Refresh Token | 轮换 Token 对；旧 Refresh Token 立即失效 |
 | POST | `/api/auth/logout` | 任意 JWT | 注销当前及请求体中属于同一用户的 Token |
 | GET | `/api/users/me` | 登录用户 | 当前用户资料 |
@@ -44,6 +44,8 @@ Authorization: Bearer <access_token>
 | --- | --- | --- | --- |
 | GET | `/api/classes` | 教师/学生 | 教师查看自己的班级和完整名册；学生仅查看本人所在班级、教师与已发布班级课程 |
 | GET | `/api/classes/course-options` | 教师 | 获取本人课程的轻量选择列表 |
+| GET | `/api/classes/password-reset-requests` | 教师 | 查询本人当前班级学生尚未过期的待审批密码申请 |
+| PUT | `/api/classes/password-reset-requests/{id}` | 学生所属班级教师 | 使用 `APPROVED` 或 `REJECTED` 审批学生密码申请 |
 | POST | `/api/classes` | 教师 | 创建班级 |
 | PUT | `/api/classes/{id}` | 班级教师 | 编辑班级资料 |
 | DELETE | `/api/classes/{id}` | 班级教师 | 删除班级及班级关系 |
@@ -53,6 +55,8 @@ Authorization: Bearer <access_token>
 | DELETE | `/api/classes/{id}/courses/{course_id}` | 班级教师 | 解除班级课程关联 |
 
 关联课程请求体为 `{"course_id": 1}`。关联时，已有学生会自动加入课程；之后新增到班级的学生也会同步加入该班级的全部关联课程。已有但已退出的课程关系会重新启用。解除课程关联、移出学生或删除班级只调整班级关系，不删除学生已有的课程关系、学习进度、作业或测验记录。教师可预先关联草稿或已下线课程，学生端只返回其中已发布的课程。
+
+学生提交密码重置时，原密码继续有效，新密码不会立即生效。申请有效期为 24 小时；所属班级任一当前负责教师同意后，新密码立即替换原密码，拒绝或过期则不改变密码。教师只能查看和处理当前仍在本人班级中的学生申请。管理员直接代重置会取消该学生尚未处理的申请，防止旧申请随后覆盖管理员设置的密码。
 
 ## 课程与章节
 

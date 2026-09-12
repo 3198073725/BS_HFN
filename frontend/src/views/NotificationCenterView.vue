@@ -74,7 +74,7 @@ function formatDate(value) {
 }
 
 function categoryLabel(value) {
-  return { HOMEWORK: '课程作业', EXAM: '在线测验', QUESTION: '课程答疑', SYSTEM: '系统消息' }[value] || value
+  return { HOMEWORK: '课程作业', EXAM: '在线测验', QUESTION: '课程答疑', PASSWORD: '账号安全', SYSTEM: '系统消息' }[value] || value
 }
 
 onMounted(load)

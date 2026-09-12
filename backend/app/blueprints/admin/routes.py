@@ -101,7 +101,7 @@ def reset_managed_user_password(user_id: int):
         return error("不能通过用户管理重置当前登录账号的密码", 409)
     try:
         password = validate_new_password(json_body())
-        user = set_user_password(user_id, password)
+        user = set_user_password(user_id, password, int(get_jwt_identity()))
     except AuthValidationError as exc:
         return error(str(exc), 400)
     except AuthenticationError as exc:

@@ -7,6 +7,11 @@ from app.constants import UserRole
 from app.datetime_utils import utc_now
 from app.extensions import db
 from app.models import User
+from app.services.password_reset_service import (
+    PasswordResetRequestConflict,
+    cancel_pending_password_resets,
+    submit_student_password_reset,
+)
 
 
 class AuthenticationError(ValueError):
@@ -90,7 +95,7 @@ def get_active_user(user_id: str | int) -> User:
     return user
 
 
-def reset_password(username: str, verification: str, new_password: str) -> User:
+def reset_password(username: str, verification: str, new_password: str) -> str:
     user = db.session.scalar(db.select(User).where(User.username == username))
     values = {value for value in (user.email, user.student_no, user.teacher_no, user.phone) if value} if user else set()
     if user is None or verification not in values:
@@ -101,17 +106,24 @@ def reset_password(username: str, verification: str, new_password: str) -> User:
         raise AuthenticationError("账号已被禁用，请联系管理员")
     if check_password_hash(user.password_hash, new_password):
         raise ConflictError("新密码不能与当前密码相同")
+    if user.role == UserRole.STUDENT.value:
+        try:
+            submit_student_password_reset(user, new_password)
+        except PasswordResetRequestConflict as exc:
+            raise ConflictError(str(exc)) from exc
+        return "PENDING"
     user.password_hash = generate_password_hash(new_password)
     db.session.commit()
-    return user
+    return "COMPLETED"
 
 
-def set_user_password(user_id: int, new_password: str) -> User:
+def set_user_password(user_id: int, new_password: str, reviewer_id: int | None = None) -> User:
     user = db.session.get(User, user_id)
     if user is None:
         raise AuthenticationError("用户不存在")
     if check_password_hash(user.password_hash, new_password):
         raise ConflictError("新密码不能与当前密码相同")
     user.password_hash = generate_password_hash(new_password)
+    cancel_pending_password_resets(user.id, reviewer_id)
     db.session.commit()
     return user

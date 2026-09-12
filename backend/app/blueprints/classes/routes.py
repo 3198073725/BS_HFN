@@ -15,6 +15,13 @@ from app.services.class_service import (
     unassign_course,
     update_classroom,
 )
+from app.services.password_reset_service import (
+    PasswordResetRequestConflict,
+    PasswordResetRequestDenied,
+    PasswordResetRequestNotFound,
+    list_teacher_password_reset_requests,
+    review_student_password_reset,
+)
 from app.utils import error, json_body, roles_required, success
 from . import classes_bp
 from .schemas import (
@@ -35,6 +42,34 @@ def classrooms():
 @roles_required(UserRole.TEACHER)
 def classroom_course_options():
     return success(list_course_options(int(get_jwt_identity())))
+
+
+@classes_bp.get("/password-reset-requests")
+@roles_required(UserRole.TEACHER)
+def password_reset_requests():
+    return success(list_teacher_password_reset_requests(int(get_jwt_identity())))
+
+
+@classes_bp.put("/password-reset-requests/<int:request_id>")
+@roles_required(UserRole.TEACHER)
+def review_password_reset_request(request_id: int):
+    action = str(json_body().get("action") or "").strip().upper()
+    if action not in {"APPROVED", "REJECTED"}:
+        return error("审批操作只能是 APPROVED 或 REJECTED", 400)
+    try:
+        result = review_student_password_reset(
+            request_id,
+            int(get_jwt_identity()),
+            action,
+        )
+    except PasswordResetRequestNotFound as exc:
+        return error(str(exc), 404)
+    except PasswordResetRequestDenied as exc:
+        return error(str(exc), 403)
+    except PasswordResetRequestConflict as exc:
+        return error(str(exc), 409)
+    message = "已同意密码重置，新密码现已生效" if action == "APPROVED" else "已拒绝密码重置申请"
+    return success(result, message)
 
 
 @classes_bp.post("")

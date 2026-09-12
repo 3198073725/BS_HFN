@@ -7,6 +7,7 @@ from .homework import Homework, HomeworkSubmission
 from .learning import LearningRecord, VideoNote
 from .notice import Notice
 from .notification import Notification
+from .password_reset_request import PasswordResetRequest
 from .question import Answer, Question
 from .teaching_class import TeachingClass, TeachingClassCourse, TeachingClassStudent
 from .user import User
@@ -30,6 +31,7 @@ __all__ = [
     "LearningRecord",
     "Notice",
     "Notification",
+    "PasswordResetRequest",
     "Question",
     "TeachingClass",
     "TeachingClassCourse",

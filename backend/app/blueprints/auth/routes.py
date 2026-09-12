@@ -48,14 +48,20 @@ def login():
 def recover_password():
     try:
         username, verification, password = validate_password_reset(json_body())
-        reset_password(username, verification, password)
+        outcome = reset_password(username, verification, password)
     except ValidationError as exc:
         return error(str(exc), 400)
     except AuthenticationError as exc:
         return error(str(exc), 400)
     except ConflictError as exc:
         return error(str(exc), 409)
-    return success(message="密码已重置，请使用新密码登录")
+    if outcome == "PENDING":
+        return success(
+            {"status": "PENDING"},
+            "申请已提交，请等待班级教师同意后使用新密码登录",
+            202,
+        )
+    return success({"status": "COMPLETED"}, "密码已重置，请使用新密码登录")
 
 
 @auth_bp.post("/refresh")

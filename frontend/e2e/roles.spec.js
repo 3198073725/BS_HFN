@@ -75,9 +75,13 @@ test('忘记密码可完成身份核验和密码重置请求', async ({ page }) 
   await page.route('**/api/auth/reset-password', async (route) => {
     submittedPayload = route.request().postDataJSON()
     await route.fulfill({
-      status: 200,
+      status: 202,
       contentType: 'application/json',
-      body: JSON.stringify({ code: 200, message: '密码重置成功', data: null }),
+      body: JSON.stringify({
+        code: 202,
+        message: '申请已提交，请等待班级教师同意后使用新密码登录',
+        data: { status: 'PENDING' },
+      }),
     })
   })
   await page.goto('/login')
@@ -87,9 +91,9 @@ test('忘记密码可完成身份核验和密码重置请求', async ({ page }) 
   await dialog.getByPlaceholder('注册邮箱、学号、工号或手机号').fill('E2ES001')
   await dialog.getByPlaceholder('8–72 位新密码').fill('NewPassword123!')
   await dialog.getByPlaceholder('再次输入新密码').fill('NewPassword123!')
-  await dialog.getByRole('button', { name: '确认重置', exact: true }).click()
+  await dialog.getByRole('button', { name: '提交重置', exact: true }).click()
 
-  await expect(page.getByText('密码已重置，请使用新密码登录')).toBeVisible()
+  await expect(page.getByText('申请已提交，请等待班级教师同意后使用新密码登录')).toBeVisible()
   await expect(dialog).toBeHidden()
   expect(submittedPayload).toEqual({
     username: 'e2e_student',
@@ -302,6 +306,30 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   await expect(studentCard.getByText('2026 秋季端到端班级', { exact: true })).toBeVisible()
   await expect(studentCard.getByRole('link', { name: /端测基础课程/ })).toBeVisible()
   await expect(studentCard.locator('.el-table')).toHaveCount(0)
+})
+
+
+test('学生密码申请需由所属班级教师审批', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByRole('button', { name: '忘记密码', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '找回密码' })
+  await dialog.getByPlaceholder('请输入用户名').fill('e2e_student')
+  await dialog.getByPlaceholder('注册邮箱、学号、工号或手机号').fill('E2ES001')
+  await dialog.getByPlaceholder('8–72 位新密码').fill('PendingPassword123!')
+  await dialog.getByPlaceholder('再次输入新密码').fill('PendingPassword123!')
+  await dialog.getByRole('button', { name: '提交重置', exact: true }).click()
+  await expect(page.getByText('申请已提交，请等待班级教师同意后使用新密码登录')).toBeVisible()
+
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '班级管理', exact: true }).click()
+  const resetPanel = page.locator('.classroom-reset-panel').filter({ hasText: '端测学生' })
+  await expect(resetPanel).toBeVisible()
+  await expect(resetPanel).toContainText('E2ES001')
+  await resetPanel.getByRole('button', { name: '拒绝', exact: true }).click()
+  const rejectDialog = page.getByRole('dialog', { name: '拒绝密码重置' })
+  await rejectDialog.getByRole('button', { name: '确认拒绝', exact: true }).click()
+  await expect(page.getByText('已拒绝密码重置申请')).toBeVisible()
+  await expect(resetPanel).toBeHidden()
 })
 
 
