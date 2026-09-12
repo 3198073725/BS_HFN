@@ -1,9 +1,10 @@
 <script setup>
 import { ElMessage } from 'element-plus'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../stores/auth'
+import api from '../api/client'
 
 
 const route = useRoute()
@@ -11,6 +12,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const loggingOut = ref(false)
 const mainNav = ref(null)
+const unreadCount = ref(0)
 const roleLabel = computed(() => ({
   ADMIN: '管理员',
   TEACHER: '教师',
@@ -41,8 +43,30 @@ async function revealActiveNavigation() {
   navigation.scrollTo({ left: Math.max(0, target), behavior: 'smooth' })
 }
 
+async function loadUnreadCount() {
+  if (!auth.isAuthenticated) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const response = await api.get('/notifications', { params: { page: 1, page_size: 1, unread_only: true } })
+    unreadCount.value = response.data.unread_count || 0
+  } catch {
+    unreadCount.value = 0
+  }
+}
+
+function updateUnreadCount(event) {
+  unreadCount.value = Math.max(0, Number(event.detail || 0))
+}
+
 watch(() => route.name, revealActiveNavigation)
-onMounted(revealActiveNavigation)
+watch(() => auth.user?.id, loadUnreadCount, { immediate: true })
+onMounted(() => {
+  revealActiveNavigation()
+  window.addEventListener('bs-hfn:notification-count', updateUnreadCount)
+})
+onBeforeUnmount(() => window.removeEventListener('bs-hfn:notification-count', updateUnreadCount))
 </script>
 
 <template>
@@ -68,6 +92,13 @@ onMounted(revealActiveNavigation)
             :class="{ active: route.name === 'learning' }"
           >
             我的学习
+          </RouterLink>
+          <RouterLink
+            v-if="auth.isAuthenticated"
+            to="/notifications"
+            :class="{ active: route.name === 'notifications' }"
+          >
+            消息<span v-if="unreadCount" class="nav-unread-count">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
           </RouterLink>
           <RouterLink
             v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)"

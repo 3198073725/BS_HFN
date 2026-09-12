@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash
 
 from app.constants import CourseStatus, UserRole
 from app.extensions import db
-from app.models import Course, CourseCategory, CourseStudent, User
+from app.models import Course, CourseCategory, CourseStudent, ExamRecord, User
 
 
 def bearer(token):
@@ -259,3 +259,45 @@ def test_only_owner_can_delete_draft_exam_with_questions(app, client):
     deleted = client.delete(f"/api/exams/{exam_id}", headers=bearer(teacher))
     assert deleted.status_code == 200
     assert client.get(f"/api/exams/{exam_id}", headers=bearer(teacher)).status_code == 404
+
+
+def test_exam_answers_are_saved_and_expired_record_uses_saved_draft(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    exam = create_exam(client, teacher, context["course_id"], total_score=100, time_limit_minutes=30)
+    question = client.post(
+        f"/api/exams/{exam['id']}/questions",
+        headers=bearer(teacher),
+        json={
+            "question_type": "SINGLE",
+            "content": "自动保存测试",
+            "options": {"A": "正确", "B": "错误"},
+            "correct_answer": "A",
+            "score": 100,
+        },
+    ).get_json()["data"]
+    assert client.post(f"/api/exams/{exam['id']}/publish", headers=bearer(teacher)).status_code == 200
+    started = client.post(f"/api/exams/{exam['id']}/start", headers=bearer(student)).get_json()["data"]
+    saved = client.put(
+        f"/api/exams/{exam['id']}/answers",
+        headers=bearer(student),
+        json={"answers": [{"question_id": question["id"], "answer": "A"}]},
+    )
+    assert saved.status_code == 200
+    assert saved.get_json()["data"]["draft_answers"][0]["answer"] == "A"
+
+    with app.app_context():
+        record = db.session.get(ExamRecord, started["id"])
+        record.started_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=31)
+        db.session.commit()
+
+    submitted = client.post(
+        f"/api/exams/{exam['id']}/submit",
+        headers=bearer(student),
+        json={"answers": [{"question_id": question["id"], "answer": "B"}]},
+    )
+    assert submitted.status_code == 200
+    assert submitted.get_json()["data"]["status"] == "SUBMITTED"
+    assert submitted.get_json()["data"]["score"] == 100.0
+    assert submitted.get_json()["data"]["duration_seconds"] == 1800

@@ -23,6 +23,7 @@ const editingQuestionId = ref(null)
 const records = ref([])
 const answers = reactive({})
 const remainingSeconds = ref(null)
+const answerSaveState = ref('')
 const examFormRef = ref(null)
 const currentPage = ref(1)
 const pageSize = 6
@@ -51,6 +52,8 @@ const examRules = {
   title: [{ required: true, message: '请输入测验名称', trigger: 'blur' }],
 }
 let timer = null
+let answerSaveTimer = null
+let lastChanceSaveRequested = false
 
 const questionScoreTotal = computed(() => (
   selectedExam.value?.questions?.reduce((sum, question) => sum + Number(question.score), 0) || 0
@@ -240,6 +243,7 @@ async function openExam(exam) {
     selectedExam.value = response.data
     selectedRecord.value = response.data.record
     Object.keys(answers).forEach((key) => delete answers[key])
+    restoreDraftAnswers(selectedRecord.value)
     if (selectedRecord.value?.status === 'SUBMITTED') {
       takeDialog.value = true
       return
@@ -250,6 +254,13 @@ async function openExam(exam) {
     }
     const started = await api.post(`/exams/${exam.id}/start`)
     selectedRecord.value = started.data
+    selectedExam.value.record = started.data
+    restoreDraftAnswers(started.data)
+    if (started.data.status === 'SUBMITTED') {
+      takeDialog.value = true
+      await load()
+      return
+    }
     startCountdown()
     takeDialog.value = true
   } catch (error) {
@@ -278,6 +289,60 @@ async function submitExam() {
   }
 }
 
+function restoreDraftAnswers(record) {
+  for (const item of record?.draft_answers || []) answers[item.question_id] = item.answer
+}
+
+function scheduleAnswerSave() {
+  if (selectedRecord.value?.status !== 'DOING') return
+  answerSaveState.value = '等待保存'
+  if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
+  answerSaveTimer = window.setTimeout(() => void saveDraftAnswers(), 500)
+}
+
+async function saveDraftAnswers() {
+  if (selectedRecord.value?.status !== 'DOING' || !selectedExam.value || remainingSeconds.value === 0) return false
+  if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
+  answerSaveTimer = null
+  const payload = Object.entries(answers).map(([questionId, answer]) => ({
+    question_id: Number(questionId), answer,
+  }))
+  answerSaveState.value = '保存中…'
+  try {
+    const response = await api.put(`/exams/${selectedExam.value.id}/answers`, { answers: payload })
+    selectedRecord.value = { ...selectedRecord.value, ...response.data }
+    answerSaveState.value = '已自动保存'
+    return true
+  } catch (error) {
+    answerSaveState.value = '保存失败'
+    ElMessage.error(error.message || '答案自动保存失败')
+    return false
+  }
+}
+
+async function autoSubmitExam() {
+  if (selectedRecord.value?.status !== 'DOING' || saving.value) return
+  if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
+  answerSaveTimer = null
+  saving.value = true
+  try {
+    const payload = selectedExam.value.questions.map((question) => ({
+      question_id: question.id,
+      answer: answers[question.id] || '',
+    }))
+    const response = await api.post(`/exams/${selectedExam.value.id}/submit`, { answers: payload })
+    selectedRecord.value = response.data
+    selectedExam.value.record = response.data
+    answerSaveState.value = '已自动交卷'
+    ElMessage.warning(`作答时间结束，系统已自动交卷，得分 ${response.data.score}`)
+    await load()
+  } catch (error) {
+    ElMessage.error(error.message || '自动交卷失败，请重新打开测验确认状态')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function openRecords(exam) {
   selectedExam.value = exam
   try {
@@ -291,6 +356,7 @@ async function openRecords(exam) {
 
 function startCountdown() {
   stopCountdown()
+  lastChanceSaveRequested = false
   const startedAt = parseUtc(selectedRecord.value?.started_at)
   const endAt = parseUtc(selectedExam.value?.end_time)
   let deadline = endAt?.getTime() || null
@@ -303,8 +369,15 @@ function startCountdown() {
     return
   }
   const update = () => {
-    remainingSeconds.value = Math.max(0, Math.floor((deadline - Date.now()) / 1000))
-    if (remainingSeconds.value === 0) stopCountdown()
+    remainingSeconds.value = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+    if (remainingSeconds.value === 1 && !lastChanceSaveRequested) {
+      lastChanceSaveRequested = true
+      void saveDraftAnswers()
+    }
+    if (remainingSeconds.value === 0) {
+      stopCountdown()
+      void autoSubmitExam()
+    }
   }
   update()
   timer = window.setInterval(update, 1000)
@@ -313,6 +386,13 @@ function startCountdown() {
 function stopCountdown() {
   if (timer) window.clearInterval(timer)
   timer = null
+}
+
+function handleTakeClosed() {
+  if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
+  answerSaveTimer = null
+  void saveDraftAnswers()
+  stopCountdown()
 }
 
 function resetExamForm() {
@@ -398,7 +478,11 @@ watch(() => exams.value.length, (total) => {
   currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
 })
 onMounted(load)
-onBeforeUnmount(stopCountdown)
+onBeforeUnmount(() => {
+  if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
+  void saveDraftAnswers()
+  stopCountdown()
+})
 </script>
 
 <template>
@@ -603,7 +687,7 @@ onBeforeUnmount(stopCountdown)
       :title="selectedExam?.title"
       width="min(860px, 96vw)"
       :close-on-click-modal="selectedRecord?.status === 'SUBMITTED'"
-      @closed="stopCountdown"
+      @closed="handleTakeClosed"
     >
       <div v-if="selectedRecord?.status === 'SUBMITTED'" class="exam-result">
         <div class="result-score">
@@ -626,15 +710,16 @@ onBeforeUnmount(stopCountdown)
           <strong v-if="remainingSeconds !== null" :class="{ urgent: remainingSeconds < 300 }">
             剩余 {{ formatDuration(remainingSeconds) }}
           </strong>
+          <small v-if="answerSaveState" class="answer-save-state">{{ answerSaveState }}</small>
         </div>
         <article v-for="(question, index) in selectedExam.questions" :key="question.id" class="paper-question">
           <h3><span>{{ index + 1 }}</span>{{ question.content }} <small>{{ question.score }} 分</small></h3>
-          <el-radio-group v-if="question.question_type === 'SINGLE'" v-model="answers[question.id]" class="answer-options">
+          <el-radio-group v-if="question.question_type === 'SINGLE'" v-model="answers[question.id]" class="answer-options" @change="scheduleAnswerSave">
             <el-radio v-for="(option, key) in question.options" :key="key" :value="key" border>
               <strong>{{ key }}</strong>{{ option }}
             </el-radio>
           </el-radio-group>
-          <el-radio-group v-else v-model="answers[question.id]" class="answer-options judge-options">
+          <el-radio-group v-else v-model="answers[question.id]" class="answer-options judge-options" @change="scheduleAnswerSave">
             <el-radio value="TRUE" border>正确</el-radio>
             <el-radio value="FALSE" border>错误</el-radio>
           </el-radio-group>

@@ -27,12 +27,14 @@ Authorization: Bearer <access_token>
 | GET | `/api/health` | 公开 | 健康检查 |
 | POST | `/api/auth/register` | 公开 | 注册学生账号 |
 | POST | `/api/auth/login` | 公开 | 用户名、邮箱、学号或工号登录 |
+| POST | `/api/auth/reset-password` | 公开 | 使用用户名与已登记邮箱、学号、工号或手机号核验后设置新密码 |
 | POST | `/api/auth/refresh` | Refresh Token | 轮换 Token 对；旧 Refresh Token 立即失效 |
 | POST | `/api/auth/logout` | 任意 JWT | 注销当前及请求体中属于同一用户的 Token |
 | GET | `/api/users/me` | 登录用户 | 当前用户资料 |
 | GET | `/api/admin/users` | 管理员 | 分页查询用户；支持 `role`、`status`、`keyword`、`page`、`page_size` |
 | POST | `/api/admin/users` | 管理员 | 创建教师或学生账号 |
 | PUT | `/api/admin/users/{id}/status` | 管理员 | 启用或禁用教师/学生账号 |
+| PUT | `/api/admin/users/{id}/password` | 管理员 | 为其他账号设置新密码并记录审计日志；不能重置当前登录账号 |
 
 注册核心字段：`username`、`password`、`real_name`，可选 `email`、`phone`、`student_no`。登录字段为 `account`、`password`。退出时可在 JSON 中附带 `access_token`、`refresh_token`，后端会校验归属后统一注销。
 
@@ -136,10 +138,12 @@ Authorization: Bearer <access_token>
 | PUT | `/api/homeworks/{id}` | 课程教师 | 编辑草稿作业 |
 | DELETE | `/api/homeworks/{id}` | 课程教师 | 删除作业草稿并清理附件目录 |
 | POST | `/api/homeworks/{id}/attachment` | 课程教师 | 上传或替换草稿作业附件 |
+| GET | `/api/homeworks/{id}/attachment` | 课程成员/课程教师 | 鉴权后在线预览作业附件；`download=1` 强制下载 |
 | POST | `/api/homeworks/{id}/publish` | 课程教师 | 发布作业 |
 | POST | `/api/homeworks/{id}/close` | 课程教师 | 关闭作业 |
 | PUT | `/api/homeworks/{id}/submission` | 课程学生 | 提交或更新文字答案 |
 | POST | `/api/homeworks/{id}/submission/attachment` | 课程学生 | 提交或替换本人附件 |
+| GET | `/api/homeworks/submissions/{id}/attachment` | 提交学生/课程教师 | 鉴权后预览提交附件；`download=1` 强制下载 |
 | GET | `/api/homeworks/{id}/submissions` | 课程教师 | 学生提交列表 |
 | PUT | `/api/homeworks/submissions/{id}/grade` | 课程教师 | 保存得分和评语 |
 
@@ -160,12 +164,23 @@ Authorization: Bearer <access_token>
 | DELETE | `/api/exams/questions/{id}` | 课程教师 | 删除草稿试题 |
 | POST | `/api/exams/{id}/publish` | 课程教师 | 校验题目总分并发布 |
 | POST | `/api/exams/{id}/close` | 课程教师 | 关闭测验 |
-| POST | `/api/exams/{id}/start` | 课程学生 | 开始或继续未提交测验 |
+| POST | `/api/exams/{id}/start` | 课程学生 | 开始或继续未提交测验，并返回已保存答案 |
+| PUT | `/api/exams/{id}/answers` | 课程学生 | 保存未交卷测验的答案草稿 |
 | POST | `/api/exams/{id}/submit` | 课程学生 | 正式交卷并自动评分 |
 | GET | `/api/exams/{id}/records` | 课程教师 | 查看成绩记录 |
 | GET | `/api/exams/records/{id}` | 本人/课程教师 | 测验结果和逐题明细 |
 
-第一版题型为 `SINGLE` 和 `JUDGE`，答案分别使用 `A/B/C/D` 与 `TRUE/FALSE`。交卷体为 `{"answers": [{"question_id": 1, "answer": "A"}]}`。每名学生每个测验只能正式提交一次；未交卷时响应不会包含 `correct_answer`。
+第一版题型为 `SINGLE` 和 `JUDGE`，答案分别使用 `A/B/C/D` 与 `TRUE/FALSE`。保存和交卷体均为 `{"answers": [{"question_id": 1, "answer": "A"}]}`。每名学生每个测验只能正式提交一次；未交卷时响应不会包含 `correct_answer`。页面在选择答案后防抖保存，并在倒计时结束时自动交卷；若浏览器没有及时发出超时请求，后端在下一次查询或继续答题时会使用截止前已保存的答案完成交卷，不接受截止后的新答案。
+
+## 站内消息
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/notifications` | 登录用户 | 分页查询本人通知；支持 `unread_only`、`page`、`page_size` |
+| PUT | `/api/notifications/{id}/read` | 通知接收者 | 将单条通知标为已读 |
+| PUT | `/api/notifications/read-all` | 登录用户 | 将本人全部未读通知标为已读 |
+
+课程作业或测验发布、作业批改、答疑首次回复及更新回复都会产生站内通知。通知只能由接收者读取或改变已读状态。
 
 ## 公告、统计与后台
 

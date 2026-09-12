@@ -17,6 +17,7 @@ from app.services.exam_service import (
     list_exam_records,
     list_student_exams,
     list_teacher_exams,
+    save_exam_answers,
     start_exam,
     submit_exam,
     update_exam,
@@ -133,6 +134,16 @@ def finish_exam(exam_id: int):
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(submit_exam(exam_id, _user_id(), answers), "测验提交成功"))
+
+
+@exams_bp.put("/<int:exam_id>/answers")
+@roles_required(UserRole.STUDENT)
+def save_answers(exam_id: int):
+    try:
+        answers = validate_answers(json_body())
+    except ValidationError as exc:
+        return error(str(exc), 400)
+    return _handle(lambda: success(save_exam_answers(exam_id, _user_id(), answers), "答案已保存"))
 
 
 @exams_bp.get("/<int:exam_id>/records")

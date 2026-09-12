@@ -88,3 +88,30 @@ def get_active_user(user_id: str | int) -> User:
     if user is None or not user.status:
         raise AuthenticationError("用户不存在或已禁用")
     return user
+
+
+def reset_password(username: str, verification: str, new_password: str) -> User:
+    user = db.session.scalar(db.select(User).where(User.username == username))
+    values = {value for value in (user.email, user.student_no, user.teacher_no, user.phone) if value} if user else set()
+    if user is None or verification not in values:
+        raise AuthenticationError("账号信息核验失败，请检查用户名和验证信息")
+    if user.role == UserRole.ADMIN.value:
+        raise AuthenticationError("管理员账号不能通过公开入口重置密码")
+    if not user.status:
+        raise AuthenticationError("账号已被禁用，请联系管理员")
+    if check_password_hash(user.password_hash, new_password):
+        raise ConflictError("新密码不能与当前密码相同")
+    user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    return user
+
+
+def set_user_password(user_id: int, new_password: str) -> User:
+    user = db.session.get(User, user_id)
+    if user is None:
+        raise AuthenticationError("用户不存在")
+    if check_password_hash(user.password_hash, new_password):
+        raise ConflictError("新密码不能与当前密码相同")
+    user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    return user

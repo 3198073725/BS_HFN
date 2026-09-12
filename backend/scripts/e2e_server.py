@@ -10,7 +10,7 @@ from app import create_app
 from app.constants import CourseStatus, UserRole, VideoStatus
 from app.datetime_utils import utc_now
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, CourseStudent, User, Video
+from app.models import Chapter, Course, CourseCategory, CourseStudent, Notification, User, Video
 
 
 E2E_PASSWORD = "E2ePassword123!"
@@ -171,7 +171,14 @@ def create_e2e_app():
             student_id=student.id,
             status=True,
         )
-        db.session.add_all([video, membership])
+        welcome_notification = Notification(
+            recipient_id=student.id,
+            category="SYSTEM",
+            title="端到端消息中心验证",
+            content="这是一条用于验证消息读取状态的站内通知。",
+            link="/learning",
+        )
+        db.session.add_all([video, membership, welcome_notification])
         long_course = Course(
             teacher_id=teacher.id,
             category_id=category.id,

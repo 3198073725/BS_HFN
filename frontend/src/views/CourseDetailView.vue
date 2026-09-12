@@ -19,6 +19,7 @@ const learningLoading = ref(false)
 const actionLoading = ref('')
 const studyTab = ref('notes')
 const progress = ref(null)
+const queuedProgressCount = ref(0)
 const startTime = ref(0)
 const currentTime = ref(0)
 const notes = ref([])
@@ -194,10 +195,75 @@ async function saveProgress(force = false) {
     if (selectedVideo.value?.id === savedVideoId) progress.value = response.data
     pendingWatchDuration = Math.max(0, pendingWatchDuration - watchDelta)
   } catch (error) {
-    if (force) ElMessage.error(error.message || '学习进度保存失败')
+    if (isConnectionError(error)) {
+      queueProgress({
+        video_id: savedVideoId,
+        current_time: currentTime.value,
+        watch_duration_delta: watchDelta,
+      })
+      pendingWatchDuration = Math.max(0, pendingWatchDuration - watchDelta)
+      if (force) ElMessage.warning('网络不可用，学习进度已保存在本机，恢复连接后会自动补传')
+    } else if (force) {
+      ElMessage.error(error.message || '学习进度保存失败')
+    }
   } finally {
     savingProgress.value = false
   }
+}
+
+function progressQueueKey() {
+  return `bs-hfn:progress-queue:${auth.user?.id || 'anonymous'}`
+}
+
+function readProgressQueue() {
+  try {
+    const value = JSON.parse(localStorage.getItem(progressQueueKey()) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
+}
+
+function writeProgressQueue(items) {
+  const limited = items.slice(-200)
+  localStorage.setItem(progressQueueKey(), JSON.stringify(limited))
+  queuedProgressCount.value = limited.length
+}
+
+function queueProgress(payload) {
+  writeProgressQueue([...readProgressQueue(), { ...payload, queued_at: Date.now() }])
+}
+
+async function flushProgressQueue() {
+  if (!isStudent.value || !navigator.onLine) return
+  const queued = readProgressQueue()
+  if (!queued.length) {
+    queuedProgressCount.value = 0
+    return
+  }
+  const remaining = [...queued]
+  let sent = 0
+  while (remaining.length) {
+    const item = remaining[0]
+    try {
+      await api.put(`/learning/videos/${item.video_id}/progress`, {
+        current_time: item.current_time,
+        watch_duration_delta: item.watch_duration_delta,
+      })
+      remaining.shift()
+      sent += 1
+    } catch (error) {
+      if (!isConnectionError(error)) remaining.shift()
+      break
+    }
+  }
+  writeProgressQueue(remaining)
+  if (sent) ElMessage.success(`已补传 ${sent} 条离线学习进度`)
+}
+
+function isConnectionError(error) {
+  const message = String(error?.message || '')
+  return !navigator.onLine || message.includes('网络连接失败') || message.includes('请求超时')
 }
 
 async function createNote() {
@@ -294,12 +360,17 @@ watch(() => route.params.id, async (nextId, previousId) => {
   await saveProgress(true)
   void loadCourse()
 })
-onMounted(loadCourse)
+onMounted(() => {
+  queuedProgressCount.value = readProgressQueue().length
+  window.addEventListener('online', flushProgressQueue)
+  void loadCourse().then(flushProgressQueue)
+})
 onBeforeUnmount(() => {
   courseRequestSequence += 1
   courseStateRequestSequence += 1
   learningRequestSequence += 1
   void saveProgress(true)
+  window.removeEventListener('online', flushProgressQueue)
 })
 </script>
 
@@ -369,6 +440,7 @@ onBeforeUnmount(() => {
               <span v-if="progress" class="progress-chip">
                 {{ progress.status === 'COMPLETED' ? '已完成' : `${progress.progress}%` }}
               </span>
+              <span v-if="queuedProgressCount" class="offline-progress-chip">{{ queuedProgressCount }} 条进度待补传</span>
               <span v-if="selectedVideo" class="playing-status"><i></i> 可播放</span>
             </div>
           </div>

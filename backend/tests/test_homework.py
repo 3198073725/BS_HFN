@@ -130,6 +130,15 @@ def test_homework_publish_submit_grade_and_resubmit(app, client):
     )
     assert published.status_code == 200
     assert published.get_json()["data"]["status"] == "PUBLISHED"
+    assert client.get(
+        f"/api/homeworks/{homework_id}/attachment", headers=bearer(student)
+    ).status_code == 200
+    assert client.get(
+        f"/api/homeworks/{homework_id}/attachment", headers=bearer(other_student)
+    ).status_code == 403
+    notifications = client.get("/api/notifications", headers=bearer(student)).get_json()["data"]
+    assert notifications["unread_count"] == 1
+    assert notifications["items"][0]["category"] == "HOMEWORK"
     assert client.put(
         f"/api/homeworks/{homework_id}",
         headers=bearer(teacher),
@@ -176,6 +185,15 @@ def test_homework_publish_submit_grade_and_resubmit(app, client):
     assert student_attachment.get_json()["data"]["attachment"].startswith(
         f"homework/{homework_id}/"
     )
+    assert client.get(
+        f"/api/homeworks/submissions/{submission_id}/attachment", headers=bearer(student)
+    ).status_code == 200
+    assert client.get(
+        f"/api/homeworks/submissions/{submission_id}/attachment", headers=bearer(teacher)
+    ).status_code == 200
+    assert client.get(
+        f"/api/homeworks/submissions/{submission_id}/attachment", headers=bearer(other_student)
+    ).status_code == 403
 
     assert client.get(
         f"/api/homeworks/{homework_id}/submissions",
@@ -200,6 +218,13 @@ def test_homework_publish_submit_grade_and_resubmit(app, client):
     assert graded.status_code == 200
     assert graded.get_json()["data"]["status"] == "GRADED"
     assert graded.get_json()["data"]["score"] == 92.5
+    after_grade = client.get("/api/notifications", headers=bearer(student)).get_json()["data"]
+    assert after_grade["unread_count"] == 2
+    first_notice_id = after_grade["items"][0]["id"]
+    assert client.put(
+        f"/api/notifications/{first_notice_id}/read", headers=bearer(student)
+    ).status_code == 200
+    assert client.put("/api/notifications/read-all", headers=bearer(student)).status_code == 200
 
     resubmitted = client.put(
         f"/api/homeworks/{homework_id}/submission",

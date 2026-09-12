@@ -1941,6 +1941,102 @@
   }
 }
 
+.nav-unread-count {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #315f85;
+  color: #fff;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.notification-toolbar {
+  display: flex;
+  min-height: 72px;
+  margin-bottom: 18px;
+  padding: 16px 22px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notification-toolbar > div {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.notification-toolbar strong { font-size: 26px; color: #173752; }
+.notification-toolbar span { color: #66798a; }
+
+.notification-list { overflow: hidden; }
+
+.notification-item {
+  display: flex;
+  width: 100%;
+  min-height: 116px;
+  gap: 14px;
+  padding: 20px 24px;
+  border: 0;
+  border-bottom: 1px solid #e4eaf0;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notification-item:hover { background: #f8fafc; }
+.notification-item.unread { background: #f4f8fb; }
+.notification-dot { width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: transparent; flex: 0 0 auto; }
+.notification-item.unread .notification-dot { background: #315f85; }
+.notification-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 6px; }
+.notification-copy > span { display: flex; justify-content: space-between; gap: 16px; color: #738495; }
+.notification-copy small { font-style: normal; }
+.notification-copy strong { color: #173752; font-size: 17px; }
+.notification-copy p { margin: 0; color: #52687b; line-height: 1.65; }
+.notification-copy i { color: #82909d; font-size: 12px; font-style: normal; }
+
+.homework-attachment,
+.attachment-text-button {
+  border: 0;
+  background: transparent;
+  color: #285d86;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.homework-attachment { padding: 0; }
+.attachment-text-button { padding: 0; }
+
+.attachment-preview {
+  display: flex;
+  min-height: 430px;
+  max-height: 68vh;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  background: #f4f6f8;
+  border: 1px solid #d9e1e8;
+}
+
+.attachment-preview img { max-width: 100%; max-height: 65vh; object-fit: contain; }
+.attachment-preview iframe { width: 100%; min-height: 65vh; border: 0; background: #fff; }
+
+.answer-save-state { margin-left: auto; color: #687b8c; font-size: 12px; }
+.offline-progress-chip { color: #735d32; font-size: 12px; }
+
+@media (max-width: 640px) {
+  .notification-item { min-height: 0; padding: 16px; }
+  .notification-copy > span { flex-direction: column; gap: 3px; }
+  .attachment-preview { min-height: 320px; }
+}
+
 /* Practical academic portal visual system: business pages */
 .hero-small-button,
 .study-tabs > button,

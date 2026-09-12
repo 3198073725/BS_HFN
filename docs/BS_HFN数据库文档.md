@@ -3167,3 +3167,28 @@ favorite
 - 审计接口只提供分页读取，不提供修改和删除能力。
 
 对应迁移版本为 `8b7c6d5e4f32`，上一版本为班级课程关系迁移 `f4a2b9d7e6c1`。
+
+# 59. 当前实现扩展：站内通知表
+
+为作业、测验、答疑和系统消息新增 `notification`。通知只保存站内投递结果，不替代各业务表的真实状态。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGINT UNSIGNED | 通知主键 |
+| recipient_id | BIGINT UNSIGNED | 接收用户，关联 `sys_user.id` |
+| sender_id | BIGINT UNSIGNED | 可空发送用户；为空表示系统消息 |
+| category | VARCHAR(50) | `SYSTEM/HOMEWORK/EXAM/QUESTION` 等分类 |
+| title | VARCHAR(200) | 通知标题 |
+| content | TEXT | 通知正文 |
+| link | VARCHAR(255) | 可空站内跳转路径 |
+| read_at | DATETIME | 可空；首次阅读的 UTC 时间 |
+| created_at | DATETIME | UTC 创建时间 |
+
+约束与索引：
+
+- 接收者删除后通知级联清理；发送者删除时 `sender_id` 置空并继续显示为系统来源。
+- `(recipient_id, read_at)` 支持未读计数。
+- `(recipient_id, created_at)` 支持查询用户通知时间线。
+- 用户只能读取和标记自己的通知，通知内容仍以作业、测验、答疑等业务表为最终依据。
+
+对应迁移版本为 `9c8d7e6f5a43`，上一版本为管理员审计迁移 `8b7c6d5e4f32`。

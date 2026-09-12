@@ -141,6 +141,7 @@ def test_role_permissions_and_admin_user_creation(app, client):
         )
         db.session.add(admin)
         db.session.commit()
+        admin_id = admin.id
 
     admin_login = client.post(
         "/api/auth/login",
@@ -204,3 +205,68 @@ def test_role_permissions_and_admin_user_creation(app, client):
         },
     )
     assert forbidden.status_code == 403
+
+
+def test_password_recovery_and_admin_password_reset_are_verified(app, client):
+    registered = client.post("/api/auth/register", json=STUDENT)
+    assert registered.status_code == 201
+
+    rejected = client.post(
+        "/api/auth/reset-password",
+        json={"username": STUDENT["username"], "verification": "wrong", "new_password": "NewStudy123!"},
+    )
+    assert rejected.status_code == 400
+    recovered = client.post(
+        "/api/auth/reset-password",
+        json={
+            "username": STUDENT["username"],
+            "verification": STUDENT["student_no"],
+            "new_password": "NewStudy123!",
+        },
+    )
+    assert recovered.status_code == 200
+    assert client.post(
+        "/api/auth/login",
+        json={"account": STUDENT["username"], "password": "NewStudy123!"},
+    ).status_code == 200
+
+    with app.app_context():
+        admin = User(
+            username="password_admin",
+            password_hash=generate_password_hash("Admin123!"),
+            real_name="密码管理员",
+            email="password-admin@example.com",
+            role=UserRole.ADMIN.value,
+        )
+        db.session.add(admin)
+        db.session.commit()
+        password_admin_id = admin.id
+    admin_token = client.post(
+        "/api/auth/login", json={"account": "password_admin", "password": "Admin123!"}
+    ).get_json()["data"]["access_token"]
+    public_admin_reset = client.post(
+        "/api/auth/reset-password",
+        json={
+            "username": "password_admin",
+            "verification": "password-admin@example.com",
+            "new_password": "PublicReset123!",
+        },
+    )
+    assert public_admin_reset.status_code == 400
+    assert client.put(
+        f"/api/admin/users/{password_admin_id}/password",
+        headers=bearer(admin_token),
+        json={"new_password": "SelfReset123!"},
+    ).status_code == 409
+    with app.app_context():
+        student_id = db.session.scalar(db.select(User.id).where(User.username == STUDENT["username"]))
+    reset = client.put(
+        f"/api/admin/users/{student_id}/password",
+        headers=bearer(admin_token),
+        json={"new_password": "AdminReset123!"},
+    )
+    assert reset.status_code == 200
+    assert client.post(
+        "/api/auth/login",
+        json={"account": STUDENT["username"], "password": "AdminReset123!"},
+    ).status_code == 200

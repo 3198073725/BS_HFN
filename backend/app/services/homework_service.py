@@ -9,6 +9,7 @@ from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Course, CourseStudent, Homework, HomeworkSubmission
 from app.services.file_service import clear_homework_files, remove_media_file, save_homework_attachment
+from app.services.notification_service import queue_course_notifications, queue_notification
 
 
 class HomeworkNotFound(ValueError):
@@ -69,6 +70,14 @@ def change_homework_status(homework_id: int, teacher_id: int, status: PublishSta
         if homework.deadline and homework.deadline <= _now():
             raise HomeworkConflict("截止时间已过，不能发布作业")
         homework.published_at = _now()
+        queue_course_notifications(
+            homework.course_id,
+            f"新作业：{homework.title}",
+            f"课程“{homework.course.name}”发布了新作业，请按时完成。",
+            category="HOMEWORK",
+            sender_id=teacher_id,
+            link="/homeworks",
+        )
     elif status is PublishStatus.CLOSED:
         if homework.status != PublishStatus.PUBLISHED.value:
             raise HomeworkConflict("只有已发布作业可以关闭")
@@ -112,6 +121,37 @@ def get_visible_homework(homework_id: int, user_id: int, role: str) -> dict:
         _ensure_student_access(homework, user_id)
         return serialize_homework(homework, student_id=user_id)
     raise HomeworkPermissionDenied("无权查看该作业")
+
+
+def get_homework_attachment_path(homework_id: int, user_id: int, role: str) -> Path:
+    homework = _get_homework(homework_id)
+    if role == UserRole.TEACHER.value:
+        if homework.teacher_id != user_id:
+            raise HomeworkPermissionDenied("不能查看其他教师的作业附件")
+    elif role == UserRole.STUDENT.value:
+        _ensure_student_access(homework, user_id)
+    else:
+        raise HomeworkPermissionDenied("无权查看作业附件")
+    return _checked_attachment_path(homework.attachment)
+
+
+def get_submission_attachment_path(submission_id: int, user_id: int, role: str) -> Path:
+    submission = db.session.scalar(
+        db.select(HomeworkSubmission)
+        .options(joinedload(HomeworkSubmission.homework))
+        .where(HomeworkSubmission.id == submission_id)
+    )
+    if submission is None:
+        raise HomeworkNotFound("作业提交不存在")
+    if role == UserRole.TEACHER.value:
+        if submission.homework.teacher_id != user_id:
+            raise HomeworkPermissionDenied("不能查看其他教师课程的提交附件")
+    elif role == UserRole.STUDENT.value:
+        if submission.student_id != user_id:
+            raise HomeworkPermissionDenied("不能查看其他学生的提交附件")
+    else:
+        raise HomeworkPermissionDenied("无权查看提交附件")
+    return _checked_attachment_path(submission.attachment)
 
 
 def submit_homework(homework_id: int, student_id: int, content: str) -> dict:
@@ -220,6 +260,14 @@ def grade_submission(submission_id: int, teacher_id: int, score: float, comment:
     submission.teacher_comment = comment
     submission.status = "GRADED"
     submission.graded_time = _now()
+    queue_notification(
+        submission.student_id,
+        f"作业已批改：{submission.homework.title}",
+        f"你的作业已完成批改，得分 {float(score):g}/{float(submission.homework.total_score):g}。",
+        category="HOMEWORK",
+        sender_id=teacher_id,
+        link="/homeworks",
+    )
     db.session.commit()
     return serialize_submission(submission)
 
@@ -344,3 +392,13 @@ def _remove_previous_attachment(relative_path: str | None) -> None:
         remove_media_file(Path(current_app.config["MEDIA_ROOT"]), relative_path)
     except ValueError:
         current_app.logger.warning("忽略媒体目录之外的历史附件路径：%s", relative_path)
+
+
+def _checked_attachment_path(relative_path: str | None) -> Path:
+    if not relative_path:
+        raise HomeworkNotFound("附件不存在")
+    media_root = Path(current_app.config["MEDIA_ROOT"]).resolve()
+    target = (media_root / relative_path).resolve()
+    if target == media_root or not target.is_relative_to(media_root) or not target.is_file():
+        raise HomeworkNotFound("附件不存在")
+    return target

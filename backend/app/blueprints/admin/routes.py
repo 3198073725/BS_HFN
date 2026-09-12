@@ -4,7 +4,7 @@ from kombu.exceptions import OperationalError
 
 from app.constants import CourseStatus, UserRole, VideoStatus
 from app.extensions import db
-from app.services.auth_service import ConflictError, create_user
+from app.services.auth_service import AuthenticationError, ConflictError, create_user, set_user_password
 from app.services.audit_service import list_admin_audit_logs, record_admin_action
 from app.services.admin_service import (
     AdminConflict,
@@ -27,6 +27,7 @@ from app.services.admin_service import (
 )
 from app.services.video_processing_service import mark_video_failed, process_video_sync
 from app.utils import error, json_body, roles_required, success
+from app.blueprints.auth.schemas import ValidationError as AuthValidationError, validate_new_password
 from app.blueprints.auth.schemas import ValidationError, validate_managed_user
 from . import admin_bp
 from .schemas import ValidationError as AdminValidationError, validate_category
@@ -91,6 +92,29 @@ def set_user_status(user_id: int):
         {"status": raw_status},
     )
     return success(user, "用户状态更新成功")
+
+
+@admin_bp.put("/users/<int:user_id>/password")
+@roles_required(UserRole.ADMIN)
+def reset_managed_user_password(user_id: int):
+    if user_id == int(get_jwt_identity()):
+        return error("不能通过用户管理重置当前登录账号的密码", 409)
+    try:
+        password = validate_new_password(json_body())
+        user = set_user_password(user_id, password)
+    except AuthValidationError as exc:
+        return error(str(exc), 400)
+    except AuthenticationError as exc:
+        return error(str(exc), 404)
+    except ConflictError as exc:
+        return error(str(exc), 409)
+    _record_audit(
+        "USER_PASSWORD_RESET",
+        "USER",
+        user.id,
+        f"重置用户密码：{user.username}",
+    )
+    return success(message="用户密码已重置")
 
 
 @admin_bp.get("/videos")

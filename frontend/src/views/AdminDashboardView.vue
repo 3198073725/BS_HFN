@@ -3,8 +3,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
+import { useAuthStore } from '../stores/auth'
 
 
+const auth = useAuthStore()
 const activeSection = ref('videos')
 const loading = ref(false)
 const refreshingVideos = ref(false)
@@ -18,6 +20,8 @@ const categories = ref([])
 const notices = ref([])
 const auditLogs = ref([])
 const userDialog = ref(false)
+const passwordDialog = ref(false)
+const passwordUser = ref(null)
 const noticeDialog = ref(false)
 const categoryDialog = ref(false)
 const userFormRef = ref(null)
@@ -38,6 +42,7 @@ const userForm = reactive({
 })
 const noticeForm = reactive({ title: '', content: '' })
 const categoryForm = reactive({ name: '', description: '', sort_order: 0 })
+const passwordForm = reactive({ new_password: '', confirm_password: '' })
 let userSearchSequence = 0
 let videoSearchSequence = 0
 let videoPoller = null
@@ -318,6 +323,33 @@ async function toggleUser(user) {
   }
 }
 
+function openPasswordReset(user) {
+  passwordUser.value = user
+  Object.assign(passwordForm, { new_password: '', confirm_password: '' })
+  passwordDialog.value = true
+}
+
+async function resetUserPassword() {
+  if (passwordForm.new_password.length < 8 || passwordForm.new_password.length > 72) {
+    ElMessage.warning('新密码长度需为 8–72 位')
+    return
+  }
+  if (passwordForm.new_password !== passwordForm.confirm_password) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  saving.value = true
+  try {
+    await api.put(`/admin/users/${passwordUser.value.id}/password`, { new_password: passwordForm.new_password })
+    passwordDialog.value = false
+    ElMessage.success('用户密码已重置')
+  } catch (error) {
+    ElMessage.error(error.message || '密码重置失败')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function changeCourseStatus(course, status) {
   try {
     await ElMessageBox.confirm(
@@ -468,7 +500,7 @@ function videoStepLabel(step) {
 function noticeStatusLabel(status) { return { DRAFT: '草稿', PUBLISHED: '已发布', OFFLINE: '已下线' }[status] || status }
 function auditActionLabel(action) {
   return {
-    USER_CREATE: '创建用户', USER_STATUS_CHANGE: '用户状态',
+    USER_CREATE: '创建用户', USER_STATUS_CHANGE: '用户状态', USER_PASSWORD_RESET: '重置密码',
     VIDEO_RETRY: '重新转码', VIDEO_DELETE: '清理视频',
     COURSE_STATUS_CHANGE: '课程状态', CLASS_DELETE: '删除班级',
     CATEGORY_CREATE: '创建分类', CATEGORY_UPDATE: '编辑分类',
@@ -595,7 +627,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <el-table-column label="学号 / 工号" min-width="150"><template #default="scope">{{ scope.row.student_no || scope.row.teacher_no || '—' }}</template></el-table-column>
         <el-table-column prop="email" label="邮箱" min-width="190"><template #default="scope">{{ scope.row.email || '—' }}</template></el-table-column>
         <el-table-column label="状态" width="90"><template #default="scope"><span :class="['account-state', scope.row.status ? 'active' : 'disabled']">{{ scope.row.status ? '正常' : '禁用' }}</span></template></el-table-column>
-        <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button v-if="scope.row.role !== 'ADMIN'" link @click="toggleUser(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="165" fixed="right"><template #default="scope"><div class="admin-row-actions"><el-button v-if="scope.row.id !== auth.user?.id" link @click="openPasswordReset(scope.row)">重置密码</el-button><span v-else class="no-action">当前账号</span><el-button v-if="scope.row.role !== 'ADMIN'" link @click="toggleUser(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></div></template></el-table-column>
       </el-table>
       <el-pagination
         v-if="userPage.total > userPage.page_size"
@@ -703,6 +735,14 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
     <el-dialog v-model="userDialog" class="admin-neutral-dialog" title="创建教师或学生账号" width="min(620px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetUserForm">
       <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-position="top"><el-form-item label="账号角色"><el-radio-group v-model="userForm.role"><el-radio-button value="STUDENT">学生</el-radio-button><el-radio-button value="TEACHER">教师</el-radio-button></el-radio-group></el-form-item><div class="admin-form-grid"><el-form-item label="用户名" prop="username"><el-input v-model.trim="userForm.username" placeholder="3–50 位字符" /></el-form-item><el-form-item label="真实姓名" prop="real_name"><el-input v-model.trim="userForm.real_name" placeholder="请输入姓名" /></el-form-item><el-form-item :label="userForm.role === 'STUDENT' ? '学号' : '工号'" :prop="userForm.role === 'STUDENT' ? 'student_no' : 'teacher_no'"><el-input v-if="userForm.role === 'STUDENT'" v-model.trim="userForm.student_no" placeholder="请输入学号" /><el-input v-else v-model.trim="userForm.teacher_no" placeholder="请输入工号" /></el-form-item><el-form-item label="初始密码" prop="password"><el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位" /></el-form-item><el-form-item label="邮箱" prop="email"><el-input v-model.trim="userForm.email" maxlength="100" placeholder="可选" /></el-form-item><el-form-item label="手机号" prop="phone"><el-input v-model.trim="userForm.phone" maxlength="11" placeholder="可选" /></el-form-item></div></el-form>
       <template #footer><el-button :disabled="saving" @click="userDialog = false">取消</el-button><el-button :loading="saving" @click="createUser">创建账号</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="passwordDialog" class="admin-neutral-dialog" :title="`重置密码 · ${passwordUser?.username || ''}`" width="min(500px, 94vw)" :close-on-click-modal="!saving">
+      <p class="dialog-tip">请将新密码通过线下方式告知用户，不要在公告或公开页面中发送。</p>
+      <el-form :model="passwordForm" label-position="top">
+        <el-form-item label="新密码"><el-input v-model="passwordForm.new_password" type="password" show-password maxlength="72" placeholder="8–72 位" /></el-form-item>
+        <el-form-item label="确认新密码"><el-input v-model="passwordForm.confirm_password" type="password" show-password maxlength="72" placeholder="再次输入新密码" /></el-form-item>
+      </el-form>
+      <template #footer><el-button :disabled="saving" @click="passwordDialog = false">取消</el-button><el-button :loading="saving" @click="resetUserPassword">确认重置</el-button></template>
     </el-dialog>
     <el-dialog v-model="categoryDialog" class="admin-neutral-dialog" :title="editingCategoryId ? '编辑课程分类' : '新建课程分类'" width="min(560px, 94vw)">
       <el-form :model="categoryForm" label-position="top"><el-form-item label="分类名称" required><el-input v-model.trim="categoryForm.name" maxlength="50" show-word-limit placeholder="例如：计算机基础" /></el-form-item><el-form-item label="分类说明"><el-input v-model.trim="categoryForm.description" type="textarea" :rows="4" maxlength="255" show-word-limit placeholder="说明该分类包含的课程范围" /></el-form-item><el-form-item label="排序"><el-input-number v-model="categoryForm.sort_order" :min="0" :max="100000" /></el-form-item></el-form>

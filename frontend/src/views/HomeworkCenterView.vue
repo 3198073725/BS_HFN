@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -14,6 +14,11 @@ const courses = ref([])
 const createDialog = ref(false)
 const submissionDialog = ref(false)
 const gradeDialog = ref(false)
+const previewDialog = ref(false)
+const previewLoading = ref(false)
+const previewUrl = ref('')
+const previewName = ref('')
+const previewKind = ref('unsupported')
 const selectedHomework = ref(null)
 const selectedSubmission = ref(null)
 const homeworkAttachment = ref(null)
@@ -315,14 +320,53 @@ function selectSubmissionAttachment(event) {
   submissionAttachment.value = event.target.files?.[0] || null
 }
 
-function mediaUrl(path) {
-  return path ? `/media/${path}` : '#'
+async function openAttachment(homework, submission = null) {
+  previewLoading.value = true
+  previewDialog.value = true
+  clearPreview()
+  const storedPath = String(submission?.attachment || homework.attachment || '')
+  const suffix = storedPath.split('.').pop()?.toLowerCase()
+  const label = submission ? `${submission.student_name || '学生'}的提交附件` : `${homework.title} · 教师附件`
+  previewName.value = suffix ? `${label}.${suffix}` : label
+  const endpoint = submission
+    ? `/homeworks/submissions/${submission.id}/attachment`
+    : `/homeworks/${homework.id}/attachment`
+  try {
+    const blob = await api.get(endpoint, { responseType: 'blob', timeout: 30000 })
+    previewUrl.value = URL.createObjectURL(blob)
+    const type = String(blob.type || '').toLowerCase()
+    previewKind.value = type.startsWith('image/') || ['png', 'jpg', 'jpeg'].includes(suffix)
+      ? 'image'
+      : type === 'application/pdf' || type.startsWith('text/') || ['pdf', 'txt'].includes(suffix)
+        ? 'document'
+        : 'unsupported'
+  } catch (error) {
+    previewDialog.value = false
+    ElMessage.error(error.message || '附件加载失败')
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function downloadPreview() {
+  if (!previewUrl.value) return
+  const anchor = document.createElement('a')
+  anchor.href = previewUrl.value
+  anchor.download = previewName.value
+  anchor.click()
+}
+
+function clearPreview() {
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  previewUrl.value = ''
+  previewKind.value = 'unsupported'
 }
 
 watch(() => homeworks.value.length, (total) => {
   currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
 })
 onMounted(load)
+onBeforeUnmount(clearPreview)
 </script>
 
 <template>
@@ -367,15 +411,14 @@ onMounted(load)
           <span :class="deadlineTone(homework)">截止 · {{ formatDate(homework.deadline) }}</span>
           <span>满分 · {{ homework.total_score }}</span>
         </div>
-        <a
+        <button
           v-if="homework.attachment"
           class="homework-attachment"
-          :href="mediaUrl(homework.attachment)"
-          target="_blank"
-          rel="noopener"
+          type="button"
+          @click="openAttachment(homework)"
         >
-          查看教师附件 ↗
-        </a>
+          在线预览教师附件
+        </button>
 
         <div v-if="!isTeacher" class="submission-result">
           <div>
@@ -385,12 +428,12 @@ onMounted(load)
             </strong>
           </div>
           <p v-if="homework.submission?.teacher_comment">教师评语：{{ homework.submission.teacher_comment }}</p>
-          <a
+          <button
             v-if="homework.submission?.attachment"
-            :href="mediaUrl(homework.submission.attachment)"
-            target="_blank"
-            rel="noopener"
-          >查看我的提交附件 ↗</a>
+            type="button"
+            class="attachment-text-button"
+            @click="openAttachment(homework, homework.submission)"
+          >在线预览我的提交附件</button>
         </div>
 
         <div class="homework-actions">
@@ -564,8 +607,9 @@ onMounted(load)
         <el-table-column label="成绩" width="100">
           <template #default="scope">{{ scope.row.score ?? '待批改' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <el-table-column label="操作" width="155">
           <template #default="scope">
+            <el-button v-if="scope.row.attachment" link @click="openAttachment(selectedHomework, scope.row)">预览附件</el-button>
             <el-button link type="primary" @click="selectForGrade(scope.row)">批改</el-button>
           </template>
         </el-table-column>
@@ -588,6 +632,14 @@ onMounted(load)
           <el-button type="primary" :loading="saving" @click="gradeSubmission">保存批改</el-button>
         </div>
       </div>
+    </el-dialog>
+    <el-dialog v-model="previewDialog" :title="previewName" width="min(920px, 96vw)" @closed="clearPreview">
+      <div v-loading="previewLoading" class="attachment-preview">
+        <img v-if="previewUrl && previewKind === 'image'" :src="previewUrl" :alt="previewName" />
+        <iframe v-else-if="previewUrl && previewKind === 'document'" :src="previewUrl" :title="previewName"></iframe>
+        <el-empty v-else-if="!previewLoading" description="该格式无法在浏览器内直接预览，请下载后使用本机软件打开" :image-size="64" />
+      </div>
+      <template #footer><el-button :disabled="!previewUrl" @click="downloadPreview">下载附件</el-button><el-button @click="previewDialog = false">关闭</el-button></template>
     </el-dialog>
   </section>
 </template>

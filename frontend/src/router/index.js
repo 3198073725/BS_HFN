@@ -14,6 +14,7 @@ const HomeworkCenterView = () => import('../views/HomeworkCenterView.vue')
 const LearningCenterView = () => import('../views/LearningCenterView.vue')
 const LoginView = () => import('../views/LoginView.vue')
 const NotFoundView = () => import('../views/NotFoundView.vue')
+const NotificationCenterView = () => import('../views/NotificationCenterView.vue')
 const RegisterView = () => import('../views/RegisterView.vue')
 const StatisticsView = () => import('../views/StatisticsView.vue')
 const TeacherCoursesView = () => import('../views/TeacherCoursesView.vue')
@@ -55,6 +56,12 @@ const router = createRouter({
           name: 'exams',
           component: ExamCenterView,
           meta: { requiresAuth: true, roles: ['STUDENT', 'TEACHER'] },
+        },
+        {
+          path: 'notifications',
+          name: 'notifications',
+          component: NotificationCenterView,
+          meta: { requiresAuth: true, roles: ['STUDENT', 'TEACHER', 'ADMIN'] },
         },
         {
           path: 'statistics',

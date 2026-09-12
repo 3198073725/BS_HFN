@@ -6,6 +6,7 @@ from app.datetime_utils import iso_utc
 from app.extensions import db
 from app.models import Answer, Chapter, Course, Question, User, Video
 from .learning_service import get_student_video
+from .notification_service import queue_notification
 
 
 class QuestionNotFound(ValueError):
@@ -77,6 +78,14 @@ def answer_question(question_id: int, teacher_id: int, content: str) -> dict:
     answer = Answer(question_id=question.id, teacher_id=teacher_id, content=content)
     question.status = QuestionStatus.ANSWERED.value
     db.session.add(answer)
+    queue_notification(
+        question.student_id,
+        f"问题已回复：{question.title}",
+        "教师已经回复了你的课程问题，点击查看回复内容。",
+        category="QUESTION",
+        sender_id=teacher_id,
+        link=f"/courses/{question.video.chapter.course_id}",
+    )
     try:
         db.session.commit()
     except IntegrityError as exc:
@@ -95,6 +104,14 @@ def update_answer(question_id: int, teacher_id: int, content: str) -> dict:
     if question.answer.teacher_id != teacher_id:
         raise QuestionPermissionDenied("不能修改其他教师的回答")
     question.answer.content = content
+    queue_notification(
+        question.student_id,
+        f"课程答疑已更新：{question.title}",
+        "教师更新了对你问题的回答，点击查看最新内容。",
+        category="QUESTION",
+        link=f"/courses/{question.video.chapter.course_id}",
+        sender_id=teacher_id,
+    )
     db.session.commit()
     return serialize_question(_get_question(question.id))
 

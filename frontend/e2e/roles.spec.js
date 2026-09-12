@@ -70,6 +70,47 @@ test('登录表单提示完整，受保护页面登录后回到原路径', async
 })
 
 
+test('忘记密码可完成身份核验和密码重置请求', async ({ page }) => {
+  let submittedPayload = null
+  await page.route('**/api/auth/reset-password', async (route) => {
+    submittedPayload = route.request().postDataJSON()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 200, message: '密码重置成功', data: null }),
+    })
+  })
+  await page.goto('/login')
+  await page.getByRole('button', { name: '忘记密码', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '找回密码' })
+  await dialog.getByPlaceholder('请输入用户名').fill('e2e_student')
+  await dialog.getByPlaceholder('注册邮箱、学号、工号或手机号').fill('E2ES001')
+  await dialog.getByPlaceholder('8–72 位新密码').fill('NewPassword123!')
+  await dialog.getByPlaceholder('再次输入新密码').fill('NewPassword123!')
+  await dialog.getByRole('button', { name: '确认重置', exact: true }).click()
+
+  await expect(page.getByText('密码已重置，请使用新密码登录')).toBeVisible()
+  await expect(dialog).toBeHidden()
+  expect(submittedPayload).toEqual({
+    username: 'e2e_student',
+    verification: 'E2ES001',
+    new_password: 'NewPassword123!',
+  })
+})
+
+
+test('学生可以查看站内通知并全部标为已读', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.locator('a[href="/notifications"]').click()
+  await expect(page).toHaveURL('/notifications')
+  await expect(page.getByRole('heading', { name: '消息中心', exact: true })).toBeVisible()
+  await expect(page.getByText('端到端消息中心验证', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '全部标为已读', exact: true }).click()
+  await expect(page.getByText('全部通知已标记为已读')).toBeVisible()
+  await expect(page.getByText('0', { exact: true }).first()).toBeVisible()
+})
+
+
 test('刷新令牌失效后清除本地会话并返回登录页', async ({ page }) => {
   await login(page, 'e2e_student')
   await page.route('**/api/learning/courses', (route) => route.fulfill({
@@ -804,7 +845,13 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   let examCard = page.locator('.exam-card').filter({ hasText: examTitle })
   await examCard.getByRole('button', { name: '开始测验', exact: true }).click()
   const takeDialog = page.getByRole('dialog', { name: examTitle })
+  const answerSaved = page.waitForResponse((response) => (
+    /\/api\/exams\/\d+\/answers$/.test(response.url())
+    && response.request().method() === 'PUT'
+  ))
   await takeDialog.locator('label.el-radio').filter({ hasText: '80' }).click()
+  expect((await answerSaved).status()).toBe(200)
+  await expect(takeDialog.getByText('已自动保存', { exact: true })).toBeVisible()
   await takeDialog.getByRole('button', { name: '提交测验', exact: true }).click()
   await page.getByRole('dialog', { name: '提交测验' }).getByRole('button', { name: '确定' }).click()
   await expect(page.getByText('交卷成功，得分 100')).toBeVisible()

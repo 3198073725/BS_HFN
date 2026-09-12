@@ -55,6 +55,24 @@ def validate_login(payload: dict) -> tuple[str, str]:
     return account, password
 
 
+def validate_password_reset(payload: dict) -> tuple[str, str, str]:
+    username = str(payload.get("username") or "").strip()
+    verification = str(payload.get("verification") or "").strip()
+    password = validate_new_password(payload)
+    if not username or len(username) > 50:
+        raise ValidationError("请输入正确的用户名")
+    if not verification or len(verification) > 100:
+        raise ValidationError("请输入注册邮箱、学号、工号或手机号进行身份核验")
+    return username, verification, password
+
+
+def validate_new_password(payload: dict) -> str:
+    password = str(payload.get("new_password", payload.get("password", "")))
+    if not 8 <= len(password) <= 72:
+        raise ValidationError("新密码长度需为8到72位")
+    return password
+
+
 def validate_managed_user(payload: dict) -> dict:
     data = validate_registration(payload)
     role = str(payload.get("role", "")).upper()

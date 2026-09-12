@@ -7,6 +7,7 @@ from app.services.auth_service import (
     create_student,
     get_active_user,
     issue_token_pair,
+    reset_password,
 )
 from app.services.token_service import (
     InvalidCompanionToken,
@@ -16,7 +17,7 @@ from app.services.token_service import (
 )
 from app.utils import error, json_body, success
 from . import auth_bp
-from .schemas import ValidationError, validate_login, validate_registration
+from .schemas import ValidationError, validate_login, validate_password_reset, validate_registration
 
 
 @auth_bp.post("/register")
@@ -41,6 +42,20 @@ def login():
     except AuthenticationError as exc:
         return error(str(exc), 401)
     return success(issue_token_pair(user), "登录成功")
+
+
+@auth_bp.post("/reset-password")
+def recover_password():
+    try:
+        username, verification, password = validate_password_reset(json_body())
+        reset_password(username, verification, password)
+    except ValidationError as exc:
+        return error(str(exc), 400)
+    except AuthenticationError as exc:
+        return error(str(exc), 400)
+    except ConflictError as exc:
+        return error(str(exc), 409)
+    return success(message="密码已重置，请使用新密码登录")
 
 
 @auth_bp.post("/refresh")

@@ -32,6 +32,7 @@ def test_expected_blueprints_are_registered(app):
         "homework",
         "learning",
         "notices",
+        "notifications",
         "questions",
         "statistics",
         "system",

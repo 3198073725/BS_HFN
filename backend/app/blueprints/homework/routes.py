@@ -1,4 +1,4 @@
-from flask import request
+from flask import request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from app.constants import PublishStatus, UserRole
@@ -14,6 +14,8 @@ from app.services.homework_service import (
     create_homework,
     delete_draft_homework,
     get_visible_homework,
+    get_homework_attachment_path,
+    get_submission_attachment_path,
     grade_submission,
     list_student_homeworks,
     list_submissions,
@@ -60,6 +62,28 @@ def add_homework():
 def homework_detail(homework_id: int):
     return _handle(
         lambda: success(get_visible_homework(homework_id, _user_id(), _current_role()))
+    )
+
+
+@homework_bp.get("/<int:homework_id>/attachment")
+@roles_required(UserRole.STUDENT, UserRole.TEACHER)
+def view_homework_attachment(homework_id: int):
+    return _handle(
+        lambda: send_file(
+            get_homework_attachment_path(homework_id, _user_id(), _current_role()),
+            as_attachment=request.args.get("download") == "1",
+        )
+    )
+
+
+@homework_bp.get("/submissions/<int:submission_id>/attachment")
+@roles_required(UserRole.STUDENT, UserRole.TEACHER)
+def view_submission_attachment(submission_id: int):
+    return _handle(
+        lambda: send_file(
+            get_submission_attachment_path(submission_id, _user_id(), _current_role()),
+            as_attachment=request.args.get("download") == "1",
+        )
     )
 
 
