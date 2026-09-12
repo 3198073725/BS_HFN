@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Node
+node_modules/
+dist/
+tools/ffmpeg/
+
+# Environment and local runtime data
+.env
+*.log
+backend/logs/*
+!backend/logs/.gitkeep
+backend/media/avatars/*
+backend/media/course_covers/*
+backend/media/videos/original/*
+backend/media/videos/processed/*
+backend/media/videos/hls/*
+backend/media/videos/covers/*
+backend/media/homework/*
+!backend/media/**/.gitkeep
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

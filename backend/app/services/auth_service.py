@@ -1,0 +1,91 @@
+from datetime import datetime, timezone
+
+from flask_jwt_extended import create_access_token, create_refresh_token
+from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.constants import UserRole
+from app.extensions import db
+from app.models import User
+
+
+class AuthenticationError(ValueError):
+    pass
+
+
+class ConflictError(ValueError):
+    pass
+
+
+def create_student(data: dict) -> User:
+    return create_user(data, UserRole.STUDENT.value)
+
+
+def create_user(data: dict, role: str) -> User:
+    unique_values = [User.username == data["username"]]
+    labels = {"username": "用户名"}
+    for field in ("email", "student_no", "teacher_no"):
+        value = data.get(field)
+        if value:
+            unique_values.append(getattr(User, field) == value)
+            labels[field] = {"email": "邮箱", "student_no": "学号", "teacher_no": "工号"}[field]
+
+    existing = db.session.scalar(db.select(User).where(or_(*unique_values)))
+    if existing:
+        for field, label in labels.items():
+            value = data.get(field)
+            if value and getattr(existing, field) == value:
+                raise ConflictError(f"{label}已存在")
+        raise ConflictError("账号信息已存在")
+
+    user = User(
+        username=data["username"],
+        password_hash=generate_password_hash(data["password"]),
+        real_name=data["real_name"],
+        student_no=data.get("student_no"),
+        teacher_no=data.get("teacher_no"),
+        email=data.get("email"),
+        phone=data.get("phone"),
+        role=role,
+    )
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        raise ConflictError("账号信息已存在") from exc
+    return user
+
+
+def authenticate(account: str, password: str) -> User:
+    user = db.session.scalar(
+        db.select(User).where(
+            or_(User.username == account, User.email == account, User.student_no == account, User.teacher_no == account)
+        )
+    )
+    if user is None or not check_password_hash(user.password_hash, password):
+        raise AuthenticationError("账号或密码错误")
+    if not user.status:
+        raise AuthenticationError("账号已被禁用")
+
+    user.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.session.commit()
+    return user
+
+
+def issue_token_pair(user: User) -> dict:
+    identity = str(user.id)
+    claims = {"role": user.role}
+    return {
+        "access_token": create_access_token(identity=identity, additional_claims=claims),
+        "refresh_token": create_refresh_token(identity=identity, additional_claims=claims),
+        "user": user.to_dict(),
+    }
+
+
+def get_active_user(user_id: str | int) -> User:
+    user = db.session.get(User, int(user_id))
+    if user is None or not user.status:
+        raise AuthenticationError("用户不存在或已禁用")
+    return user
