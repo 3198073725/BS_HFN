@@ -4112,13 +4112,13 @@ body {
   transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
 }
 
-.el-button--primary:not(.is-link) {
+.el-button--primary:not(.is-link):not(.is-text) {
   border-color: #28577f;
   background: #28577f;
 }
 
-.el-button--primary:not(.is-link):hover,
-.el-button--primary:not(.is-link):focus {
+.el-button--primary:not(.is-link):not(.is-text):hover,
+.el-button--primary:not(.is-link):not(.is-text):focus {
   border-color: #1f496a;
   background: #1f496a;
 }

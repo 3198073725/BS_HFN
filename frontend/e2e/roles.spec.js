@@ -333,13 +333,15 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   await expect(page.getByText('班级创建成功')).toBeVisible()
 
   const classroomCard = page.locator('.classroom-card').filter({ hasText: className })
+  const editButton = classroomCard.getByRole('button', { name: '编辑', exact: true })
+  await expect(editButton).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await classroomCard.locator('.classroom-course-picker .el-select').click()
   await page.getByRole('option', { name: '端测基础课程（已发布）', exact: true }).click()
   await classroomCard.getByRole('button', { name: '关联课程', exact: true }).click()
   await expect(page.getByText('课程已关联，班级学生已同步加入')).toBeVisible()
   await expect(classroomCard.locator('.classroom-course-panel').getByText('端测基础课程', { exact: true })).toBeVisible()
 
-  await classroomCard.getByRole('button', { name: '编辑', exact: true }).click()
+  await editButton.click()
   dialog = page.getByRole('dialog', { name: '编辑班级' })
   await dialog.getByPlaceholder('填写年级、专业或教学安排等说明（可选）').fill('2026 秋季端到端班级')
   await dialog.getByRole('button', { name: '保存修改', exact: true }).click()
