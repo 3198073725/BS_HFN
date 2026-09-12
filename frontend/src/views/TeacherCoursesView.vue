@@ -16,7 +16,10 @@ const chapterDialog = ref(false)
 const videoDialog = ref(false)
 const selectedCourse = ref(null)
 const selectedChapter = ref(null)
+const editingCourseId = ref(null)
+const editingChapterId = ref(null)
 const videoFile = ref(null)
+const videoInputKey = ref(0)
 const uploading = ref(false)
 const savingCourse = ref(false)
 const savingChapter = ref(false)
@@ -56,44 +59,84 @@ async function load() {
   }
 }
 
-async function createCourse() {
+function openCourse(course = null) {
+  editingCourseId.value = course?.id || null
+  Object.assign(courseForm, {
+    name: course?.name || '',
+    category_id: course?.category_id || null,
+    description: course?.description || '',
+    detail: course?.detail || '',
+  })
+  courseFormRef.value?.clearValidate()
+  courseDialog.value = true
+}
+
+function resetCourseForm() {
+  editingCourseId.value = null
+  Object.assign(courseForm, { name: '', category_id: null, description: '', detail: '' })
+  courseFormRef.value?.clearValidate()
+}
+
+async function saveCourse() {
   const valid = await courseFormRef.value?.validate().catch(() => false)
   if (!valid || savingCourse.value) return
 
   savingCourse.value = true
   try {
-    await api.post('/courses', courseForm)
-    ElMessage.success('课程创建成功')
+    if (editingCourseId.value) {
+      await api.put(`/courses/${editingCourseId.value}`, courseForm)
+      ElMessage.success('课程信息已更新')
+    } else {
+      await api.post('/courses', courseForm)
+      ElMessage.success('课程创建成功')
+    }
     courseDialog.value = false
-    Object.assign(courseForm, { name: '', category_id: null, description: '', detail: '' })
-    courseFormRef.value?.clearValidate()
     await load()
   } catch (error) {
-    ElMessage.error(error.message || '课程创建失败')
+    ElMessage.error(error.message || '课程保存失败')
   } finally {
     savingCourse.value = false
   }
 }
 
-function openChapter(course) {
+function openChapter(course, chapter = null) {
   selectedCourse.value = course
+  editingChapterId.value = chapter?.id || null
+  Object.assign(chapterForm, {
+    title: chapter?.title || '',
+    description: chapter?.description || '',
+    sort_order: chapter?.sort_order || 0,
+  })
+  chapterFormRef.value?.clearValidate()
   chapterDialog.value = true
 }
 
-async function createChapter() {
+function resetChapterForm() {
+  editingChapterId.value = null
+  Object.assign(chapterForm, { title: '', description: '', sort_order: 0 })
+  chapterFormRef.value?.clearValidate()
+}
+
+async function saveChapter() {
   const valid = await chapterFormRef.value?.validate().catch(() => false)
   if (!valid || savingChapter.value) return
 
   savingChapter.value = true
   try {
-    await api.post(`/courses/${selectedCourse.value.id}/chapters`, chapterForm)
-    ElMessage.success('章节创建成功')
+    if (editingChapterId.value) {
+      await api.put(
+        `/courses/${selectedCourse.value.id}/chapters/${editingChapterId.value}`,
+        chapterForm,
+      )
+      ElMessage.success('章节信息已更新')
+    } else {
+      await api.post(`/courses/${selectedCourse.value.id}/chapters`, chapterForm)
+      ElMessage.success('章节创建成功')
+    }
     chapterDialog.value = false
-    Object.assign(chapterForm, { title: '', description: '', sort_order: 0 })
-    chapterFormRef.value?.clearValidate()
     await load()
   } catch (error) {
-    ElMessage.error(error.message || '章节创建失败')
+    ElMessage.error(error.message || '章节保存失败')
   } finally {
     savingChapter.value = false
   }
@@ -103,6 +146,8 @@ function openVideo(chapter) {
   selectedChapter.value = chapter
   videoFile.value = null
   Object.assign(videoForm, { title: '', description: '', sort_order: 0 })
+  videoInputKey.value += 1
+  videoFormRef.value?.clearValidate()
   videoDialog.value = true
 }
 
@@ -170,11 +215,13 @@ async function uploadVideo() {
 }
 
 async function monitorVideo(videoId) {
+  let consecutiveErrors = 0
   for (let attempt = 0; attempt < 150 && !disposed; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2000))
     if (disposed) return
     try {
       const response = await api.get(`/videos/${videoId}/status`)
+      consecutiveErrors = 0
       if (response.data.status === 'READY') {
         ElMessage.success(`视频“${response.data.title}”处理完成`)
         await load()
@@ -186,7 +233,11 @@ async function monitorVideo(videoId) {
         return
       }
     } catch {
-      return
+      consecutiveErrors += 1
+      if (consecutiveErrors >= 3) {
+        ElMessage.warning('暂时无法获取视频处理状态，请稍后刷新课程列表')
+        return
+      }
     }
   }
   if (!disposed) ElMessage.warning('视频仍在后台处理，请稍后刷新课程列表')
@@ -194,12 +245,55 @@ async function monitorVideo(videoId) {
 
 async function publish(course) {
   try {
-    await ElMessageBox.confirm('确认发布该课程？课程至少需要一个章节。', '发布课程')
+    const restoring = course.status === 'OFFLINE'
+    await ElMessageBox.confirm(
+      restoring ? '确认重新发布该课程？' : '确认发布该课程？课程至少需要一个章节。',
+      restoring ? '重新发布课程' : '发布课程',
+    )
     await api.post(`/courses/${course.id}/publish`)
-    ElMessage.success('课程已发布')
+    ElMessage.success(restoring ? '课程已重新发布' : '课程已发布')
     await load()
   } catch (error) {
     if (error !== 'cancel') ElMessage.error(error.message || '发布失败')
+  }
+}
+
+async function offline(course) {
+  try {
+    await ElMessageBox.confirm('下线后学生暂时无法访问该课程，确认继续？', '下线课程', {
+      type: 'warning',
+    })
+    await api.post(`/courses/${course.id}/offline`)
+    ElMessage.success('课程已下线，可随时重新发布')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '课程下线失败')
+  }
+}
+
+async function removeCourse(course) {
+  try {
+    await ElMessageBox.confirm('删除后课程、章节和视频记录将无法恢复，确认继续？', '删除课程', {
+      type: 'warning',
+    })
+    await api.delete(`/courses/${course.id}`)
+    ElMessage.success('课程草稿已删除')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '课程删除失败')
+  }
+}
+
+async function removeChapter(course, chapter) {
+  try {
+    await ElMessageBox.confirm('删除章节会同时移除其中的视频，确认继续？', '删除章节', {
+      type: 'warning',
+    })
+    await api.delete(`/courses/${course.id}/chapters/${chapter.id}`)
+    ElMessage.success('章节已删除')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '章节删除失败')
   }
 }
 
@@ -217,7 +311,7 @@ onBeforeUnmount(() => {
         <h1>教学管理</h1>
         <p>创建课程、组织章节并上传视频内容。</p>
       </div>
-      <el-button type="primary" size="large" @click="courseDialog = true">＋ 创建课程</el-button>
+      <el-button type="primary" size="large" @click="openCourse()">＋ 创建课程</el-button>
     </div>
 
     <div class="management-surface">
@@ -228,6 +322,7 @@ onBeforeUnmount(() => {
         </div>
         <small>展开课程可查看章节与视频</small>
       </div>
+      <p class="table-scroll-hint">左右滑动表格可查看课程状态和全部操作</p>
       <el-table v-loading="loading" :data="courses">
         <el-table-column type="expand">
           <template #default="scope">
@@ -244,7 +339,21 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                 </div>
-                <el-button :disabled="scope.row.status !== 'DRAFT'" @click="openVideo(chapter)">上传视频</el-button>
+                <div class="chapter-actions">
+                  <el-button
+                    v-if="scope.row.status === 'DRAFT'"
+                    link
+                    type="primary"
+                    @click="openChapter(scope.row, chapter)"
+                  >编辑</el-button>
+                  <el-button
+                    v-if="scope.row.status === 'DRAFT'"
+                    link
+                    type="danger"
+                    @click="removeChapter(scope.row, chapter)"
+                  >删除</el-button>
+                  <el-button :disabled="scope.row.status !== 'DRAFT'" @click="openVideo(chapter)">上传视频</el-button>
+                </div>
               </div>
               <el-empty v-if="!scope.row.chapters.length" description="暂无章节，先添加第一个章节吧" :image-size="64" />
             </div>
@@ -261,12 +370,20 @@ onBeforeUnmount(() => {
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="240">
+        <el-table-column label="操作" min-width="310">
           <template #default="scope">
-            <el-button :disabled="scope.row.status !== 'DRAFT'" @click="openChapter(scope.row)">添加章节</el-button>
-            <el-button type="primary" :disabled="scope.row.status !== 'DRAFT'" @click="publish(scope.row)">
-              发布课程
-            </el-button>
+            <div class="course-row-actions">
+              <el-button v-if="scope.row.status === 'DRAFT'" link type="primary" @click="openCourse(scope.row)">编辑</el-button>
+              <el-button v-if="scope.row.status === 'DRAFT'" link @click="openChapter(scope.row)">添加章节</el-button>
+              <el-button
+                v-if="['DRAFT', 'OFFLINE'].includes(scope.row.status)"
+                link
+                type="primary"
+                @click="publish(scope.row)"
+              >{{ scope.row.status === 'OFFLINE' ? '重新发布' : '发布课程' }}</el-button>
+              <el-button v-if="scope.row.status === 'PUBLISHED'" link type="warning" @click="offline(scope.row)">下线</el-button>
+              <el-button v-if="scope.row.status === 'DRAFT'" link type="danger" @click="removeCourse(scope.row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -275,7 +392,15 @@ onBeforeUnmount(() => {
       </el-table>
     </div>
 
-    <el-dialog v-model="courseDialog" title="创建课程" width="min(560px, 92vw)">
+    <el-dialog
+      v-model="courseDialog"
+      :title="editingCourseId ? '编辑课程草稿' : '创建课程'"
+      width="min(560px, 92vw)"
+      :close-on-click-modal="!savingCourse"
+      :close-on-press-escape="!savingCourse"
+      :show-close="!savingCourse"
+      @closed="resetCourseForm"
+    >
       <el-form ref="courseFormRef" :model="courseForm" :rules="courseRules" label-position="top">
         <el-form-item label="课程名称" prop="name">
           <el-input v-model.trim="courseForm.name" placeholder="例如：高等数学基础" />
@@ -305,12 +430,20 @@ onBeforeUnmount(() => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="courseDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingCourse" @click="createCourse">保存课程</el-button>
+        <el-button :disabled="savingCourse" @click="courseDialog = false">取消</el-button>
+        <el-button type="primary" :loading="savingCourse" @click="saveCourse">保存课程</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="chapterDialog" title="添加章节" width="min(520px, 92vw)">
+    <el-dialog
+      v-model="chapterDialog"
+      :title="editingChapterId ? '编辑章节' : '添加章节'"
+      width="min(520px, 92vw)"
+      :close-on-click-modal="!savingChapter"
+      :close-on-press-escape="!savingChapter"
+      :show-close="!savingChapter"
+      @closed="resetChapterForm"
+    >
       <el-form ref="chapterFormRef" :model="chapterForm" :rules="chapterRules" label-position="top">
         <el-form-item label="章节标题" prop="title">
           <el-input v-model.trim="chapterForm.title" placeholder="例如：第一章 课程导学" />
@@ -323,15 +456,22 @@ onBeforeUnmount(() => {
             placeholder="简要说明本章学习内容"
           />
         </el-form-item>
-        <el-form-item label="排序"><el-input-number v-model="chapterForm.sort_order" :min="0" /></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="chapterForm.sort_order" :min="0" :max="100000" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="chapterDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingChapter" @click="createChapter">保存章节</el-button>
+        <el-button :disabled="savingChapter" @click="chapterDialog = false">取消</el-button>
+        <el-button type="primary" :loading="savingChapter" @click="saveChapter">保存章节</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="videoDialog" title="上传视频" width="min(520px, 92vw)" :close-on-click-modal="!uploading">
+    <el-dialog
+      v-model="videoDialog"
+      title="上传视频"
+      width="min(520px, 92vw)"
+      :close-on-click-modal="!uploading"
+      :close-on-press-escape="!uploading"
+      :show-close="!uploading"
+    >
       <el-form ref="videoFormRef" :model="videoForm" :rules="videoRules" label-position="top">
         <el-form-item label="视频标题" prop="title">
           <el-input v-model.trim="videoForm.title" placeholder="请输入视频标题" />
@@ -344,10 +484,11 @@ onBeforeUnmount(() => {
             placeholder="简要介绍本节视频内容"
           />
         </el-form-item>
-        <el-form-item label="排序"><el-input-number v-model="videoForm.sort_order" :min="0" /></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="videoForm.sort_order" :min="0" :max="100000" /></el-form-item>
         <el-form-item label="视频文件" required>
           <label class="file-picker">
             <input
+              :key="videoInputKey"
               type="file"
               accept=".mp4,.mov,.mkv,.avi,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm"
               @change="selectVideoFile"

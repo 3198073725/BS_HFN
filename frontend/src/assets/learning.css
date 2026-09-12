@@ -1116,6 +1116,19 @@
   display: block;
 }
 
+.question-list-actions,
+.question-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.question-list-actions .el-button + .el-button,
+.question-editor-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
 .exam-question-list article strong {
   color: var(--ink-800);
   font-size: 11px;
@@ -1572,10 +1585,24 @@
 
 @media (max-width: 560px) {
   .statistics-grid,
-  .admin-metrics,
   .home-notice-list,
   .admin-form-grid,
   .admin-filters {
     grid-template-columns: 1fr;
+  }
+
+  .admin-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .admin-metrics article {
+    min-height: 105px;
+    padding: 15px;
+  }
+
+  .admin-metrics strong {
+    margin-top: 22px;
+    font-size: 22px;
   }
 }

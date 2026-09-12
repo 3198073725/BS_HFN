@@ -14,7 +14,7 @@ export const SESSION_EXPIRED_EVENT = 'bs-hfn:session-expired'
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
   if (token) sessionExpiryNotified = false
-  if (token && !config.headers.Authorization) {
+  if (token && config.authMode !== 'none' && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
@@ -70,6 +70,13 @@ api.interceptors.response.use(
         }
       }
       clearStoredSession()
+      if (original.authMode === 'optional' && !original._anonymousRetry) {
+        original._anonymousRetry = true
+        original.authMode = 'none'
+        original.skipAuthRefresh = true
+        if (original.headers) delete original.headers.Authorization
+        return api(original)
+      }
     }
     if (!error.response) {
       const message = error.code === 'ECONNABORTED'

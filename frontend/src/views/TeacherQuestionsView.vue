@@ -12,18 +12,22 @@ const answerDialog = ref(false)
 const selectedQuestion = ref(null)
 const submitting = ref(false)
 const answerForm = reactive({ content: '' })
+let requestSequence = 0
 
 async function load() {
+  const requestId = ++requestSequence
+  const selectedStatus = statusFilter.value
   loading.value = true
   try {
     const response = await api.get('/questions', {
-      params: statusFilter.value ? { status: statusFilter.value } : {},
+      params: selectedStatus ? { status: selectedStatus } : {},
     })
+    if (requestId !== requestSequence) return
     questions.value = response.data
   } catch (error) {
-    ElMessage.error(error.message || '答疑列表加载失败')
+    if (requestId === requestSequence) ElMessage.error(error.message || '答疑列表加载失败')
   } finally {
-    loading.value = false
+    if (requestId === requestSequence) loading.value = false
   }
 }
 

@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import api from '../api/client'
@@ -31,32 +31,48 @@ const isStudent = computed(() => auth.user?.role === 'STUDENT')
 let lastPosition = null
 let pendingWatchDuration = 0
 let lastSaveAt = Date.now()
+let courseRequestSequence = 0
+let courseStateRequestSequence = 0
+let learningRequestSequence = 0
 
 async function loadCourse() {
+  const requestId = ++courseRequestSequence
+  const courseId = String(route.params.id)
   loading.value = true
   errorMessage.value = ''
+  course.value = null
+  selectedVideo.value = null
+  Object.assign(learningState, { joined: false, favorited: false })
+  resetLearningContext()
   try {
-    course.value = (await api.get(`/courses/${route.params.id}`)).data
+    const response = await api.get(`/courses/${courseId}`, { authMode: 'optional' })
+    if (requestId !== courseRequestSequence || String(route.params.id) !== courseId) return
+    course.value = response.data
     selectedVideo.value =
       course.value.chapters
         .flatMap((chapter) => chapter.videos)
         .find((video) => video.status === 'READY') || null
-    if (isStudent.value) await loadCourseState()
+    if (isStudent.value) await loadCourseState(courseId)
   } catch (error) {
+    if (requestId !== courseRequestSequence || String(route.params.id) !== courseId) return
     errorMessage.value = error.message || '课程加载失败'
     ElMessage.error(errorMessage.value)
   } finally {
-    loading.value = false
+    if (requestId === courseRequestSequence) loading.value = false
   }
 }
 
-async function loadCourseState() {
+async function loadCourseState(courseId = String(route.params.id)) {
+  const requestId = ++courseStateRequestSequence
   try {
-    const response = await api.get(`/learning/courses/${route.params.id}/state`)
+    const response = await api.get(`/learning/courses/${courseId}/state`)
+    if (requestId !== courseStateRequestSequence || String(route.params.id) !== courseId) return
     Object.assign(learningState, response.data)
     if (learningState.joined && selectedVideo.value) await loadLearningContext()
   } catch (error) {
-    ElMessage.error(error.message || '学习状态加载失败')
+    if (requestId === courseStateRequestSequence && String(route.params.id) === courseId) {
+      ElMessage.error(error.message || '学习状态加载失败')
+    }
   }
 }
 
@@ -105,28 +121,36 @@ async function selectVideo(video) {
 
 async function loadLearningContext() {
   if (!selectedVideo.value) return
+  const requestId = ++learningRequestSequence
+  const videoId = selectedVideo.value.id
   learningLoading.value = true
-  resetLearningContext()
+  resetLearningContext(false)
   try {
-    const videoId = selectedVideo.value.id
     const [progressResponse, notesResponse, questionsResponse] = await Promise.all([
       api.get(`/learning/videos/${videoId}/progress`),
       api.get(`/learning/videos/${videoId}/notes`),
       api.get('/questions', { params: { video_id: videoId } }),
     ])
+    if (requestId !== learningRequestSequence || selectedVideo.value?.id !== videoId) return
     progress.value = progressResponse.data
     startTime.value = progressResponse.data.current_time || 0
     currentTime.value = startTime.value
     notes.value = notesResponse.data
     questions.value = questionsResponse.data
   } catch (error) {
-    ElMessage.error(error.message || '学习数据加载失败')
+    if (requestId === learningRequestSequence && selectedVideo.value?.id === videoId) {
+      ElMessage.error(error.message || '学习数据加载失败')
+    }
   } finally {
-    learningLoading.value = false
+    if (requestId === learningRequestSequence) learningLoading.value = false
   }
 }
 
-function resetLearningContext() {
+function resetLearningContext(invalidateRequest = true) {
+  if (invalidateRequest) {
+    learningRequestSequence += 1
+    learningLoading.value = false
+  }
   progress.value = null
   startTime.value = 0
   currentTime.value = 0
@@ -265,8 +289,16 @@ function seekTo(seconds) {
   currentTime.value = Number(seconds || 0)
 }
 
+watch(() => route.params.id, async (nextId, previousId) => {
+  if (nextId === previousId) return
+  await saveProgress(true)
+  void loadCourse()
+})
 onMounted(loadCourse)
 onBeforeUnmount(() => {
+  courseRequestSequence += 1
+  courseStateRequestSequence += 1
+  learningRequestSequence += 1
   void saveProgress(true)
 })
 </script>

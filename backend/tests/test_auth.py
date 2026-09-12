@@ -161,6 +161,36 @@ def test_role_permissions_and_admin_user_creation(app, client):
     assert teacher.status_code == 201
     assert teacher.get_json()["data"]["role"] == "TEACHER"
 
+    teacher_with_student_number = client.post(
+        "/api/admin/users",
+        headers=bearer(admin_login["access_token"]),
+        json={
+            "username": "teacher_mixed",
+            "password": "Teach123!",
+            "real_name": "混合编号教师",
+            "teacher_no": "T20260003",
+            "student_no": "S20260003",
+            "role": "TEACHER",
+        },
+    )
+    assert teacher_with_student_number.status_code == 400
+    assert teacher_with_student_number.get_json()["message"] == "教师账号不能提供 student_no"
+
+    student_with_teacher_number = client.post(
+        "/api/admin/users",
+        headers=bearer(admin_login["access_token"]),
+        json={
+            "username": "student_mixed",
+            "password": "Study123!",
+            "real_name": "混合编号学生",
+            "teacher_no": "T20260004",
+            "student_no": "S20260004",
+            "role": "STUDENT",
+        },
+    )
+    assert student_with_teacher_number.status_code == 400
+    assert student_with_teacher_number.get_json()["message"] == "学生账号不能提供 teacher_no"
+
     student_login = client.post("/api/auth/register", json=STUDENT).get_json()["data"]
     forbidden = client.post(
         "/api/admin/users",

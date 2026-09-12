@@ -1919,6 +1919,30 @@ button:focus-visible {
   --el-table-border-color: #edf0f5;
 }
 
+.table-scroll-hint {
+  display: none;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #f8faff;
+  color: var(--ink-500);
+  font-size: 10px;
+  text-align: center;
+}
+
+.course-row-actions,
+.chapter-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.course-row-actions .el-button + .el-button,
+.chapter-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
 .management-surface .el-table th.el-table__cell {
   height: 48px;
   color: var(--ink-500);
@@ -2182,6 +2206,9 @@ button:focus-visible {
     width: 100%;
     height: 46px;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scroll-snap-type: x proximity;
   }
 
   .main-nav a {
@@ -2190,6 +2217,11 @@ button:focus-visible {
     height: 46px;
     padding: 0 13px;
     justify-content: center;
+    scroll-snap-align: center;
+  }
+
+  .table-scroll-hint {
+    display: block;
   }
 
   .main-nav a::after {

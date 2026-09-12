@@ -18,6 +18,8 @@ const takeDialog = ref(false)
 const recordsDialog = ref(false)
 const selectedExam = ref(null)
 const selectedRecord = ref(null)
+const editingExamId = ref(null)
+const editingQuestionId = ref(null)
 const records = ref([])
 const answers = reactive({})
 const remainingSeconds = ref(null)
@@ -76,7 +78,22 @@ async function load() {
   }
 }
 
-async function createExam() {
+function openExamForm(exam = null) {
+  editingExamId.value = exam?.id || null
+  Object.assign(examForm, {
+    course_id: exam?.course_id || null,
+    title: exam?.title || '',
+    description: exam?.description || '',
+    total_score: exam?.total_score || 100,
+    start_time: parseUtc(exam?.start_time),
+    end_time: parseUtc(exam?.end_time),
+    time_limit_minutes: exam?.time_limit_minutes || 30,
+  })
+  examFormRef.value?.clearValidate()
+  createDialog.value = true
+}
+
+async function saveExam() {
   const valid = await examFormRef.value?.validate().catch(() => false)
   if (!valid || saving.value) return
   if (examForm.start_time && examForm.end_time && examForm.start_time >= examForm.end_time) {
@@ -85,14 +102,23 @@ async function createExam() {
   }
   saving.value = true
   try {
-    const response = await api.post('/exams', examForm)
-    ElMessage.success('测验草稿已创建，请继续添加试题')
+    const editing = Boolean(editingExamId.value)
+    const response = editing
+      ? await api.put(`/exams/${editingExamId.value}`, examForm)
+      : await api.post('/exams', examForm)
     createDialog.value = false
-    exams.value.unshift(response.data)
-    resetExamForm()
-    await openQuestionManager(response.data)
+    if (editing) {
+      const index = exams.value.findIndex((item) => item.id === response.data.id)
+      if (index >= 0) exams.value[index] = response.data
+      ElMessage.success('测验草稿已更新')
+    } else {
+      exams.value.unshift(response.data)
+      ElMessage.success('测验草稿已创建，请继续添加试题')
+      resetExamForm()
+      await openQuestionManager(response.data)
+    }
   } catch (error) {
-    ElMessage.error(error.message || '测验创建失败')
+    ElMessage.error(error.message || '测验保存失败')
   } finally {
     saving.value = false
   }
@@ -102,13 +128,30 @@ async function openQuestionManager(exam) {
   try {
     const response = await api.get(`/exams/${exam.id}`)
     selectedExam.value = response.data
+    editingQuestionId.value = null
+    resetQuestionForm()
     questionDialog.value = true
   } catch (error) {
     ElMessage.error(error.message || '测验详情加载失败')
   }
 }
 
-async function addQuestion() {
+function openQuestionEditor(question) {
+  editingQuestionId.value = question.id
+  Object.assign(questionForm, {
+    question_type: question.question_type,
+    content: question.content,
+    option_a: question.options?.A || '',
+    option_b: question.options?.B || '',
+    option_c: question.options?.C || '',
+    option_d: question.options?.D || '',
+    correct_answer: question.correct_answer,
+    score: question.score,
+    sort_order: question.sort_order,
+  })
+}
+
+async function saveQuestion() {
   const content = questionForm.content.trim()
   if (!content) {
     ElMessage.warning('请输入题目内容')
@@ -120,13 +163,22 @@ async function addQuestion() {
   }
   saving.value = true
   try {
-    const response = await api.post(`/exams/${selectedExam.value.id}/questions`, questionForm)
-    selectedExam.value.questions.push(response.data)
+    const editing = Boolean(editingQuestionId.value)
+    const response = editing
+      ? await api.put(`/exams/questions/${editingQuestionId.value}`, questionForm)
+      : await api.post(`/exams/${selectedExam.value.id}/questions`, questionForm)
+    if (editing) {
+      const index = selectedExam.value.questions.findIndex((item) => item.id === response.data.id)
+      if (index >= 0) selectedExam.value.questions[index] = response.data
+    } else {
+      selectedExam.value.questions.push(response.data)
+    }
     selectedExam.value.questions.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+    editingQuestionId.value = null
     resetQuestionForm()
-    ElMessage.success('试题已添加')
+    ElMessage.success(editing ? '试题已更新' : '试题已添加')
   } catch (error) {
-    ElMessage.error(error.message || '试题添加失败')
+    ElMessage.error(error.message || '试题保存失败')
   } finally {
     saving.value = false
   }
@@ -257,6 +309,7 @@ function stopCountdown() {
 }
 
 function resetExamForm() {
+  editingExamId.value = null
   Object.assign(examForm, {
     course_id: null,
     title: '',
@@ -287,6 +340,11 @@ function changeQuestionType(type) {
   resetQuestionForm()
   questionForm.question_type = type
   questionForm.correct_answer = type === 'JUDGE' ? 'TRUE' : 'A'
+}
+
+function cancelQuestionEdit() {
+  editingQuestionId.value = null
+  resetQuestionForm()
 }
 
 function parseUtc(value) {
@@ -341,7 +399,7 @@ onBeforeUnmount(stopCountdown)
         <h1>{{ isTeacher ? '测验管理' : '在线测验' }}</h1>
         <p>{{ isTeacher ? '编排客观题、发布测验并查看学生成绩。' : '完成课程测验，提交后即时查看自动评分结果。' }}</p>
       </div>
-      <el-button v-if="isTeacher" type="primary" size="large" @click="createDialog = true">
+      <el-button v-if="isTeacher" type="primary" size="large" @click="openExamForm()">
         ＋ 创建测验
       </el-button>
     </div>
@@ -370,6 +428,7 @@ onBeforeUnmount(stopCountdown)
         </div>
         <div class="exam-actions">
           <template v-if="isTeacher">
+            <el-button v-if="exam.status === 'DRAFT'" plain @click="openExamForm(exam)">编辑信息</el-button>
             <el-button v-if="exam.status === 'DRAFT'" type="primary" @click="openQuestionManager(exam)">
               试题管理
             </el-button>
@@ -401,7 +460,15 @@ onBeforeUnmount(stopCountdown)
       />
     </div>
 
-    <el-dialog v-model="createDialog" title="创建测验草稿" width="min(640px, 94vw)">
+    <el-dialog
+      v-model="createDialog"
+      :title="editingExamId ? '编辑测验草稿' : '创建测验草稿'"
+      width="min(640px, 94vw)"
+      :close-on-click-modal="!saving"
+      :close-on-press-escape="!saving"
+      :show-close="!saving"
+      @closed="resetExamForm"
+    >
       <el-form ref="examFormRef" :model="examForm" :rules="examRules" label-position="top">
         <el-form-item label="所属课程" prop="course_id">
           <el-select v-model="examForm.course_id" placeholder="请选择课程" style="width: 100%">
@@ -433,7 +500,9 @@ onBeforeUnmount(stopCountdown)
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="createDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="createExam">保存并添加试题</el-button>
+        <el-button type="primary" :loading="saving" @click="saveExam">
+          {{ editingExamId ? '保存修改' : '保存并添加试题' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -457,12 +526,15 @@ onBeforeUnmount(stopCountdown)
                 <strong>{{ question.content }}</strong>
                 <small>{{ question.question_type === 'SINGLE' ? '单选题' : '判断题' }} · {{ question.score }} 分 · 答案 {{ answerLabel(question.correct_answer) }}</small>
               </div>
-              <el-button link type="danger" @click="removeQuestion(question)">删除</el-button>
+              <div class="question-list-actions">
+                <el-button link type="primary" @click="openQuestionEditor(question)">编辑</el-button>
+                <el-button link type="danger" @click="removeQuestion(question)">删除</el-button>
+              </div>
             </article>
             <el-empty v-if="!selectedExam.questions.length" description="还没有试题" :image-size="58" />
           </div>
           <div class="question-create-panel">
-            <h3>添加试题</h3>
+            <h3>{{ editingQuestionId ? '编辑试题' : '添加试题' }}</h3>
             <el-select v-model="questionForm.question_type" style="width: 100%" @change="changeQuestionType">
               <el-option label="单选题" value="SINGLE" />
               <el-option label="判断题" value="JUDGE" />
@@ -483,9 +555,14 @@ onBeforeUnmount(stopCountdown)
             </el-radio-group>
             <div class="question-number-row">
               <el-input-number v-model="questionForm.score" :min="0.01" :max="999.99" :precision="2" />
-              <el-input-number v-model="questionForm.sort_order" :min="0" />
+              <el-input-number v-model="questionForm.sort_order" :min="0" :max="100000" />
             </div>
-            <el-button type="primary" :loading="saving" @click="addQuestion">添加到测验</el-button>
+            <div class="question-editor-actions">
+              <el-button v-if="editingQuestionId" :disabled="saving" @click="cancelQuestionEdit">取消编辑</el-button>
+              <el-button type="primary" :loading="saving" @click="saveQuestion">
+                {{ editingQuestionId ? '保存试题修改' : '添加到测验' }}
+              </el-button>
+            </div>
           </div>
         </div>
       </div>

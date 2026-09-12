@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 
@@ -12,6 +12,7 @@ const users = ref([])
 const notices = ref([])
 const userDialog = ref(false)
 const noticeDialog = ref(false)
+const userFormRef = ref(null)
 const editingNoticeId = ref(null)
 const filters = reactive({ role: '', status: '', keyword: '' })
 const userForm = reactive({
@@ -25,6 +26,34 @@ const userForm = reactive({
   phone: '',
 })
 const noticeForm = reactive({ title: '', content: '' })
+let userSearchSequence = 0
+const userRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { pattern: /^[A-Za-z0-9_\u4e00-\u9fff]{3,50}$/, message: '用户名需为 3–50 位中文、字母、数字或下划线', trigger: 'blur' },
+  ],
+  real_name: [
+    { required: true, message: '请输入真实姓名', trigger: 'blur' },
+    { max: 50, message: '真实姓名不能超过 50 位', trigger: 'blur' },
+  ],
+  password: [
+    { required: true, message: '请输入初始密码', trigger: 'blur' },
+    { min: 8, max: 72, message: '密码长度需为 8–72 位', trigger: 'blur' },
+  ],
+  student_no: [
+    { required: true, message: '请输入学号', trigger: 'blur' },
+    { max: 50, message: '学号不能超过 50 位', trigger: 'blur' },
+  ],
+  teacher_no: [
+    { required: true, message: '请输入工号', trigger: 'blur' },
+    { max: 50, message: '工号不能超过 50 位', trigger: 'blur' },
+  ],
+  email: [
+    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' },
+    { max: 100, message: '邮箱不能超过 100 位', trigger: 'blur' },
+  ],
+  phone: [{ pattern: /^1[3-9]\d{9}$/, message: '请输入正确的 11 位手机号', trigger: 'blur' }],
+}
 
 const metrics = computed(() => [
   { label: '系统用户', value: overview.value.users || 0, detail: '活跃 ' + (overview.value.active_users || 0) },
@@ -44,6 +73,7 @@ function userParams() {
 }
 
 async function load() {
+  const requestId = ++userSearchSequence
   loading.value = true
   try {
     const [statsResponse, userResponse, noticeResponse] = await Promise.all([
@@ -52,7 +82,7 @@ async function load() {
       api.get('/notices/manage'),
     ])
     overview.value = statsResponse.data
-    users.value = userResponse.data
+    if (requestId === userSearchSequence) users.value = userResponse.data
     notices.value = noticeResponse.data
   } catch (error) {
     ElMessage.error(error.message || '后台数据加载失败')
@@ -62,27 +92,32 @@ async function load() {
 }
 
 async function searchUsers() {
+  const requestId = ++userSearchSequence
   try {
     const response = await api.get('/admin/users', { params: userParams() })
-    users.value = response.data
+    if (requestId === userSearchSequence) users.value = response.data
   } catch (error) {
-    ElMessage.error(error.message || '用户查询失败')
+    if (requestId === userSearchSequence) ElMessage.error(error.message || '用户查询失败')
   }
 }
 
 async function createUser() {
-  if (!userForm.username.trim() || !userForm.real_name.trim() || userForm.password.length < 8) {
-    ElMessage.warning('请完整填写用户名、姓名和至少 8 位密码')
-    return
-  }
-  const number = userForm.role === 'STUDENT' ? userForm.student_no : userForm.teacher_no
-  if (!number.trim()) {
-    ElMessage.warning(userForm.role === 'STUDENT' ? '学生账号必须填写学号' : '教师账号必须填写工号')
-    return
-  }
+  const valid = await userFormRef.value?.validate().catch(() => false)
+  if (!valid || saving.value) return
   saving.value = true
   try {
-    await api.post('/admin/users', userForm)
+    const payload = {
+      role: userForm.role,
+      username: userForm.username.trim(),
+      password: userForm.password,
+      real_name: userForm.real_name.trim(),
+      email: userForm.email.trim() || null,
+      phone: userForm.phone.trim() || null,
+      ...(userForm.role === 'STUDENT'
+        ? { student_no: userForm.student_no.trim() }
+        : { teacher_no: userForm.teacher_no.trim() }),
+    }
+    await api.post('/admin/users', payload)
     userDialog.value = false
     resetUserForm()
     ElMessage.success('用户账号已创建')
@@ -174,7 +209,14 @@ function resetUserForm() {
     email: '',
     phone: '',
   })
+  userFormRef.value?.clearValidate()
 }
+
+watch(() => userForm.role, (role) => {
+  if (role === 'STUDENT') userForm.teacher_no = ''
+  if (role === 'TEACHER') userForm.student_no = ''
+  userFormRef.value?.clearValidate(['student_no', 'teacher_no'])
+})
 
 function roleLabel(role) {
   return { ADMIN: '管理员', TEACHER: '教师', STUDENT: '学生' }[role] || role
@@ -237,6 +279,7 @@ onMounted(load)
           </el-select>
           <el-button @click="searchUsers">查询</el-button>
         </div>
+        <p class="table-scroll-hint">左右滑动表格可查看账号状态和操作</p>
         <el-table :data="users" max-height="460">
           <el-table-column prop="username" label="用户名" min-width="130" />
           <el-table-column prop="real_name" label="姓名" min-width="110" />
@@ -303,8 +346,16 @@ onMounted(load)
       </aside>
     </div>
 
-    <el-dialog v-model="userDialog" title="创建教师或学生账号" width="min(620px, 94vw)">
-      <el-form :model="userForm" label-position="top">
+    <el-dialog
+      v-model="userDialog"
+      title="创建教师或学生账号"
+      width="min(620px, 94vw)"
+      :close-on-click-modal="!saving"
+      :close-on-press-escape="!saving"
+      :show-close="!saving"
+      @closed="resetUserForm"
+    >
+      <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-position="top">
         <el-form-item label="账号角色">
           <el-radio-group v-model="userForm.role">
             <el-radio-button value="STUDENT">学生</el-radio-button>
@@ -312,17 +363,17 @@ onMounted(load)
           </el-radio-group>
         </el-form-item>
         <div class="admin-form-grid">
-          <el-form-item label="用户名" required><el-input v-model.trim="userForm.username" placeholder="3–50 位字符" /></el-form-item>
-          <el-form-item label="真实姓名" required><el-input v-model.trim="userForm.real_name" placeholder="请输入姓名" /></el-form-item>
-          <el-form-item :label="userForm.role === 'STUDENT' ? '学号' : '工号'" required>
+          <el-form-item label="用户名" prop="username"><el-input v-model.trim="userForm.username" placeholder="3–50 位字符" /></el-form-item>
+          <el-form-item label="真实姓名" prop="real_name"><el-input v-model.trim="userForm.real_name" placeholder="请输入姓名" /></el-form-item>
+          <el-form-item :label="userForm.role === 'STUDENT' ? '学号' : '工号'" :prop="userForm.role === 'STUDENT' ? 'student_no' : 'teacher_no'">
             <el-input v-if="userForm.role === 'STUDENT'" v-model.trim="userForm.student_no" placeholder="请输入学号" />
             <el-input v-else v-model.trim="userForm.teacher_no" placeholder="请输入工号" />
           </el-form-item>
-          <el-form-item label="初始密码" required>
+          <el-form-item label="初始密码" prop="password">
             <el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位" />
           </el-form-item>
-          <el-form-item label="邮箱"><el-input v-model.trim="userForm.email" placeholder="可选" /></el-form-item>
-          <el-form-item label="手机号"><el-input v-model.trim="userForm.phone" maxlength="11" placeholder="可选" /></el-form-item>
+          <el-form-item label="邮箱" prop="email"><el-input v-model.trim="userForm.email" maxlength="100" placeholder="可选" /></el-form-item>
+          <el-form-item label="手机号" prop="phone"><el-input v-model.trim="userForm.phone" maxlength="11" placeholder="可选" /></el-form-item>
         </div>
       </el-form>
       <template #footer>

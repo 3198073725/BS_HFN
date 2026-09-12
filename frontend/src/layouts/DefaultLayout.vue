@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage } from 'element-plus'
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '../stores/auth'
@@ -10,6 +10,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const loggingOut = ref(false)
+const mainNav = ref(null)
 const roleLabel = computed(() => ({
   ADMIN: '管理员',
   TEACHER: '教师',
@@ -29,6 +30,19 @@ async function handleLogout() {
   }
   await router.replace('/')
 }
+
+async function revealActiveNavigation() {
+  await nextTick()
+  const navigation = mainNav.value
+  if (!navigation || navigation.scrollWidth <= navigation.clientWidth) return
+  const activeLink = navigation.querySelector('a.active')
+  if (!activeLink) return
+  const target = activeLink.offsetLeft - (navigation.clientWidth - activeLink.offsetWidth) / 2
+  navigation.scrollTo({ left: Math.max(0, target), behavior: 'smooth' })
+}
+
+watch(() => route.name, revealActiveNavigation)
+onMounted(revealActiveNavigation)
 </script>
 
 <template>
@@ -43,7 +57,7 @@ async function handleLogout() {
           </span>
         </RouterLink>
 
-        <nav class="main-nav" aria-label="主导航">
+        <nav ref="mainNav" class="main-nav" aria-label="主导航">
           <RouterLink to="/" :class="{ active: route.name === 'home' }">首页</RouterLink>
           <RouterLink to="/courses" :class="{ active: ['courses', 'course-detail'].includes(route.name) }">
             课程中心

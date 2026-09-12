@@ -9,20 +9,24 @@ const categories = ref([])
 const courses = ref([])
 const categoryId = ref(null)
 const loading = ref(false)
+let requestSequence = 0
 
 async function load() {
+  const requestId = ++requestSequence
+  const selectedCategoryId = categoryId.value
   loading.value = true
   try {
     const [categoryResponse, courseResponse] = await Promise.all([
       api.get('/courses/categories'),
-      api.get('/courses', { params: categoryId.value ? { category_id: categoryId.value } : {} }),
+      api.get('/courses', { params: selectedCategoryId ? { category_id: selectedCategoryId } : {} }),
     ])
+    if (requestId !== requestSequence) return
     categories.value = categoryResponse.data
     courses.value = courseResponse.data
   } catch (error) {
-    ElMessage.error(error.message || '课程加载失败')
+    if (requestId === requestSequence) ElMessage.error(error.message || '课程加载失败')
   } finally {
-    loading.value = false
+    if (requestId === requestSequence) loading.value = false
   }
 }
 

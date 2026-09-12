@@ -81,6 +81,25 @@ test('访问令牌损坏时使用刷新令牌恢复请求', async ({ page }) => 
 })
 
 
+test('公开课程在本地会话完全失效后自动降级为匿名访问', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.evaluate(() => {
+    localStorage.setItem('access_token', 'invalid-access-token')
+    localStorage.setItem('refresh_token', 'invalid-refresh-token')
+  })
+
+  await page.goto('/courses/1')
+  await expect(page.getByRole('heading', { name: '端测基础课程', exact: true })).toBeVisible()
+  await expect(page.getByText('课程加载失败')).toBeHidden()
+  await expect(page.getByText('Not enough segments')).toBeHidden()
+  const storedTokens = await page.evaluate(() => ({
+    access: localStorage.getItem('access_token'),
+    refresh: localStorage.getItem('refresh_token'),
+  }))
+  expect(storedTokens).toEqual({ access: null, refresh: null })
+})
+
+
 test('其他标签页退出后当前受保护页面同步返回登录页', async ({ page, context }) => {
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '我的学习', exact: true }).click()
@@ -139,6 +158,30 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
 })
 
 
+test('管理员切换账号角色后只提交当前角色编号', async ({ page }) => {
+  await login(page, 'e2e_admin')
+  await page.getByRole('link', { name: '系统后台', exact: true }).click()
+  await page.getByRole('button', { name: '＋ 创建用户', exact: true }).click()
+
+  const dialog = page.getByRole('dialog', { name: '创建教师或学生账号' })
+  await dialog.getByPlaceholder('3–50 位字符').fill('e2e_role_switch_teacher')
+  await dialog.getByPlaceholder('请输入姓名').fill('角色切换教师')
+  await dialog.getByPlaceholder('至少 8 位').fill(password)
+  await dialog.getByPlaceholder('请输入学号').fill('E2E-SWITCH-STUDENT')
+  await dialog.getByText('教师', { exact: true }).click()
+  await dialog.getByPlaceholder('请输入工号').fill('E2E-SWITCH-TEACHER')
+
+  const createRequest = page.waitForRequest((request) =>
+    request.url().endsWith('/api/admin/users') && request.method() === 'POST',
+  )
+  await dialog.getByRole('button', { name: '创建账号', exact: true }).click()
+  const payload = (await createRequest).postDataJSON()
+  expect(payload.teacher_no).toBe('E2E-SWITCH-TEACHER')
+  expect(payload).not.toHaveProperty('student_no')
+  await expect(page.getByText('用户账号已创建')).toBeVisible()
+})
+
+
 test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
   const courseName = '端到端课程'
   await login(page, 'e2e_teacher')
@@ -177,6 +220,53 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
 })
 
 
+test('教师可以编辑课程章节并完成下线与重新发布', async ({ page }) => {
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '教学管理', exact: true }).click()
+
+  await page.getByRole('button', { name: '＋ 创建课程' }).click()
+  let dialog = page.getByRole('dialog', { name: '创建课程' })
+  await dialog.getByPlaceholder('例如：高等数学基础').fill('课程生命周期草稿')
+  await dialog.getByText('请选择课程分类', { exact: true }).click()
+  await page.getByRole('option', { name: '端测分类' }).click()
+  await dialog.getByPlaceholder('一句话介绍课程内容').fill('编辑前简介')
+  await dialog.getByRole('button', { name: '保存课程', exact: true }).click()
+
+  let courseRow = page.getByRole('row').filter({ hasText: '课程生命周期草稿' })
+  await courseRow.getByRole('button', { name: '编辑', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '编辑课程草稿' })
+  await dialog.getByPlaceholder('例如：高等数学基础').fill('课程生命周期已编辑')
+  await dialog.getByPlaceholder('一句话介绍课程内容').fill('编辑后简介')
+  await dialog.getByRole('button', { name: '保存课程', exact: true }).click()
+  await expect(page.getByText('课程信息已更新')).toBeVisible()
+
+  courseRow = page.getByRole('row').filter({ hasText: '课程生命周期已编辑' })
+  await courseRow.getByRole('button', { name: '添加章节', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '添加章节' })
+  await dialog.getByPlaceholder('例如：第一章 课程导学').fill('生命周期章节')
+  await dialog.getByRole('button', { name: '保存章节', exact: true }).click()
+  await courseRow.locator('.el-table__expand-icon').click()
+
+  const chapterRow = page.locator('.chapter-row').filter({ hasText: '生命周期章节' })
+  await chapterRow.getByRole('button', { name: '编辑', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '编辑章节' })
+  await dialog.getByPlaceholder('例如：第一章 课程导学').fill('生命周期章节已编辑')
+  await dialog.getByRole('button', { name: '保存章节', exact: true }).click()
+  await expect(page.getByText('章节信息已更新')).toBeVisible()
+
+  courseRow = page.getByRole('row').filter({ hasText: '课程生命周期已编辑' })
+  await courseRow.getByRole('button', { name: '发布课程', exact: true }).click()
+  await page.getByRole('dialog', { name: '发布课程' }).getByRole('button', { name: '确定' }).click()
+  await expect(courseRow.getByText('已发布', { exact: true })).toBeVisible()
+  await courseRow.getByRole('button', { name: '下线', exact: true }).click()
+  await page.getByRole('dialog', { name: '下线课程' }).getByRole('button', { name: '确定' }).click()
+  await expect(courseRow.getByText('已下架', { exact: true })).toBeVisible()
+  await courseRow.getByRole('button', { name: '重新发布', exact: true }).click()
+  await page.getByRole('dialog', { name: '重新发布课程' }).getByRole('button', { name: '确定' }).click()
+  await expect(courseRow.getByText('已发布', { exact: true })).toBeVisible()
+})
+
+
 test('学生提交作业后教师可以批改并回传成绩', async ({ page }) => {
   const homeworkTitle = '端到端作业'
   await login(page, 'e2e_teacher')
@@ -192,6 +282,13 @@ test('学生提交作业后教师可以批改并回传成绩', async ({ page }) 
   await expect(page.getByText('作业草稿已创建')).toBeVisible()
 
   let homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
+  await homeworkCard.getByRole('button', { name: '编辑', exact: true }).click()
+  const editDialog = page.getByRole('dialog', { name: '编辑作业草稿' })
+  await editDialog.getByPlaceholder('说明完成要求、提交格式与评分要点…').fill('修改后的自动化测试答案要求。')
+  await editDialog.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(page.getByText('作业草稿已更新')).toBeVisible()
+
+  homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
   await homeworkCard.getByRole('button', { name: '发布', exact: true }).click()
   await page.getByRole('dialog', { name: '发布作业' }).getByRole('button', { name: '确定' }).click()
   await expect(homeworkCard.getByText('进行中', { exact: true })).toBeVisible()
@@ -235,6 +332,49 @@ test('学生提交作业后教师可以批改并回传成绩', async ({ page }) 
 })
 
 
+test('作业附件上传失败时重试不会重复创建草稿', async ({ page }) => {
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '作业管理', exact: true }).click()
+
+  let createRequests = 0
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/homeworks') && request.method() === 'POST') {
+      createRequests += 1
+    }
+  })
+  await page.route(/\/api\/homeworks\/\d+\/attachment$/, (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ code: 503, message: '附件服务暂不可用', data: null }),
+  }))
+
+  await page.getByRole('button', { name: '＋ 创建作业' }).click()
+  const dialog = page.getByRole('dialog', { name: '创建作业草稿' })
+  await dialog.getByText('请选择课程', { exact: true }).click()
+  await page.getByRole('option', { name: '端测基础课程（已发布）' }).click()
+  await dialog.getByPlaceholder('例如：第一章知识总结').fill('附件重试防重复草稿')
+  await dialog.getByPlaceholder('说明完成要求、提交格式与评分要点…').fill('验证分阶段保存状态。')
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: '作业说明.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('attachment retry test'),
+  })
+  await dialog.getByRole('button', { name: '保存草稿', exact: true }).click()
+
+  await expect(page.getByText(/作业草稿已创建，但附件上传失败/)).toBeVisible()
+  await expect(dialog.getByText(/不会重复创建草稿/)).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '重试上传附件', exact: true })).toBeVisible()
+  expect(createRequests).toBe(1)
+
+  const retriedUpload = page.waitForResponse((response) =>
+    /\/api\/homeworks\/\d+\/attachment$/.test(response.url()),
+  )
+  await dialog.getByRole('button', { name: '重试上传附件', exact: true }).click()
+  expect((await retriedUpload).status()).toBe(503)
+  expect(createRequests).toBe(1)
+})
+
+
 test('学生提交测验后教师可以查看自动评分结果', async ({ page }) => {
   const examTitle = '端到端测验'
   await login(page, 'e2e_teacher')
@@ -256,6 +396,23 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   await questionDialog.locator('.question-number-row input[role="spinbutton"]').first().fill('100')
   await questionDialog.getByRole('button', { name: '添加到测验', exact: true }).click()
   await expect(page.getByText('试题已添加')).toBeVisible()
+  const questionItem = questionDialog.locator('.exam-question-list article').filter({ hasText: 'HTTP 默认端口是多少？' })
+  await questionItem.getByRole('button', { name: '编辑', exact: true }).click()
+  await questionDialog.getByPlaceholder('请输入题目内容').fill('HTTP 协议的默认端口是多少？')
+  await questionDialog.getByRole('button', { name: '保存试题修改', exact: true }).click()
+  await expect(page.getByText('试题已更新')).toBeVisible()
+  await expect(questionDialog.getByText('HTTP 协议的默认端口是多少？', { exact: true })).toBeVisible()
+  await questionDialog.getByRole('button', { name: '稍后继续', exact: true }).click()
+  await expect(questionDialog).toBeHidden()
+
+  const draftExamCard = page.locator('.exam-card').filter({ hasText: examTitle })
+  await draftExamCard.getByRole('button', { name: '编辑信息', exact: true }).click()
+  const editExamDialog = page.getByRole('dialog', { name: '编辑测验草稿' })
+  await editExamDialog.getByPlaceholder('填写作答要求…').fill('修改后的作答要求。')
+  await editExamDialog.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(page.getByText('测验草稿已更新')).toBeVisible()
+  await draftExamCard.getByRole('button', { name: '试题管理', exact: true }).click()
+
   await expect(questionDialog.getByText('分值已匹配，可以发布')).toBeVisible()
   await questionDialog.getByRole('button', { name: '发布测验', exact: true }).click()
   await page.getByRole('dialog', { name: '发布测验' }).getByRole('button', { name: '确定' }).click()
@@ -294,6 +451,30 @@ test('网络故障时显示中文提示且页面保持可用', async ({ page }) 
 
   await expect(page.getByRole('heading', { name: '课程作业', exact: true })).toBeVisible()
   await expect(page.getByText('网络连接失败，请检查网络或服务状态')).toBeVisible()
+})
+
+
+test('视频资源加载失败时显示中文错误并支持重试', async ({ page }) => {
+  await login(page, 'e2e_student')
+  const playlistPattern = /\/media\/videos\/hls\/e2e\/index\.m3u8$/
+  await page.route(playlistPattern, (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/vnd.apple.mpegurl',
+    body: '',
+  }))
+
+  await page.goto('/courses/1')
+  const playbackError = page.getByRole('alert')
+  await expect(playbackError).toContainText('视频资源暂时无法加载', { timeout: 20_000 })
+
+  await page.unroute(playlistPattern)
+  await playbackError.getByRole('button', { name: '重新加载视频', exact: true }).click()
+  const video = page.locator('video')
+  await expect(video).toBeVisible()
+  await expect.poll(
+    () => video.evaluate((element) => element.readyState),
+    { timeout: 15_000 },
+  ).toBeGreaterThanOrEqual(1)
 })
 
 

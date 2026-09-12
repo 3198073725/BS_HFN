@@ -67,6 +67,10 @@ def validate_managed_user(payload: dict) -> dict:
         raise ValidationError("教师账号必须提供 teacher_no")
     if role == "STUDENT" and not data["student_no"]:
         raise ValidationError("学生账号必须提供 student_no")
+    if role == "TEACHER" and data["student_no"]:
+        raise ValidationError("教师账号不能提供 student_no")
+    if role == "STUDENT" and teacher_no:
+        raise ValidationError("学生账号不能提供 teacher_no")
     data.update(role=role, teacher_no=teacher_no)
     return data
 

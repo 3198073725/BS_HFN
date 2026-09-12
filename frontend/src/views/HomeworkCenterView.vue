@@ -21,6 +21,9 @@ const submissionAttachment = ref(null)
 const submissions = ref([])
 const saving = ref(false)
 const homeworkFormRef = ref(null)
+const pendingHomeworkId = ref(null)
+const editingHomeworkId = ref(null)
+const submissionContentSaved = ref(false)
 const homeworkForm = reactive({
   course_id: null,
   title: '',
@@ -60,28 +63,57 @@ async function load() {
   }
 }
 
-async function createHomework() {
-  const valid = await homeworkFormRef.value?.validate().catch(() => false)
-  if (!valid || saving.value) return
+function openHomework(homework = null) {
+  editingHomeworkId.value = homework?.id || null
+  pendingHomeworkId.value = null
+  Object.assign(homeworkForm, {
+    course_id: homework?.course_id || null,
+    title: homework?.title || '',
+    description: homework?.description || '',
+    deadline: parseUtc(homework?.deadline),
+    total_score: homework?.total_score || 100,
+  })
+  homeworkAttachment.value = null
+  homeworkFormRef.value?.clearValidate()
+  createDialog.value = true
+}
+
+async function saveHomework() {
+  if (saving.value) return
+  if (!pendingHomeworkId.value) {
+    const valid = await homeworkFormRef.value?.validate().catch(() => false)
+    if (!valid) return
+  } else if (!homeworkAttachment.value) {
+    ElMessage.warning('请重新选择附件后再重试上传')
+    return
+  }
+
   saving.value = true
+  let committedAction = ''
   try {
-    const response = await api.post('/homeworks', homeworkForm)
+    if (!pendingHomeworkId.value) {
+      const response = editingHomeworkId.value
+        ? await api.put(`/homeworks/${editingHomeworkId.value}`, homeworkForm)
+        : await api.post('/homeworks', homeworkForm)
+      pendingHomeworkId.value = response.data.id
+      committedAction = editingHomeworkId.value ? 'updated' : 'created'
+    }
     if (homeworkAttachment.value) {
       const attachmentData = new FormData()
       attachmentData.append('attachment', homeworkAttachment.value)
-      await api.post(`/homeworks/${response.data.id}/attachment`, attachmentData)
+      try {
+        await api.post(`/homeworks/${pendingHomeworkId.value}/attachment`, attachmentData)
+      } catch (error) {
+        await load()
+        const prefix = committedAction === 'created'
+          ? '作业草稿已创建'
+          : committedAction === 'updated' ? '作业草稿已更新' : '作业草稿已保存'
+        ElMessage.warning(`${prefix}，但附件上传失败：${error.message || '请检查文件后重试'}`)
+        return
+      }
     }
-    ElMessage.success('作业草稿已创建')
+    ElMessage.success(editingHomeworkId.value ? '作业草稿已更新' : '作业草稿已创建')
     createDialog.value = false
-    Object.assign(homeworkForm, {
-      course_id: null,
-      title: '',
-      description: '',
-      deadline: null,
-      total_score: 100,
-    })
-    homeworkFormRef.value?.clearValidate()
-    homeworkAttachment.value = null
     await load()
   } catch (error) {
     ElMessage.error(error.message || '作业创建失败')
@@ -124,6 +156,7 @@ function openSubmission(homework) {
   selectedHomework.value = homework
   submissionForm.content = homework.submission?.content || ''
   submissionAttachment.value = null
+  submissionContentSaved.value = false
   submissionDialog.value = true
 }
 
@@ -136,20 +169,28 @@ async function submitHomework() {
   saving.value = true
   try {
     let submission = selectedHomework.value.submission
-    if (content) {
+    if (content && !submissionContentSaved.value) {
       const response = await api.put(`/homeworks/${selectedHomework.value.id}/submission`, { content })
       submission = response.data
+      submissionContentSaved.value = true
+      updateSelectedSubmission(submission)
     }
     if (submissionAttachment.value) {
       const attachmentData = new FormData()
       attachmentData.append('attachment', submissionAttachment.value)
-      const response = await api.post(
-        `/homeworks/${selectedHomework.value.id}/submission/attachment`,
-        attachmentData,
-      )
-      submission = response.data
+      try {
+        const response = await api.post(
+          `/homeworks/${selectedHomework.value.id}/submission/attachment`,
+          attachmentData,
+        )
+        submission = response.data
+      } catch (error) {
+        const prefix = submissionContentSaved.value ? '作业内容已保存' : '作业内容未发生变化'
+        ElMessage.warning(`${prefix}，但附件上传失败：${error.message || '请检查文件后重试'}`)
+        return
+      }
     }
-    replaceHomework({ ...selectedHomework.value, submission })
+    updateSelectedSubmission(submission)
     submissionDialog.value = false
     ElMessage.success('作业提交成功')
   } catch (error) {
@@ -198,6 +239,31 @@ async function gradeSubmission() {
 function replaceHomework(homework) {
   const index = homeworks.value.findIndex((item) => item.id === homework.id)
   if (index >= 0) homeworks.value[index] = homework
+}
+
+function updateSelectedSubmission(submission) {
+  const homework = { ...selectedHomework.value, submission }
+  selectedHomework.value = homework
+  replaceHomework(homework)
+}
+
+function resetHomeworkForm() {
+  pendingHomeworkId.value = null
+  editingHomeworkId.value = null
+  Object.assign(homeworkForm, {
+    course_id: null,
+    title: '',
+    description: '',
+    deadline: null,
+    total_score: 100,
+  })
+  homeworkAttachment.value = null
+  homeworkFormRef.value?.clearValidate()
+}
+
+function resetSubmissionDialog() {
+  submissionContentSaved.value = false
+  submissionAttachment.value = null
 }
 
 function statusLabel(status) {
@@ -256,7 +322,7 @@ onMounted(load)
         <h1>{{ isTeacher ? '作业管理' : '课程作业' }}</h1>
         <p>{{ isTeacher ? '发布课程任务，集中查看提交并完成批改。' : '按时完成课程任务，随时查看成绩与教师评语。' }}</p>
       </div>
-      <el-button v-if="isTeacher" type="primary" size="large" @click="createDialog = true">
+      <el-button v-if="isTeacher" type="primary" size="large" @click="openHomework()">
         ＋ 创建作业
       </el-button>
     </div>
@@ -320,6 +386,11 @@ onMounted(load)
           <template v-if="isTeacher">
             <el-button
               v-if="homework.status === 'DRAFT'"
+              plain
+              @click="openHomework(homework)"
+            >编辑</el-button>
+            <el-button
+              v-if="homework.status === 'DRAFT'"
               type="primary"
               @click="changeStatus(homework, 'publish')"
             >
@@ -362,8 +433,25 @@ onMounted(load)
       />
     </div>
 
-    <el-dialog v-model="createDialog" title="创建作业草稿" width="min(620px, 94vw)">
-      <el-form ref="homeworkFormRef" :model="homeworkForm" :rules="homeworkRules" label-position="top">
+    <el-dialog
+      v-model="createDialog"
+      :title="editingHomeworkId ? '编辑作业草稿' : '创建作业草稿'"
+      width="min(620px, 94vw)"
+      :close-on-click-modal="!saving"
+      :close-on-press-escape="!saving"
+      :show-close="!saving"
+      @closed="resetHomeworkForm"
+    >
+      <p v-if="pendingHomeworkId" class="dialog-tip">
+        草稿已经保存，课程与作业内容已锁定；请重新选择附件并重试，不会重复创建草稿。
+      </p>
+      <el-form
+        ref="homeworkFormRef"
+        :model="homeworkForm"
+        :rules="homeworkRules"
+        :disabled="Boolean(pendingHomeworkId)"
+        label-position="top"
+      >
         <el-form-item label="所属课程" prop="course_id">
           <el-select v-model="homeworkForm.course_id" placeholder="请选择课程" style="width: 100%">
             <el-option
@@ -410,11 +498,21 @@ onMounted(load)
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="createDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="createHomework">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" @click="saveHomework">
+          {{ pendingHomeworkId ? '重试上传附件' : editingHomeworkId ? '保存修改' : '保存草稿' }}
+        </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="submissionDialog" :title="selectedHomework?.title" width="min(640px, 94vw)">
+    <el-dialog
+      v-model="submissionDialog"
+      :title="selectedHomework?.title"
+      width="min(640px, 94vw)"
+      :close-on-click-modal="!saving"
+      :close-on-press-escape="!saving"
+      :show-close="!saving"
+      @closed="resetSubmissionDialog"
+    >
       <p class="dialog-tip">支持重复提交；重新提交后，已有成绩和评语会等待教师再次确认。</p>
       <el-input
         v-model="submissionForm.content"
