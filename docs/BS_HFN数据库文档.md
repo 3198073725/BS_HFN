@@ -3224,3 +3224,28 @@ favorite
 用户主页沿用 `sys_user`，新增可空字段 `bio VARCHAR(500)` 保存个人简介；头像继续使用 `avatar` 保存相对媒体路径。公开接口仅返回用户编号、姓名、角色、头像、简介和加入时间，教师额外返回工号与已发布课程。用户名、邮箱、手机号、学生学号等账号资料不通过公开主页接口返回。
 
 头像文件保存到媒体根目录的 `avatars/` 子目录，采用随机文件名并校验扩展名、文件签名和 3MB 大小。替换或移除头像时同步清理旧文件。对应迁移版本为 `b2c3d4e5f6a7`，上一版本为学生密码重置申请迁移 `a1b2c3d4e5f6`。
+
+# 62. 当前实现扩展：学生入班申请表
+
+为“学生申请、班级教师审批”的入班流程新增 `teaching_class_join_request`。申请只表达待处理意愿，不替代 `teaching_class_student` 的正式成员关系。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGINT UNSIGNED | 入班申请主键 |
+| class_id | BIGINT UNSIGNED | 目标班级，关联 `teaching_class.id` |
+| student_id | BIGINT UNSIGNED | 申请学生，关联 `sys_user.id` |
+| source_course_id | BIGINT UNSIGNED | 发起申请时所在课程，可空，关联 `course.id` |
+| status | VARCHAR(20) | `PENDING/APPROVED/REJECTED` |
+| reviewer_id | BIGINT UNSIGNED | 实际处理申请的教师，可空 |
+| reviewed_at | DATETIME | 同意或拒绝的 UTC 时间，可空 |
+| created_at | DATETIME | 首次申请或再次申请时间 |
+| updated_at | DATETIME | 最近状态更新时间 |
+
+约束与索引：
+
+- `(class_id, student_id)` 唯一，拒绝后再次申请复用原记录并恢复为 `PENDING`，避免同一学生产生重复历史行。
+- `(class_id, status)` 支持教师按班级查询待办，`(student_id, status)` 支持课程详情显示个人申请状态。
+- 申请课程必须已发布，并且目标班级必须真实关联该课程；待审批阶段不写入 `teaching_class_student` 或 `course_student`。
+- 审批时实时校验 `teaching_class.teacher_id`，只有当前班级教师可以处理；同意后才创建班级成员并同步该班全部课程。
+
+对应迁移版本为 `c3d4e5f6a7b8`，上一版本为用户公开主页资料迁移 `b2c3d4e5f6a7`。

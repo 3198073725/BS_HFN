@@ -11,7 +11,9 @@ from app.services.class_service import (
     delete_classroom,
     list_classes,
     list_course_options,
+    list_teacher_class_join_requests,
     remove_student,
+    review_class_join_request,
     unassign_course,
     update_classroom,
 )
@@ -42,6 +44,34 @@ def classrooms():
 @roles_required(UserRole.TEACHER)
 def classroom_course_options():
     return success(list_course_options(int(get_jwt_identity())))
+
+
+@classes_bp.get("/join-requests")
+@roles_required(UserRole.TEACHER)
+def classroom_join_requests():
+    return success(list_teacher_class_join_requests(int(get_jwt_identity())))
+
+
+@classes_bp.put("/join-requests/<int:request_id>")
+@roles_required(UserRole.TEACHER)
+def review_classroom_join_request(request_id: int):
+    action = str(json_body().get("action") or "").strip().upper()
+    if action not in {"APPROVED", "REJECTED"}:
+        return error("审批操作只能是 APPROVED 或 REJECTED", 400)
+    try:
+        result = review_class_join_request(
+            request_id,
+            int(get_jwt_identity()),
+            action,
+        )
+    except ClassNotFound as exc:
+        return error(str(exc), 404)
+    except ClassPermissionDenied as exc:
+        return error(str(exc), 403)
+    except ClassConflict as exc:
+        return error(str(exc), 409)
+    message = "已同意入班申请，学生已加入班级" if action == "APPROVED" else "已拒绝入班申请"
+    return success(result, message)
 
 
 @classes_bp.get("/password-reset-requests")

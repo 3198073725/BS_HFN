@@ -29,6 +29,8 @@ const classStatistics = ref(null)
 const statisticsLoading = ref(false)
 const passwordResetRequests = ref([])
 const handlingResetId = ref(null)
+const joinRequests = ref([])
+const handlingJoinRequestId = ref(null)
 let requestSequence = 0
 let statisticsRequestSequence = 0
 
@@ -98,18 +100,23 @@ async function loadClasses() {
   const requestId = ++requestSequence
   loading.value = true
   try {
-    const [response, courseResponse, resetResponse] = await Promise.all([
+    const [response, courseResponse, resetResponse, joinResponse] = await Promise.all([
       api.get('/classes'),
       isTeacher.value ? api.get('/classes/course-options') : Promise.resolve({ data: [] }),
       isTeacher.value ? api.get('/classes/password-reset-requests') : Promise.resolve({ data: [] }),
+      isTeacher.value ? api.get('/classes/join-requests') : Promise.resolve({ data: [] }),
     ])
     if (requestId !== requestSequence) return
     classrooms.value = response.data
     teacherCourses.value = courseResponse.data
     passwordResetRequests.value = resetResponse.data
+    joinRequests.value = joinResponse.data
+    const joinRequestId = Number(route.query.join_request_id)
+    const requestedJoin = joinRequests.value.find((item) => item.id === joinRequestId)
     const requestedId = Number(route.query.reset_request_id)
     const requestedItem = passwordResetRequests.value.find((item) => item.id === requestedId)
-    if (requestedItem?.class_ids?.length) selectedClassId.value = requestedItem.class_ids[0]
+    if (requestedJoin) selectedClassId.value = requestedJoin.class_id
+    else if (requestedItem?.class_ids?.length) selectedClassId.value = requestedItem.class_ids[0]
     if (isTeacher.value && !classrooms.value.some((item) => item.id === selectedClassId.value)) {
       selectedClassId.value = classrooms.value[0]?.id || null
     }
@@ -124,6 +131,41 @@ async function loadClasses() {
 
 function resetRequestsForClass(classId) {
   return passwordResetRequests.value.filter((item) => item.class_ids?.includes(classId))
+}
+
+function joinRequestsForClass(classId) {
+  return joinRequests.value.filter((item) => item.class_id === classId)
+}
+
+async function reviewJoinRequest(item, action) {
+  if (handlingJoinRequestId.value !== null) return
+  const approved = action === 'APPROVED'
+  try {
+    await ElMessageBox.confirm(
+      approved
+        ? `同意后，“${item.student_name}”将加入“${item.class_name}”，并同步班级课程，确定继续吗？`
+        : `确定拒绝“${item.student_name}”加入“${item.class_name}”吗？`,
+      approved ? '同意入班申请' : '拒绝入班申请',
+      {
+        confirmButtonText: approved ? '确认同意' : '确认拒绝',
+        cancelButtonText: '取消',
+        type: approved ? 'warning' : 'info',
+      },
+    )
+  } catch {
+    return
+  }
+  handlingJoinRequestId.value = item.id
+  try {
+    const response = await api.put(`/classes/join-requests/${item.id}`, { action })
+    ElMessage.success(response.message || (approved ? '已同意入班申请' : '已拒绝入班申请'))
+    await loadClasses()
+  } catch (error) {
+    ElMessage.error(error.message || '入班申请处理失败')
+    await loadClasses()
+  } finally {
+    handlingJoinRequestId.value = null
+  }
 }
 
 async function reviewPasswordReset(item, action) {
@@ -417,6 +459,9 @@ onBeforeUnmount(() => {
             <div>
               <strong>{{ classroom.name }}</strong>
               <small>{{ classroom.member_count }} 名学生</small>
+              <em v-if="joinRequestsForClass(classroom.id).length">
+                {{ joinRequestsForClass(classroom.id).length }} 项入班申请
+              </em>
               <em v-if="resetRequestsForClass(classroom.id).length">
                 {{ resetRequestsForClass(classroom.id).length }} 项密码申请
               </em>
@@ -580,6 +625,47 @@ onBeforeUnmount(() => {
         </section>
 
         <template v-if="isTeacher">
+          <section
+            v-if="joinRequestsForClass(classroom.id).length"
+            class="classroom-reset-panel classroom-join-panel"
+            aria-label="学生入班申请"
+          >
+            <div class="classroom-reset-heading">
+              <div>
+                <strong>学生入班申请</strong>
+                <small>核对学生和来源课程后决定是否加入当前班级</small>
+              </div>
+              <span>{{ joinRequestsForClass(classroom.id).length }} 项待处理</span>
+            </div>
+            <article
+              v-for="item in joinRequestsForClass(classroom.id)"
+              :key="item.id"
+              class="classroom-reset-item"
+            >
+              <div class="classroom-reset-student">
+                <span>{{ item.student_name.slice(0, 1) }}</span>
+                <p>
+                  <strong>{{ item.student_name }}</strong>
+                  <small>{{ item.student_no || item.username }} · 来自{{ item.source_course_name || '课程详情' }}</small>
+                </p>
+              </div>
+              <time>申请于 {{ formatDate(item.requested_at) }}</time>
+              <div class="classroom-reset-actions">
+                <el-button
+                  :loading="handlingJoinRequestId === item.id"
+                  :disabled="handlingJoinRequestId !== null && handlingJoinRequestId !== item.id"
+                  @click="reviewJoinRequest(item, 'REJECTED')"
+                >拒绝</el-button>
+                <el-button
+                  type="primary"
+                  :loading="handlingJoinRequestId === item.id"
+                  :disabled="handlingJoinRequestId !== null && handlingJoinRequestId !== item.id"
+                  @click="reviewJoinRequest(item, 'APPROVED')"
+                >同意入班</el-button>
+              </div>
+            </article>
+          </section>
+
           <section
             v-if="resetRequestsForClass(classroom.id).length"
             class="classroom-reset-panel"

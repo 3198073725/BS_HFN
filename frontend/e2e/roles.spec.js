@@ -171,7 +171,7 @@ test('公开课程在本地会话完全失效后自动降级为匿名访问', as
 })
 
 
-test('学生可从课程详情查看教师主页并加入关联班级', async ({ page }) => {
+test('学生从课程详情申请入班并由教师审批', async ({ page }) => {
   await login(page, 'e2e_student')
   await page.goto('/courses/1')
 
@@ -188,9 +188,28 @@ test('学生可从课程详情查看教师主页并加入关联班级', async ({
   const dialog = page.getByRole('dialog', { name: '选择课程班级' })
   await expect(dialog.getByText('端测密码审批班', { exact: true })).toBeVisible()
   const availableClass = dialog.locator('.course-class-option').filter({ hasText: '端测自主加入班' })
-  await availableClass.getByRole('button', { name: '加入', exact: true }).click()
-  await expect(page.getByText('已加入“端测自主加入班”')).toBeVisible()
-  await expect(availableClass.getByRole('button', { name: '已加入', exact: true })).toBeDisabled()
+  await availableClass.getByRole('button', { name: '申请加入', exact: true }).click()
+  await expect(page.getByText('已申请加入“端测自主加入班”，请等待教师审批')).toBeVisible()
+  await expect(availableClass.getByRole('button', { name: '待教师审批', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '班级管理', exact: true }).click()
+  const classroomCard = page.locator('.classroom-card').filter({ hasText: '端测自主加入班' })
+  const requestPanel = classroomCard.locator('.classroom-join-panel')
+  await expect(requestPanel).toContainText('端测学生')
+  await requestPanel.getByRole('button', { name: '同意入班', exact: true }).click()
+  await page.getByRole('dialog', { name: '同意入班申请' })
+    .getByRole('button', { name: '确认同意', exact: true }).click()
+  await expect(page.getByText('已同意入班申请，学生已加入班级')).toBeVisible()
+  await expect(classroomCard.locator('.el-table')).toContainText('端测学生')
+
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '我的班级', exact: true }).click()
+  await expect(page.locator('.classroom-card').filter({ hasText: '端测自主加入班' })).toBeVisible()
 })
 
 

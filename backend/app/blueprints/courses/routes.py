@@ -6,8 +6,8 @@ from app.services.auth_service import AuthenticationError, get_active_user
 from app.services.class_service import (
     ClassConflict,
     ClassNotFound,
-    join_course_class,
     list_course_class_options,
+    request_course_class_join,
 )
 from app.services.course_service import (
     CourseNotFound,
@@ -65,16 +65,16 @@ def course_classes(course_id: int):
     return success(classes)
 
 
-@courses_bp.post("/<int:course_id>/classes/<int:class_id>/join")
+@courses_bp.post("/<int:course_id>/classes/<int:class_id>/apply")
 @roles_required(UserRole.STUDENT)
-def join_class_from_course(course_id: int, class_id: int):
+def apply_to_class_from_course(course_id: int, class_id: int):
     try:
-        classroom = join_course_class(course_id, class_id, int(get_jwt_identity()))
+        join_request = request_course_class_join(course_id, class_id, int(get_jwt_identity()))
     except ClassNotFound as exc:
         return error(str(exc), 404)
     except ClassConflict as exc:
         return error(str(exc), 409)
-    return success(classroom, "班级加入成功", 201)
+    return success(join_request, "入班申请已提交，请等待教师审批", 202)
 
 
 @courses_bp.get("/<int:course_id>")

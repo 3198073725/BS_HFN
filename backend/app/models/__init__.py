@@ -9,7 +9,12 @@ from .notice import Notice
 from .notification import Notification
 from .password_reset_request import PasswordResetRequest
 from .question import Answer, Question
-from .teaching_class import TeachingClass, TeachingClassCourse, TeachingClassStudent
+from .teaching_class import (
+    TeachingClass,
+    TeachingClassCourse,
+    TeachingClassJoinRequest,
+    TeachingClassStudent,
+)
 from .user import User
 from .video import Video
 
@@ -35,6 +40,7 @@ __all__ = [
     "Question",
     "TeachingClass",
     "TeachingClassCourse",
+    "TeachingClassJoinRequest",
     "TeachingClassStudent",
     "User",
     "Video",

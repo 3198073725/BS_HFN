@@ -2,7 +2,14 @@ from werkzeug.security import generate_password_hash
 
 from app.constants import CourseStatus, UserRole
 from app.extensions import db
-from app.models import Course, CourseCategory, CourseStudent, User
+from app.models import (
+    Course,
+    CourseCategory,
+    CourseStudent,
+    TeachingClassJoinRequest,
+    TeachingClassStudent,
+    User,
+)
 
 
 PASSWORD = "Password123!"
@@ -211,10 +218,12 @@ def test_classroom_input_and_student_status_validation(app, client):
     assert disabled.get_json()["message"] == "该学生账号已被禁用"
 
 
-def test_student_can_join_a_linked_class_from_published_course(app, client):
+def test_student_class_join_request_requires_teacher_approval(app, client):
     context = create_context(app)
     teacher = login(client, context["teacher"])
+    other_teacher = login(client, context["other_teacher"])
     student = login(client, context["student"])
+    other_student = login(client, context["other_student"])
 
     with app.app_context():
         category = CourseCategory(name="公开加入班级分类")
@@ -244,17 +253,69 @@ def test_student_can_join_a_linked_class_from_published_course(app, client):
     options = client.get(f"/api/courses/{course_id}/classes", headers=bearer(student))
     assert options.status_code == 200
     assert options.get_json()["data"][0]["joined"] is False
-    joined = client.post(
-        f"/api/courses/{course_id}/classes/{classroom['id']}/join",
+    assert options.get_json()["data"][0]["request_status"] is None
+
+    applied = client.post(
+        f"/api/courses/{course_id}/classes/{classroom['id']}/apply",
         headers=bearer(student),
     )
-    assert joined.status_code == 201
-    assert joined.get_json()["data"]["name"] == "可加入班级"
+    assert applied.status_code == 202
+    request_id = applied.get_json()["data"]["id"]
+    assert applied.get_json()["data"]["status"] == "PENDING"
     assert client.post(
-        f"/api/courses/{course_id}/classes/{classroom['id']}/join",
+        f"/api/courses/{course_id}/classes/{classroom['id']}/apply",
         headers=bearer(student),
     ).status_code == 409
+
     with app.app_context():
+        assert db.session.scalar(
+            db.select(TeachingClassStudent).where(
+                TeachingClassStudent.class_id == classroom["id"],
+                TeachingClassStudent.student_id == context["student_id"],
+            )
+        ) is None
+        assert db.session.scalar(
+            db.select(CourseStudent).where(
+                CourseStudent.course_id == course_id,
+                CourseStudent.student_id == context["student_id"],
+                CourseStudent.status.is_(True),
+            )
+        ) is None
+
+    pending_options = client.get(
+        f"/api/courses/{course_id}/classes",
+        headers=bearer(student),
+    ).get_json()["data"][0]
+    assert pending_options["request_status"] == "PENDING"
+
+    teacher_requests = client.get("/api/classes/join-requests", headers=bearer(teacher))
+    assert teacher_requests.status_code == 200
+    assert teacher_requests.get_json()["data"][0]["student_no"] == "CS001"
+    assert client.put(
+        f"/api/classes/join-requests/{request_id}",
+        headers=bearer(other_teacher),
+        json={"action": "APPROVED"},
+    ).status_code == 403
+    approved = client.put(
+        f"/api/classes/join-requests/{request_id}",
+        headers=bearer(teacher),
+        json={"action": "APPROVED"},
+    )
+    assert approved.status_code == 200
+    assert approved.get_json()["data"]["status"] == "APPROVED"
+    assert client.put(
+        f"/api/classes/join-requests/{request_id}",
+        headers=bearer(teacher),
+        json={"action": "REJECTED"},
+    ).status_code == 409
+
+    with app.app_context():
+        assert db.session.scalar(
+            db.select(TeachingClassStudent).where(
+                TeachingClassStudent.class_id == classroom["id"],
+                TeachingClassStudent.student_id == context["student_id"],
+            )
+        ) is not None
         assert db.session.scalar(
             db.select(CourseStudent).where(
                 CourseStudent.course_id == course_id,
@@ -262,6 +323,25 @@ def test_student_can_join_a_linked_class_from_published_course(app, client):
                 CourseStudent.status.is_(True),
             )
         ) is not None
+
+    rejected_application = client.post(
+        f"/api/courses/{course_id}/classes/{classroom['id']}/apply",
+        headers=bearer(other_student),
+    )
+    rejected_id = rejected_application.get_json()["data"]["id"]
+    assert client.put(
+        f"/api/classes/join-requests/{rejected_id}",
+        headers=bearer(teacher),
+        json={"action": "REJECTED"},
+    ).status_code == 200
+    reapplied = client.post(
+        f"/api/courses/{course_id}/classes/{classroom['id']}/apply",
+        headers=bearer(other_student),
+    )
+    assert reapplied.status_code == 202
+    assert reapplied.get_json()["data"]["id"] == rejected_id
+    with app.app_context():
+        assert db.session.get(TeachingClassJoinRequest, rejected_id).status == "PENDING"
 
 
 def test_classroom_course_assignment_enrolls_existing_and_future_students(app, client):

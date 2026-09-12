@@ -2,7 +2,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from app.constants import CourseStatus, UserRole
+from app.constants import ClassJoinRequestStatus, CourseStatus, UserRole
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import (
@@ -10,9 +10,11 @@ from app.models import (
     CourseStudent,
     TeachingClass,
     TeachingClassCourse,
+    TeachingClassJoinRequest,
     TeachingClassStudent,
     User,
 )
+from app.services.notification_service import queue_notification
 
 
 class ClassNotFound(ValueError):
@@ -60,6 +62,15 @@ def list_course_class_options(course_id: int, student_id: int) -> list[dict]:
         .where(TeachingClassCourse.course_id == course_id)
         .order_by(TeachingClass.created_at.desc(), TeachingClass.id.desc())
     ).all()
+    request_by_class_id = {
+        item.class_id: item
+        for item in db.session.scalars(
+            db.select(TeachingClassJoinRequest).where(
+                TeachingClassJoinRequest.student_id == student_id,
+                TeachingClassJoinRequest.class_id.in_([item.id for item in classrooms]),
+            )
+        ).all()
+    } if classrooms else {}
     return [
         {
             "id": classroom.id,
@@ -69,12 +80,17 @@ def list_course_class_options(course_id: int, student_id: int) -> list[dict]:
             "teacher_name": classroom.teacher.real_name,
             "member_count": len(classroom.student_links),
             "joined": any(link.student_id == student_id for link in classroom.student_links),
+            "request_status": (
+                request_by_class_id[classroom.id].status
+                if classroom.id in request_by_class_id
+                else None
+            ),
         }
         for classroom in classrooms
     ]
 
 
-def join_course_class(course_id: int, class_id: int, student_id: int) -> dict:
+def request_course_class_join(course_id: int, class_id: int, student_id: int) -> dict:
     course = db.session.get(Course, course_id)
     if course is None or course.status != CourseStatus.PUBLISHED.value:
         raise ClassNotFound("课程不存在或尚未发布")
@@ -95,19 +111,158 @@ def join_course_class(course_id: int, class_id: int, student_id: int) -> dict:
         raise ClassNotFound("该课程没有关联这个班级")
     if any(link.student_id == student_id for link in classroom.student_links):
         raise ClassConflict("你已经加入该班级")
-    db.session.add(TeachingClassStudent(class_id=classroom.id, student_id=student_id))
-    _enroll_student_in_class_courses(classroom, student_id)
+    join_request = db.session.scalar(
+        db.select(TeachingClassJoinRequest).where(
+            TeachingClassJoinRequest.class_id == classroom.id,
+            TeachingClassJoinRequest.student_id == student_id,
+        )
+    )
+    if join_request is not None and join_request.status == ClassJoinRequestStatus.PENDING.value:
+        raise ClassConflict("你已经提交过入班申请，请等待教师审批")
+    now = utc_now()
+    if join_request is None:
+        join_request = TeachingClassJoinRequest(
+            class_id=classroom.id,
+            student_id=student_id,
+            source_course_id=course.id,
+            status=ClassJoinRequestStatus.PENDING.value,
+        )
+        db.session.add(join_request)
+    else:
+        join_request.source_course_id = course.id
+        join_request.status = ClassJoinRequestStatus.PENDING.value
+        join_request.reviewer_id = None
+        join_request.reviewed_at = None
+        join_request.created_at = now
+    db.session.flush()
+    student_name = db.session.scalar(db.select(User.real_name).where(User.id == student_id))
+    queue_notification(
+        classroom.teacher_id,
+        "新的入班申请",
+        f"{student_name}申请加入“{classroom.name}”，请在班级管理中审批。",
+        category="CLASS",
+        sender_id=student_id,
+        link=f"/classes?join_request_id={join_request.id}",
+    )
     try:
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()
-        raise ClassConflict("你已经加入该班级") from exc
+        raise ClassConflict("你已经提交过入班申请，请等待教师审批") from exc
     return {
-        "id": classroom.id,
-        "name": classroom.name,
-        "teacher_id": classroom.teacher_id,
-        "teacher_name": classroom.teacher.real_name,
-        "joined": True,
+        "id": join_request.id,
+        "class_id": classroom.id,
+        "class_name": classroom.name,
+        "status": join_request.status,
+        "requested_at": iso_utc(join_request.created_at),
+    }
+
+
+def list_teacher_class_join_requests(teacher_id: int) -> list[dict]:
+    requests = db.session.scalars(
+        db.select(TeachingClassJoinRequest)
+        .options(
+            selectinload(TeachingClassJoinRequest.classroom),
+            selectinload(TeachingClassJoinRequest.student),
+            selectinload(TeachingClassJoinRequest.source_course),
+        )
+        .join(TeachingClass, TeachingClass.id == TeachingClassJoinRequest.class_id)
+        .where(
+            TeachingClass.teacher_id == teacher_id,
+            TeachingClassJoinRequest.status == ClassJoinRequestStatus.PENDING.value,
+        )
+        .order_by(TeachingClassJoinRequest.created_at.asc(), TeachingClassJoinRequest.id.asc())
+    ).all()
+    return [_serialize_join_request(item) for item in requests]
+
+
+def review_class_join_request(
+    request_id: int,
+    teacher_id: int,
+    action: str,
+) -> dict:
+    join_request = db.session.scalar(
+        db.select(TeachingClassJoinRequest)
+        .options(
+            selectinload(TeachingClassJoinRequest.classroom)
+            .selectinload(TeachingClass.course_links),
+            selectinload(TeachingClassJoinRequest.student),
+            selectinload(TeachingClassJoinRequest.source_course),
+        )
+        .where(TeachingClassJoinRequest.id == request_id)
+    )
+    if join_request is None:
+        raise ClassNotFound("入班申请不存在")
+    if join_request.classroom.teacher_id != teacher_id:
+        raise ClassPermissionDenied("不能审批其他教师班级的申请")
+    if join_request.status != ClassJoinRequestStatus.PENDING.value:
+        raise ClassConflict("该入班申请已经处理")
+
+    approved = action == ClassJoinRequestStatus.APPROVED.value
+    if approved:
+        if not join_request.student.status:
+            raise ClassConflict("该学生账号已被禁用，不能加入班级")
+        membership = db.session.scalar(
+            db.select(TeachingClassStudent).where(
+                TeachingClassStudent.class_id == join_request.class_id,
+                TeachingClassStudent.student_id == join_request.student_id,
+            )
+        )
+        if membership is None:
+            db.session.add(
+                TeachingClassStudent(
+                    class_id=join_request.class_id,
+                    student_id=join_request.student_id,
+                )
+            )
+            _enroll_student_in_class_courses(join_request.classroom, join_request.student_id)
+    join_request.status = action
+    join_request.reviewer_id = teacher_id
+    join_request.reviewed_at = utc_now()
+    queue_notification(
+        join_request.student_id,
+        "入班申请已通过" if approved else "入班申请未通过",
+        (
+            f"你已加入“{join_request.classroom.name}”，班级课程已同步到我的学习。"
+            if approved
+            else f"你加入“{join_request.classroom.name}”的申请未通过，可联系教师或重新申请。"
+        ),
+        category="CLASS",
+        sender_id=teacher_id,
+        link=(
+            "/classes"
+            if approved
+            else (
+                f"/courses/{join_request.source_course_id}"
+                if join_request.source_course_id
+                else "/courses"
+            )
+        ),
+    )
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        raise ClassConflict("该学生已经在班级中") from exc
+    return _serialize_join_request(join_request)
+
+
+def _serialize_join_request(join_request: TeachingClassJoinRequest) -> dict:
+    return {
+        "id": join_request.id,
+        "class_id": join_request.class_id,
+        "class_name": join_request.classroom.name,
+        "student_id": join_request.student_id,
+        "student_name": join_request.student.real_name,
+        "student_no": join_request.student.student_no,
+        "username": join_request.student.username,
+        "source_course_id": join_request.source_course_id,
+        "source_course_name": (
+            join_request.source_course.name if join_request.source_course else None
+        ),
+        "status": join_request.status,
+        "requested_at": iso_utc(join_request.created_at),
+        "reviewed_at": iso_utc(join_request.reviewed_at),
     }
 
 
@@ -192,6 +347,25 @@ def add_student(class_id: int, teacher_id: int, account: str) -> dict:
     if existing is not None:
         raise ClassConflict("该学生已经在班级中")
     db.session.add(TeachingClassStudent(class_id=classroom.id, student_id=student.id))
+    pending_request = db.session.scalar(
+        db.select(TeachingClassJoinRequest).where(
+            TeachingClassJoinRequest.class_id == classroom.id,
+            TeachingClassJoinRequest.student_id == student.id,
+            TeachingClassJoinRequest.status == ClassJoinRequestStatus.PENDING.value,
+        )
+    )
+    if pending_request is not None:
+        pending_request.status = ClassJoinRequestStatus.APPROVED.value
+        pending_request.reviewer_id = teacher_id
+        pending_request.reviewed_at = utc_now()
+        queue_notification(
+            student.id,
+            "入班申请已通过",
+            f"你已加入“{classroom.name}”，班级课程已同步到我的学习。",
+            category="CLASS",
+            sender_id=teacher_id,
+            link="/classes",
+        )
     _enroll_student_in_class_courses(classroom, student.id)
     try:
         db.session.commit()

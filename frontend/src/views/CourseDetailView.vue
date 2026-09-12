@@ -116,17 +116,15 @@ async function openClassDialog() {
   }
 }
 
-async function joinClass(classroom) {
-  if (joiningClassId.value !== null || classroom.joined) return
+async function applyForClass(classroom) {
+  if (joiningClassId.value !== null || classroom.joined || classroom.request_status === 'PENDING') return
   joiningClassId.value = classroom.id
   try {
-    await api.post(`/courses/${route.params.id}/classes/${classroom.id}/join`)
-    classroom.joined = true
-    learningState.joined = true
-    ElMessage.success(`已加入“${classroom.name}”`)
-    if (selectedVideo.value) await loadLearningContext()
+    await api.post(`/courses/${route.params.id}/classes/${classroom.id}/apply`)
+    classroom.request_status = 'PENDING'
+    ElMessage.success(`已申请加入“${classroom.name}”，请等待教师审批`)
   } catch (error) {
-    ElMessage.error(error.message || '加入班级失败')
+    ElMessage.error(error.message || '入班申请提交失败')
   } finally {
     joiningClassId.value = null
   }
@@ -651,7 +649,7 @@ onBeforeUnmount(() => {
       width="min(560px, calc(100vw - 28px))"
       class="course-class-dialog"
     >
-      <p class="course-class-dialog-tip">加入班级后，教师可按班级安排课程并查看你的学习进展。</p>
+      <p class="course-class-dialog-tip">提交申请后，班级教师同意才会正式加入并同步班级课程。</p>
       <div class="course-class-options">
         <article v-for="classroom in classOptions" :key="classroom.id" class="course-class-option">
           <span class="course-class-mark">班</span>
@@ -661,12 +659,12 @@ onBeforeUnmount(() => {
             <small>{{ classroom.teacher_name }} · {{ classroom.member_count }} 名学生</small>
           </div>
           <el-button
-            :type="classroom.joined ? '' : 'primary'"
-            :disabled="classroom.joined || joiningClassId !== null"
+            :type="classroom.joined || classroom.request_status === 'PENDING' ? '' : 'primary'"
+            :disabled="classroom.joined || classroom.request_status === 'PENDING' || joiningClassId !== null"
             :loading="joiningClassId === classroom.id"
-            @click="joinClass(classroom)"
+            @click="applyForClass(classroom)"
           >
-            {{ classroom.joined ? '已加入' : '加入' }}
+            {{ classroom.joined ? '已加入' : classroom.request_status === 'PENDING' ? '待教师审批' : classroom.request_status === 'REJECTED' ? '再次申请' : '申请加入' }}
           </el-button>
         </article>
       </div>
