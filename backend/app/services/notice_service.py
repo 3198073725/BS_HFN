@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
-
 from sqlalchemy.orm import joinedload
 
 from app.constants import NoticeStatus
+from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Notice
 
@@ -95,9 +94,9 @@ def _get_notice(notice_id: int) -> Notice:
     return notice
 
 
-def _iso(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+def _iso(value) -> str | None:
+    return iso_utc(value)
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+def _now():
+    return utc_now()

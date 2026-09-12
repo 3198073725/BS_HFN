@@ -1,4 +1,5 @@
 from app.extensions import db
+from app.datetime_utils import iso_utc
 from .base import IdMixin, TimestampMixin
 
 
@@ -33,6 +34,6 @@ class User(IdMixin, TimestampMixin, db.Model):
             "avatar": self.avatar,
             "role": self.role,
             "status": bool(self.status),
-            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_login_at": iso_utc(self.last_login_at),
+            "created_at": iso_utc(self.created_at),
         }

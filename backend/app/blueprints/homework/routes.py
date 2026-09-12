@@ -12,6 +12,7 @@ from app.services.homework_service import (
     attach_submission_file,
     change_homework_status,
     create_homework,
+    delete_draft_homework,
     get_visible_homework,
     grade_submission,
     list_student_homeworks,
@@ -72,6 +73,12 @@ def edit_homework(homework_id: int):
     return _handle(
         lambda: success(update_homework(homework_id, _user_id(), data), "作业更新成功")
     )
+
+
+@homework_bp.delete("/<int:homework_id>")
+@roles_required(UserRole.TEACHER)
+def remove_homework(homework_id: int):
+    return _handle(lambda: _delete_homework_response(homework_id))
 
 
 @homework_bp.post("/<int:homework_id>/attachment")
@@ -165,6 +172,11 @@ def grade_homework(submission_id: int):
 
 def _user_id() -> int:
     return int(get_jwt_identity())
+
+
+def _delete_homework_response(homework_id: int):
+    delete_draft_homework(homework_id, _user_id())
+    return success(message="作业删除成功")
 
 
 def _current_role() -> str:

@@ -28,7 +28,10 @@ class Homework(IdMixin, TimestampMixin, db.Model):
     status = db.Column(db.String(20), nullable=False, default="DRAFT", server_default="DRAFT")
     published_at = db.Column(db.DateTime)
 
-    course = db.relationship("Course", backref="homeworks")
+    course = db.relationship(
+        "Course",
+        backref=db.backref("homeworks", cascade="all, delete-orphan"),
+    )
     teacher = db.relationship("User", backref="created_homeworks")
 
 
@@ -58,5 +61,8 @@ class HomeworkSubmission(IdMixin, TimestampMixin, db.Model):
     submit_time = db.Column(db.DateTime)
     graded_time = db.Column(db.DateTime)
 
-    homework = db.relationship("Homework", backref="submissions")
+    homework = db.relationship(
+        "Homework",
+        backref=db.backref("submissions", cascade="all, delete-orphan"),
+    )
     student = db.relationship("User", backref="homework_submissions")

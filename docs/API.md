@@ -18,6 +18,8 @@ Authorization: Bearer <access_token>
 }
 ```
 
+响应中的日期时间使用 UTC ISO 8601 格式并带 `Z`，例如 `2026-09-12T08:30:00Z`。请求中的日期时间可以携带时区偏移，后端会统一换算为 UTC。
+
 ## 系统与认证
 
 | 方法 | 路径 | 权限 | 用途 |
@@ -108,6 +110,7 @@ Authorization: Bearer <access_token>
 | POST | `/api/homeworks` | 教师 | 创建作业草稿 |
 | GET | `/api/homeworks/{id}` | 课程成员/课程教师 | 作业详情 |
 | PUT | `/api/homeworks/{id}` | 课程教师 | 编辑草稿作业 |
+| DELETE | `/api/homeworks/{id}` | 课程教师 | 删除作业草稿并清理附件目录 |
 | POST | `/api/homeworks/{id}/attachment` | 课程教师 | 上传或替换草稿作业附件 |
 | POST | `/api/homeworks/{id}/publish` | 课程教师 | 发布作业 |
 | POST | `/api/homeworks/{id}/close` | 课程教师 | 关闭作业 |
@@ -127,6 +130,7 @@ Authorization: Bearer <access_token>
 | POST | `/api/exams` | 教师 | 创建测验草稿 |
 | GET | `/api/exams/{id}` | 课程成员/课程教师 | 测验详情 |
 | PUT | `/api/exams/{id}` | 课程教师 | 编辑草稿测验 |
+| DELETE | `/api/exams/{id}` | 课程教师 | 删除测验草稿及其试题 |
 | POST | `/api/exams/{id}/questions` | 课程教师 | 添加单选题或判断题 |
 | PUT | `/api/exams/questions/{id}` | 课程教师 | 更新草稿试题 |
 | DELETE | `/api/exams/questions/{id}` | 课程教师 | 删除草稿试题 |

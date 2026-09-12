@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.constants import CourseStatus, PublishStatus, UserRole
+from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Course, CourseStudent, Exam, ExamAnswer, ExamQuestion, ExamRecord
 
@@ -43,6 +44,13 @@ def update_exam(exam_id: int, teacher_id: int, data: dict) -> dict:
     _validate_time_window(exam)
     db.session.commit()
     return serialize_exam(_get_exam(exam.id), reveal_answers=True)
+
+
+def delete_draft_exam(exam_id: int, teacher_id: int) -> None:
+    exam = _teacher_exam(exam_id, teacher_id)
+    _require_draft(exam)
+    db.session.delete(exam)
+    db.session.commit()
 
 
 def add_question(exam_id: int, teacher_id: int, data: dict) -> dict:
@@ -167,7 +175,7 @@ def submit_exam(exam_id: int, student_id: int, submitted_answers: dict[int, str]
     _ensure_student_access(exam, student_id)
     if exam.status != PublishStatus.PUBLISHED.value:
         raise ExamConflict("测验已关闭，不能继续提交")
-    record = _student_record(exam.id, student_id)
+    record = _student_record(exam.id, student_id, for_update=True)
     if record is None:
         raise ExamConflict("请先开始测验")
     if record.status == "SUBMITTED":
@@ -206,7 +214,11 @@ def submit_exam(exam_id: int, student_id: int, submitted_answers: dict[int, str]
     record.status = "SUBMITTED"
     record.submit_time = now
     record.duration_seconds = max(0, int((now - record.started_at).total_seconds()))
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        raise ExamConflict("测验已经提交或提交发生冲突") from exc
     return serialize_record(_get_record(record.id), include_answers=True)
 
 
@@ -366,13 +378,18 @@ def _get_record(record_id: int) -> ExamRecord:
     return record
 
 
-def _student_record(exam_id: int, student_id: int) -> ExamRecord | None:
-    return db.session.scalar(
-        _record_query().where(
-            ExamRecord.exam_id == exam_id,
-            ExamRecord.student_id == student_id,
-        )
+def _student_record(
+    exam_id: int,
+    student_id: int,
+    for_update: bool = False,
+) -> ExamRecord | None:
+    statement = _record_query().where(
+        ExamRecord.exam_id == exam_id,
+        ExamRecord.student_id == student_id,
     )
+    if for_update:
+        statement = statement.with_for_update()
+    return db.session.scalar(statement)
 
 
 def _teacher_exam(exam_id: int, teacher_id: int) -> Exam:
@@ -450,9 +467,9 @@ def _availability(exam: Exam) -> str:
     return "AVAILABLE" if exam.status == PublishStatus.PUBLISHED.value else "DRAFT"
 
 
-def _iso(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+def _iso(value) -> str | None:
+    return iso_utc(value)
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+def _now():
+    return utc_now()

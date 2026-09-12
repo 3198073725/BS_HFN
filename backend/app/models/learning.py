@@ -28,7 +28,10 @@ class LearningRecord(IdMixin, TimestampMixin, db.Model):
     last_watch_time = db.Column(db.DateTime)
 
     student = db.relationship("User", backref="learning_records")
-    video = db.relationship("Video", backref="learning_records")
+    video = db.relationship(
+        "Video",
+        backref=db.backref("learning_records", cascade="all, delete-orphan"),
+    )
 
 
 class VideoNote(IdMixin, TimestampMixin, db.Model):
@@ -52,4 +55,7 @@ class VideoNote(IdMixin, TimestampMixin, db.Model):
     content = db.Column(db.Text, nullable=False)
 
     student = db.relationship("User", backref="video_notes")
-    video = db.relationship("Video", backref="notes")
+    video = db.relationship(
+        "Video",
+        backref=db.backref("notes", cascade="all, delete-orphan"),
+    )

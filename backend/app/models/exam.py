@@ -31,7 +31,10 @@ class Exam(IdMixin, TimestampMixin, db.Model):
     time_limit_minutes = db.Column(db.Integer)
     published_at = db.Column(db.DateTime)
 
-    course = db.relationship("Course", backref="exams")
+    course = db.relationship(
+        "Course",
+        backref=db.backref("exams", cascade="all, delete-orphan"),
+    )
     teacher = db.relationship("User", backref="created_exams")
 
 
@@ -87,7 +90,10 @@ class ExamRecord(IdMixin, db.Model):
     duration_seconds = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.now())
 
-    exam = db.relationship("Exam", backref="records")
+    exam = db.relationship(
+        "Exam",
+        backref=db.backref("records", cascade="all, delete-orphan"),
+    )
     student = db.relationship("User", backref="exam_records")
 
 
@@ -113,5 +119,11 @@ class ExamAnswer(IdMixin, db.Model):
     score = db.Column(db.Numeric(5, 2), nullable=False, default=0, server_default="0")
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.now())
 
-    record = db.relationship("ExamRecord", backref="answers")
-    question = db.relationship("ExamQuestion", backref="student_answers")
+    record = db.relationship(
+        "ExamRecord",
+        backref=db.backref("answers", cascade="all, delete-orphan"),
+    )
+    question = db.relationship(
+        "ExamQuestion",
+        backref=db.backref("student_answers", cascade="all, delete-orphan"),
+    )

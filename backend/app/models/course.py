@@ -55,7 +55,10 @@ class CourseStudent(IdMixin, db.Model):
     join_time = db.Column(db.DateTime, nullable=False, server_default=func.now())
     status = db.Column(db.Boolean, nullable=False, default=True, server_default="1")
 
-    course = db.relationship("Course", backref="student_links")
+    course = db.relationship(
+        "Course",
+        backref=db.backref("student_links", cascade="all, delete-orphan"),
+    )
     student = db.relationship("User", backref="joined_course_links")
 
 
@@ -79,4 +82,7 @@ class Favorite(IdMixin, db.Model):
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.now())
 
     student = db.relationship("User", backref="favorites")
-    course = db.relationship("Course", backref="favorite_links")
+    course = db.relationship(
+        "Course",
+        backref=db.backref("favorite_links", cascade="all, delete-orphan"),
+    )

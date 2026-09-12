@@ -1,10 +1,9 @@
-from datetime import datetime, timezone
-
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.constants import CourseStatus, LearningStatus, VideoStatus
+from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Chapter, Course, CourseStudent, Favorite, LearningRecord, Video, VideoNote
 from .course_service import serialize_course
@@ -121,7 +120,7 @@ def list_joined_courses(student_id: int) -> list[dict]:
     result = []
     for link in links:
         item = serialize_course(link.course)
-        item["join_time"] = link.join_time.isoformat() if link.join_time else None
+        item["join_time"] = iso_utc(link.join_time)
         item["learning_progress"] = progress_by_course.get(link.course_id, 0.0)
         result.append(item)
     return result
@@ -170,7 +169,7 @@ def update_progress(student_id: int, video_id: int, current_time: float, watch_d
         db.select(LearningRecord).where(
             LearningRecord.student_id == student_id,
             LearningRecord.video_id == video_id,
-        )
+        ).with_for_update()
     )
     if record is None:
         record = LearningRecord(student_id=student_id, video_id=video_id)
@@ -267,7 +266,7 @@ def serialize_progress(record: LearningRecord) -> dict:
         "watch_duration": int(record.watch_duration or 0),
         "progress": float(record.progress or 0),
         "status": record.status,
-        "last_watch_time": record.last_watch_time.isoformat() if record.last_watch_time else None,
+        "last_watch_time": iso_utc(record.last_watch_time),
     }
 
 
@@ -278,15 +277,15 @@ def serialize_note(note: VideoNote) -> dict:
         "video_id": note.video_id,
         "video_time": float(note.video_time or 0),
         "content": note.content,
-        "created_at": note.created_at.isoformat() if note.created_at else None,
-        "updated_at": note.updated_at.isoformat() if note.updated_at else None,
+        "created_at": iso_utc(note.created_at),
+        "updated_at": iso_utc(note.updated_at),
     }
 
 
 def serialize_favorite(favorite: Favorite) -> dict:
     payload = serialize_course(favorite.course) if favorite.course else {"id": favorite.course_id}
     payload["favorite_id"] = favorite.id
-    payload["favorited_at"] = favorite.created_at.isoformat() if favorite.created_at else None
+    payload["favorited_at"] = iso_utc(favorite.created_at)
     return payload
 
 
@@ -340,5 +339,5 @@ def _course_progress(student_id: int) -> dict[int, float]:
     return {course_id: round(float(progress or 0), 2) for course_id, progress in rows}
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+def _now():
+    return utc_now()

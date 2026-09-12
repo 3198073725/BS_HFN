@@ -54,7 +54,11 @@ class BaseConfig:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     SQLALCHEMY_DATABASE_URI = _database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,
+        "connect_args": {"init_command": "SET time_zone = '+00:00'"},
+    }
 
     REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
     CELERY_BROKER_URL = REDIS_URL
@@ -84,6 +88,7 @@ class TestingConfig(BaseConfig):
     TESTING = True
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_ENGINE_OPTIONS = {}
     CELERY_ENABLED = False
     VIDEO_PROCESSING_ASYNC = False
 

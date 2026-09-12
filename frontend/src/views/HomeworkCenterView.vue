@@ -107,6 +107,19 @@ async function changeStatus(homework, action) {
   }
 }
 
+async function deleteHomework(homework) {
+  try {
+    await ElMessageBox.confirm('删除后草稿和已上传附件将无法恢复，确认继续？', '删除作业', {
+      type: 'warning',
+    })
+    await api.delete(`/homeworks/${homework.id}`)
+    homeworks.value = homeworks.value.filter((item) => item.id !== homework.id)
+    ElMessage.success('作业草稿已删除')
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '作业删除失败')
+  }
+}
+
 function openSubmission(homework) {
   selectedHomework.value = homework
   submissionForm.content = homework.submission?.content || ''
@@ -311,6 +324,14 @@ onMounted(load)
               @click="changeStatus(homework, 'publish')"
             >
               发布
+            </el-button>
+            <el-button
+              v-if="homework.status === 'DRAFT'"
+              type="danger"
+              plain
+              @click="deleteHomework(homework)"
+            >
+              删除
             </el-button>
             <el-button
               v-if="homework.status === 'PUBLISHED'"

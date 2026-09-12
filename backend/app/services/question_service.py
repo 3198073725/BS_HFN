@@ -2,6 +2,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.constants import QuestionStatus, UserRole
+from app.datetime_utils import iso_utc
 from app.extensions import db
 from app.models import Answer, Chapter, Course, Question, User, Video
 from .learning_service import get_student_video
@@ -124,16 +125,16 @@ def serialize_question(question: Question) -> dict:
         "title": question.title,
         "content": question.content,
         "status": question.status,
-        "created_at": question.created_at.isoformat() if question.created_at else None,
-        "updated_at": question.updated_at.isoformat() if question.updated_at else None,
+        "created_at": iso_utc(question.created_at),
+        "updated_at": iso_utc(question.updated_at),
         "answer": (
             {
                 "id": answer.id,
                 "teacher_id": answer.teacher_id,
                 "teacher_name": answer.teacher.real_name if answer.teacher else None,
                 "content": answer.content,
-                "created_at": answer.created_at.isoformat() if answer.created_at else None,
-                "updated_at": answer.updated_at.isoformat() if answer.updated_at else None,
+                "created_at": iso_utc(answer.created_at),
+                "updated_at": iso_utc(answer.updated_at),
             }
             if answer
             else None

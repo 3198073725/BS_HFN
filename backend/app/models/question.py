@@ -26,7 +26,10 @@ class Question(IdMixin, TimestampMixin, db.Model):
     status = db.Column(db.String(20), nullable=False, default="WAITING", server_default="WAITING")
 
     student = db.relationship("User", backref="questions")
-    video = db.relationship("Video", backref="questions")
+    video = db.relationship(
+        "Video",
+        backref=db.backref("questions", cascade="all, delete-orphan"),
+    )
 
 
 class Answer(IdMixin, TimestampMixin, db.Model):
@@ -48,5 +51,8 @@ class Answer(IdMixin, TimestampMixin, db.Model):
     )
     content = db.Column(db.Text, nullable=False)
 
-    question = db.relationship("Question", backref=db.backref("answer", uselist=False))
+    question = db.relationship(
+        "Question",
+        backref=db.backref("answer", uselist=False, cascade="all, delete-orphan"),
+    )
     teacher = db.relationship("User", backref="answers")

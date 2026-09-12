@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
-
 from flask_jwt_extended import create_access_token, create_refresh_token
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.constants import UserRole
+from app.datetime_utils import utc_now
 from app.extensions import db
 from app.models import User
 
@@ -69,7 +68,7 @@ def authenticate(account: str, password: str) -> User:
     if not user.status:
         raise AuthenticationError("账号已被禁用")
 
-    user.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    user.last_login_at = utc_now()
     db.session.commit()
     return user
 

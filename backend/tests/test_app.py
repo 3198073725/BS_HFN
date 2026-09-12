@@ -27,3 +27,4 @@ def test_expected_blueprints_are_registered(app):
 def test_testing_config_isolated_from_local_async_setting(app):
     assert app.config["CELERY_ENABLED"] is False
     assert app.config["VIDEO_PROCESSING_ASYNC"] is False
+    assert app.config["SQLALCHEMY_ENGINE_OPTIONS"] == {}

@@ -251,3 +251,31 @@ def test_homework_past_deadline_cannot_publish_or_submit(app, client):
         headers=bearer(student),
         json={"content": "已过截止时间"},
     ).status_code == 409
+
+
+def test_deleting_draft_homework_removes_attachment_directory(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    created = client.post(
+        "/api/homeworks",
+        headers=bearer(teacher),
+        json={
+            "course_id": context["course_id"],
+            "title": "可删除草稿",
+            "description": "测试附件清理",
+        },
+    )
+    homework_id = created.get_json()["data"]["id"]
+    attached = client.post(
+        f"/api/homeworks/{homework_id}/attachment",
+        headers=bearer(teacher),
+        data={"attachment": (BytesIO(b"draft"), "draft.txt")},
+        content_type="multipart/form-data",
+    )
+    relative_path = attached.get_json()["data"]["attachment"]
+    with app.app_context():
+        homework_dir = Path(app.config["MEDIA_ROOT"]) / "homework" / str(homework_id)
+        assert (Path(app.config["MEDIA_ROOT"]) / relative_path).is_file()
+    assert client.delete(f"/api/homeworks/{homework_id}", headers=bearer(teacher)).status_code == 200
+    assert not homework_dir.exists()
+    assert client.delete(f"/api/homeworks/{homework_id}", headers=bearer(teacher)).status_code == 404

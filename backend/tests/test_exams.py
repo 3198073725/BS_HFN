@@ -234,3 +234,28 @@ def test_exam_score_sum_and_time_window_validation(app, client):
         json={"start_time": later, "end_time": future},
     )
     assert invalid_window.status_code == 400
+
+
+def test_only_owner_can_delete_draft_exam_with_questions(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    other_teacher = login(client, context["other_teacher"])
+    exam = create_exam(client, teacher, context["course_id"])
+    exam_id = exam["id"]
+    question = client.post(
+        f"/api/exams/{exam_id}/questions",
+        headers=bearer(teacher),
+        json={
+            "question_type": "JUDGE",
+            "content": "待删除的草稿试题",
+            "correct_answer": "TRUE",
+            "score": 100,
+        },
+    )
+    assert question.status_code == 201
+
+    forbidden = client.delete(f"/api/exams/{exam_id}", headers=bearer(other_teacher))
+    assert forbidden.status_code == 403
+    deleted = client.delete(f"/api/exams/{exam_id}", headers=bearer(teacher))
+    assert deleted.status_code == 200
+    assert client.get(f"/api/exams/{exam_id}", headers=bearer(teacher)).status_code == 404

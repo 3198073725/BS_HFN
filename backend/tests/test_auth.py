@@ -24,6 +24,7 @@ def test_register_login_refresh_me_and_logout(client):
     payload = registered.get_json()["data"]
     assert payload["user"]["role"] == "STUDENT"
     assert "password_hash" not in payload["user"]
+    assert payload["user"]["created_at"].endswith("Z")
 
     duplicate = client.post("/api/auth/register", json=STUDENT)
     assert duplicate.status_code == 409
@@ -37,6 +38,7 @@ def test_register_login_refresh_me_and_logout(client):
     )
     assert logged_in.status_code == 200
     tokens = logged_in.get_json()["data"]
+    assert tokens["user"]["last_login_at"].endswith("Z")
 
     me = client.get("/api/users/me", headers=bearer(tokens["access_token"]))
     assert me.status_code == 200

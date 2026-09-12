@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import current_app
@@ -6,9 +5,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.constants import CourseStatus, PublishStatus, UserRole
+from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Course, CourseStudent, Homework, HomeworkSubmission
-from app.services.file_service import remove_media_file, save_homework_attachment
+from app.services.file_service import clear_homework_files, remove_media_file, save_homework_attachment
 
 
 class HomeworkNotFound(ValueError):
@@ -45,6 +45,18 @@ def update_homework(homework_id: int, teacher_id: int, data: dict) -> dict:
         setattr(homework, field, value)
     db.session.commit()
     return serialize_homework(_get_homework(homework.id))
+
+
+def delete_draft_homework(homework_id: int, teacher_id: int) -> None:
+    homework = _teacher_homework(homework_id, teacher_id)
+    if homework.status != PublishStatus.DRAFT.value:
+        raise HomeworkConflict("只有草稿作业可以删除")
+    db.session.delete(homework)
+    db.session.commit()
+    try:
+        clear_homework_files(Path(current_app.config["MEDIA_ROOT"]), homework_id)
+    except (OSError, ValueError):
+        current_app.logger.exception("作业 %s 的附件清理失败", homework_id)
 
 
 def change_homework_status(homework_id: int, teacher_id: int, status: PublishStatus) -> dict:
@@ -226,12 +238,12 @@ def serialize_homework(
         "title": homework.title,
         "description": homework.description,
         "attachment": homework.attachment,
-        "deadline": homework.deadline.isoformat() if homework.deadline else None,
+        "deadline": iso_utc(homework.deadline),
         "total_score": float(homework.total_score),
         "status": homework.status,
-        "published_at": homework.published_at.isoformat() if homework.published_at else None,
-        "created_at": homework.created_at.isoformat() if homework.created_at else None,
-        "updated_at": homework.updated_at.isoformat() if homework.updated_at else None,
+        "published_at": iso_utc(homework.published_at),
+        "created_at": iso_utc(homework.created_at),
+        "updated_at": iso_utc(homework.updated_at),
     }
     if student_id is not None:
         submission = next((item for item in homework.submissions if item.student_id == student_id), None)
@@ -252,8 +264,8 @@ def serialize_submission(submission: HomeworkSubmission) -> dict:
         "status": submission.status,
         "score": float(submission.score) if submission.score is not None else None,
         "teacher_comment": submission.teacher_comment,
-        "submit_time": submission.submit_time.isoformat() if submission.submit_time else None,
-        "graded_time": submission.graded_time.isoformat() if submission.graded_time else None,
+        "submit_time": iso_utc(submission.submit_time),
+        "graded_time": iso_utc(submission.graded_time),
     }
 
 
@@ -305,8 +317,8 @@ def _ensure_student_access(homework: Homework, student_id: int) -> None:
         raise HomeworkPermissionDenied("请先加入课程")
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+def _now():
+    return utc_now()
 
 
 def _mark_submitted(submission: HomeworkSubmission) -> None:

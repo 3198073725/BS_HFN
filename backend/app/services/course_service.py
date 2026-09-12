@@ -1,13 +1,13 @@
-from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import current_app
 from sqlalchemy.orm import selectinload
 
 from app.constants import CourseStatus, VideoStatus
+from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, Video
-from .file_service import remove_all_video_files
+from app.models import Chapter, Course, CourseCategory, Homework, Video
+from .file_service import clear_homework_files, remove_all_video_files
 
 
 class CourseNotFound(ValueError):
@@ -88,12 +88,17 @@ def update_course(course_id: int, teacher_id: int, data: dict) -> dict:
 def change_course_status(course_id: int, teacher_id: int, status: CourseStatus) -> dict:
     course = _owned_course(course_id, teacher_id)
     if status is CourseStatus.PUBLISHED:
+        if course.status not in (CourseStatus.DRAFT.value, CourseStatus.OFFLINE.value):
+            raise CourseStateError("只有草稿或已下线课程可以发布")
         chapter_count = db.session.scalar(
             db.select(db.func.count()).select_from(Chapter).where(Chapter.course_id == course.id)
         )
         if not chapter_count:
             raise CourseStateError("课程至少包含一个章节后才能发布")
-        course.published_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        course.published_at = utc_now()
+    elif status is CourseStatus.OFFLINE:
+        if course.status != CourseStatus.PUBLISHED.value:
+            raise CourseStateError("只有已发布课程可以下线")
     course.status = status.value
     db.session.commit()
     return serialize_course(_get_course(course.id))
@@ -108,9 +113,13 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
         .join(Chapter, Video.chapter_id == Chapter.id)
         .where(Chapter.course_id == course.id)
     ).all()
+    homework_ids = db.session.scalars(
+        db.select(Homework.id).where(Homework.course_id == course.id)
+    ).all()
     db.session.delete(course)
     db.session.commit()
     _cleanup_deleted_video_files(video_files)
+    _cleanup_deleted_homework_files(homework_ids)
 
 
 def create_chapter(course_id: int, teacher_id: int, data: dict) -> dict:
@@ -171,9 +180,9 @@ def serialize_course(
         "description": course.description,
         "detail": course.detail,
         "status": course.status,
-        "published_at": course.published_at.isoformat() if course.published_at else None,
-        "created_at": course.created_at.isoformat() if course.created_at else None,
-        "updated_at": course.updated_at.isoformat() if course.updated_at else None,
+        "published_at": iso_utc(course.published_at),
+        "created_at": iso_utc(course.created_at),
+        "updated_at": iso_utc(course.updated_at),
     }
     if include_chapters:
         payload["chapters"] = [
@@ -227,3 +236,12 @@ def _cleanup_deleted_video_files(video_files) -> None:
             remove_all_video_files(media_root, video_id, original_file)
         except (OSError, ValueError):
             current_app.logger.exception("视频 %s 的媒体文件清理失败", video_id)
+
+
+def _cleanup_deleted_homework_files(homework_ids) -> None:
+    media_root = Path(current_app.config["MEDIA_ROOT"])
+    for homework_id in homework_ids:
+        try:
+            clear_homework_files(media_root, homework_id)
+        except (OSError, ValueError):
+            current_app.logger.exception("作业 %s 的附件清理失败", homework_id)

@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash
 
 from app.constants import UserRole
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, User, Video
+from app.models import Chapter, Course, CourseCategory, Homework, User, Video
 
 
 def bearer(token):
@@ -106,6 +106,12 @@ def test_course_chapter_publish_and_permissions(app, client):
     assert teacher_detail.get_json()["data"]["chapters"][0]["videos"][0]["status"] == "FAILED"
     assert client.get(f"/api/videos/{failed_video_id}/status").status_code == 404
 
+    assert client.post(f"/api/courses/{course_id}/publish", headers=bearer(teacher)).status_code == 409
+    assert client.post(f"/api/courses/{course_id}/offline", headers=bearer(teacher)).status_code == 200
+    assert client.post(f"/api/courses/{course_id}/offline", headers=bearer(teacher)).status_code == 409
+    assert client.get("/api/courses").get_json()["data"] == []
+    assert client.post(f"/api/courses/{course_id}/publish", headers=bearer(teacher)).status_code == 200
+
 
 def test_deleting_chapter_cleans_video_files(app, client):
     with app.app_context():
@@ -153,3 +159,38 @@ def test_deleting_chapter_cleans_video_files(app, client):
     assert not processed.exists()
     assert not hls.exists()
     assert not cover.exists()
+
+
+def test_deleting_draft_course_cleans_homework_attachments(app, client):
+    with app.app_context():
+        category = CourseCategory(name="作业附件清理分类")
+        teacher = create_user("attachment_teacher", "Teach123!", UserRole.TEACHER.value, "TA001")
+        db.session.add(category)
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="待删除草稿课程")
+        db.session.add(course)
+        db.session.flush()
+        homework = Homework(
+            course_id=course.id,
+            teacher_id=teacher.id,
+            title="待清理作业",
+            description="附件应随课程清理",
+            attachment=f"homework/pending/teacher/file.pdf",
+        )
+        db.session.add(homework)
+        db.session.flush()
+        homework_dir = Path(app.config["MEDIA_ROOT"]) / "homework" / str(homework.id)
+        attachment = homework_dir / "teacher" / "file.pdf"
+        attachment.parent.mkdir(parents=True, exist_ok=True)
+        attachment.write_bytes(b"temporary homework attachment")
+        homework.attachment = attachment.relative_to(app.config["MEDIA_ROOT"]).as_posix()
+        db.session.commit()
+        course_id = course.id
+        homework_id = homework.id
+
+    teacher_token = login(client, "attachment_teacher", "Teach123!")
+    deleted = client.delete(f"/api/courses/{course_id}", headers=bearer(teacher_token))
+    assert deleted.status_code == 200
+    assert not homework_dir.exists()
+    with app.app_context():
+        assert db.session.get(Homework, homework_id) is None

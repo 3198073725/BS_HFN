@@ -105,6 +105,10 @@ def remove_all_video_files(media_root: Path, video_id: int, original_file: str |
     remove_file(original_path)
 
 
+def clear_homework_files(media_root: Path, homework_id: int) -> None:
+    _remove_tree_within(media_root / "homework" / str(homework_id), media_root)
+
+
 def _remove_tree_within(path: Path, allowed_root: Path) -> None:
     resolved_root = allowed_root.resolve()
     resolved_path = path.resolve()

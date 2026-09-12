@@ -143,6 +143,21 @@ async function removeQuestion(question) {
   }
 }
 
+async function deleteExam(exam) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除测验草稿“${exam.title}”？试题也会一并删除。`,
+      '删除测验草稿',
+      { type: 'warning' },
+    )
+    await api.delete(`/exams/${exam.id}`)
+    exams.value = exams.value.filter((item) => item.id !== exam.id)
+    ElMessage.success('测验草稿已删除')
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '测验删除失败')
+  }
+}
+
 async function changeStatus(exam, action) {
   const publishing = action === 'publish'
   try {
@@ -357,6 +372,9 @@ onBeforeUnmount(stopCountdown)
           <template v-if="isTeacher">
             <el-button v-if="exam.status === 'DRAFT'" type="primary" @click="openQuestionManager(exam)">
               试题管理
+            </el-button>
+            <el-button v-if="exam.status === 'DRAFT'" type="danger" plain @click="deleteExam(exam)">
+              删除草稿
             </el-button>
             <el-button v-if="exam.status === 'PUBLISHED'" type="warning" plain @click="changeStatus(exam, 'close')">
               关闭

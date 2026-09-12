@@ -11,6 +11,7 @@ from app.services.exam_service import (
     add_question,
     change_exam_status,
     create_exam,
+    delete_draft_exam,
     delete_question,
     get_visible_exam,
     get_visible_record,
@@ -63,6 +64,12 @@ def edit_exam(exam_id: int):
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(update_exam(exam_id, _user_id(), data), "测验更新成功"))
+
+
+@exams_bp.delete("/<int:exam_id>")
+@roles_required(UserRole.TEACHER)
+def remove_exam(exam_id: int):
+    return _handle(lambda: _delete_exam_response(exam_id))
 
 
 @exams_bp.post("/<int:exam_id>/questions")
@@ -146,6 +153,11 @@ def exam_record_detail(record_id: int):
 def _delete_question_response(question_id: int):
     delete_question(question_id, _user_id())
     return success(message="试题删除成功")
+
+
+def _delete_exam_response(exam_id: int):
+    delete_draft_exam(exam_id, _user_id())
+    return success(message="测验草稿删除成功")
 
 
 def _user_id() -> int:
