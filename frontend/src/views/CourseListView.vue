@@ -31,30 +31,54 @@ onMounted(load)
 </script>
 
 <template>
-  <section>
+  <section class="page-section">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">COURSE</p>
-        <h1>已发布课程</h1>
+        <p class="eyebrow">COURSE CENTER</p>
+        <h1>发现适合你的课程</h1>
+        <p>浏览已发布课程，按分类快速筛选学习内容。</p>
       </div>
-      <el-select v-model="categoryId" clearable placeholder="全部分类" style="width: 180px">
-        <el-option v-for="item in categories" :key="item.id" :label="item.name" :value="item.id" />
-      </el-select>
+      <div class="filter-control">
+        <span>课程分类</span>
+        <el-select v-model="categoryId" clearable placeholder="全部分类">
+          <el-option v-for="item in categories" :key="item.id" :label="item.name" :value="item.id" />
+        </el-select>
+      </div>
     </div>
 
-    <el-table v-if="courses.length" v-loading="loading" :data="courses" stripe>
-      <el-table-column prop="name" label="课程名称" min-width="220">
-        <template #default="scope">
-          <RouterLink class="table-link" :to="`/courses/${scope.row.id}`">{{ scope.row.name }}</RouterLink>
-        </template>
-      </el-table-column>
-      <el-table-column prop="category_name" label="分类" width="140" />
-      <el-table-column prop="teacher_name" label="授课教师" width="150" />
-      <el-table-column prop="description" label="简介" min-width="260" show-overflow-tooltip />
-      <el-table-column label="状态" width="110">
-        <template #default><el-tag type="success">已发布</el-tag></template>
-      </el-table-column>
-    </el-table>
-    <el-empty v-else v-loading="loading" description="暂无已发布课程" />
+    <div class="course-result-meta">
+      <span>{{ loading ? '正在加载课程…' : `共 ${courses.length} 门课程` }}</span>
+      <i></i>
+    </div>
+
+    <div class="course-grid" v-loading="loading">
+      <article
+        v-for="(course, index) in courses"
+        :key="course.id"
+        class="course-card"
+        :class="`course-accent-${index % 3}`"
+      >
+        <div class="course-cover">
+          <span class="course-category">{{ course.category_name || '通识课程' }}</span>
+          <span class="course-monogram">{{ course.name?.slice(0, 1) || '课' }}</span>
+          <span class="course-state"><i></i> 已发布</span>
+        </div>
+        <div class="course-card-body">
+          <p class="course-teacher">授课教师 · {{ course.teacher_name || '待更新' }}</p>
+          <h2>
+            <RouterLink :to="`/courses/${course.id}`">{{ course.name }}</RouterLink>
+          </h2>
+          <p class="course-description">{{ course.description || '教师暂未填写课程简介。' }}</p>
+          <RouterLink class="course-open" :to="`/courses/${course.id}`">
+            查看课程 <span aria-hidden="true">→</span>
+          </RouterLink>
+        </div>
+      </article>
+      <el-empty
+        v-if="!loading && !courses.length"
+        class="surface-card course-empty"
+        description="该分类下暂无已发布课程"
+      />
+    </div>
   </section>
 </template>

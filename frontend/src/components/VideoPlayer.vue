@@ -1,5 +1,5 @@
 <script setup>
-import Hls from 'hls.js'
+import Hls from 'hls.js/light'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 
