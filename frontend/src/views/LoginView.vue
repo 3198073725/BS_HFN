@@ -41,48 +41,36 @@ async function submit() {
 </script>
 
 <template>
-  <main class="auth-page">
-    <section class="auth-shell" aria-labelledby="login-title">
-      <aside class="auth-showcase">
-        <RouterLink class="auth-brand auth-brand-light" to="/" aria-label="返回课后辅导系统首页">
-          <span class="brand-mark">辅</span>
-          <span>
-            <strong>课后辅导</strong>
-            <small>BS_HFN LEARNING</small>
-          </span>
+  <main class="account-page">
+    <section class="account-shell" aria-labelledby="login-title">
+      <aside class="account-aside">
+        <RouterLink class="account-brand" to="/" aria-label="返回课后辅导教学平台首页">
+          <span class="account-brand-mark">课</span>
+          <span><strong>课后辅导教学平台</strong><small>教学与学习管理</small></span>
         </RouterLink>
-
-        <div class="showcase-content">
-          <span class="showcase-badge">学生成长空间</span>
-          <h2>把课堂之外的时间，<br />变成持续进步。</h2>
-          <p>课程、章节与视频学习集中在一个清晰的空间，让每一次复习都更有方向。</p>
-          <div class="showcase-points" aria-label="平台特点">
-            <div><span>01</span><p><strong>课程有序</strong><small>按分类与章节快速定位内容</small></p></div>
-            <div><span>02</span><p><strong>视频流畅</strong><small>FFmpeg 与 HLS 支持多端播放</small></p></div>
-            <div><span>03</span><p><strong>进度清晰</strong><small>为后续学习闭环打好基础</small></p></div>
-          </div>
+        <div class="account-aside-content">
+          <p>统一身份认证</p>
+          <h2>登录一个账号，<br />使用对应的教学服务</h2>
+          <ul>
+            <li><strong>学生</strong><span>课程学习、作业、测验与班级信息</span></li>
+            <li><strong>教师</strong><span>课程、班级和教学活动管理</span></li>
+            <li><strong>管理员</strong><span>账号、分类与系统公告管理</span></li>
+          </ul>
         </div>
-        <p class="showcase-footer">WEB · FFMPEG · HLS</p>
+        <p class="account-aside-footer">请妥善保管账号与登录密码</p>
       </aside>
 
-      <section class="auth-panel">
-        <RouterLink class="auth-brand auth-mobile-brand" to="/">
-          <span class="brand-mark">辅</span>
-          <span><strong>课后辅导</strong><small>BS_HFN LEARNING</small></span>
+      <section class="account-panel">
+        <RouterLink class="account-brand account-mobile-brand" to="/">
+          <span class="account-brand-mark">课</span>
+          <span><strong>课后辅导教学平台</strong><small>教学与学习管理</small></span>
         </RouterLink>
-        <div class="auth-form-wrap">
-          <p class="eyebrow">WELCOME BACK</p>
+        <div class="account-form-wrap">
+          <p class="account-section-label">账号登录</p>
           <h1 id="login-title">欢迎回来</h1>
-          <p class="auth-intro">登录后继续你的课程学习或教学管理。</p>
+          <p class="account-intro">请输入平台账号和密码，系统将按身份进入相应功能页面。</p>
 
-          <el-form
-            ref="formRef"
-            class="auth-form"
-            :model="form"
-            :rules="rules"
-            label-position="top"
-            @submit.prevent="submit"
-          >
+          <el-form ref="formRef" class="account-form" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
             <el-form-item label="账号" prop="account">
               <el-input
                 v-model.trim="form.account"
@@ -105,23 +93,15 @@ async function submit() {
                 placeholder="请输入登录密码"
               />
             </el-form-item>
-            <el-button
-              type="primary"
-              native-type="submit"
-              size="large"
-              class="full-width auth-submit"
-              :loading="submitting"
-            >
+            <el-button type="primary" native-type="submit" size="large" class="full-width account-submit" :loading="submitting">
               {{ submitting ? '正在登录' : '登录' }}
             </el-button>
           </el-form>
 
-          <div class="auth-divider"><span>首次使用？</span></div>
-          <p class="auth-secondary">
-            还没有学生账号？
-            <RouterLink to="/register">立即注册</RouterLink>
-          </p>
-          <RouterLink class="back-home-link" to="/">← 返回首页浏览公开课程</RouterLink>
+          <div class="account-links">
+            <p>还没有学生账号？<RouterLink to="/register">学生注册</RouterLink></p>
+            <RouterLink to="/">返回平台首页</RouterLink>
+          </div>
         </div>
       </section>
     </section>

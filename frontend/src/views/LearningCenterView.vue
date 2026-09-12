@@ -63,7 +63,7 @@ onMounted(load)
   <section class="page-section learning-center" v-loading="loading">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">MY LEARNING</p>
+        <p class="eyebrow">学习中心</p>
         <h1>我的学习</h1>
         <p>继续上次的进度，集中查看已加入和收藏的课程。</p>
       </div>

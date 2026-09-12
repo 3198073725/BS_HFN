@@ -38,7 +38,7 @@ onMounted(load)
   <section class="page-section">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">COURSE CENTER</p>
+        <p class="eyebrow">课程资源</p>
         <h1>发现适合你的课程</h1>
         <p>浏览已发布课程，按分类快速筛选学习内容。</p>
       </div>

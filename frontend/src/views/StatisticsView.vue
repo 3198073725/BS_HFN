@@ -65,7 +65,7 @@ onMounted(load)
   <section class="page-section statistics-page" v-loading="loading">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">LEARNING INSIGHTS</p>
+        <p class="eyebrow">数据概览</p>
         <h1>{{ isTeacher ? '教学数据' : '学习数据' }}</h1>
         <p>{{ isTeacher ? '数据直接由学习、作业和测验记录实时聚合。' : '回顾学习投入与课程任务完成情况。' }}</p>
       </div>

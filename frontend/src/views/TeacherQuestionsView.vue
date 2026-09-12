@@ -102,7 +102,7 @@ onMounted(load)
   <section class="page-section teacher-questions">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">QUESTION CENTER</p>
+        <p class="eyebrow">课程答疑</p>
         <h1>课程答疑</h1>
         <p>查看学生在视频时间点提出的问题，并给出正式回答。</p>
       </div>

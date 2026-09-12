@@ -11,7 +11,7 @@ const notices = ref([])
 async function loadNotices() {
   try {
     const response = await api.get('/notices')
-    notices.value = response.data.slice(0, 3)
+    notices.value = response.data.slice(0, 4)
   } catch {
     notices.value = []
   }
@@ -20,140 +20,81 @@ async function loadNotices() {
 function formatDate(value) {
   if (!value) return ''
   const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : value + 'Z'
-  return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date(normalized))
+  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date(normalized))
 }
 
 onMounted(loadNotices)
 </script>
 
 <template>
-  <div class="home-page">
-    <section class="home-hero">
-      <div class="hero-copy">
-        <span class="status-pill"><i></i> 课后学习空间已开放</span>
-        <p class="eyebrow">AFTER-CLASS LEARNING</p>
-        <h1>让知识在课堂之外，<span>继续发生。</span></h1>
-        <p class="hero-description">
-          从课程章节到高清视频，把分散的课后学习内容整理成一条清晰路径。学生更专注，教师更省心。
-        </p>
-        <div class="hero-actions">
-          <RouterLink class="action-link action-link-primary" to="/courses">
-            浏览课程
-            <span aria-hidden="true">→</span>
-          </RouterLink>
-          <RouterLink v-if="!auth.isAuthenticated" class="action-link action-link-ghost" to="/login">
-            登录学习空间
-          </RouterLink>
-          <RouterLink
-            v-else-if="auth.user?.role === 'TEACHER'"
-            class="action-link action-link-ghost"
-            to="/teacher/courses"
-          >
-            进入教学管理
-          </RouterLink>
-          <RouterLink
-            v-else-if="auth.user?.role === 'STUDENT'"
-            class="action-link action-link-ghost"
-            to="/learning"
-          >
-            继续我的学习
-          </RouterLink>
-          <RouterLink
-            v-else-if="auth.user?.role === 'ADMIN'"
-            class="action-link action-link-ghost"
-            to="/admin"
-          >
-            进入系统后台
-          </RouterLink>
-        </div>
-        <div class="hero-proof">
-          <div><strong>清晰</strong><span>课程与章节结构</span></div>
-          <div><strong>流畅</strong><span>HLS 视频播放</span></div>
-          <div><strong>可靠</strong><span>异步转码处理</span></div>
+  <div class="portal-home">
+    <section class="portal-welcome" aria-labelledby="portal-title">
+      <div class="portal-welcome-copy">
+        <p class="portal-kicker">课后辅导教学平台</p>
+        <h1 id="portal-title">欢迎使用课后辅导教学平台</h1>
+        <p>面向学生、教师和教学管理人员，提供课程学习、班级管理、作业测验与课程答疑等服务。</p>
+        <div class="portal-actions">
+          <RouterLink class="portal-button portal-button-primary" to="/courses">进入课程中心</RouterLink>
+          <RouterLink v-if="!auth.isAuthenticated" class="portal-button" to="/login">账号登录</RouterLink>
+          <RouterLink v-else-if="auth.user?.role === 'TEACHER'" class="portal-button" to="/teacher/courses">进入教学管理</RouterLink>
+          <RouterLink v-else-if="auth.user?.role === 'STUDENT'" class="portal-button" to="/learning">进入我的学习</RouterLink>
+          <RouterLink v-else-if="auth.user?.role === 'ADMIN'" class="portal-button" to="/admin">进入系统后台</RouterLink>
         </div>
       </div>
 
-      <div class="hero-visual" aria-label="课程学习界面示意">
-        <div class="visual-glow"></div>
-        <div class="learning-window">
-          <div class="window-top">
-            <div class="window-dots"><i></i><i></i><i></i></div>
-            <span>我的学习空间</span>
-            <b>BS</b>
-          </div>
-          <div class="window-body">
-            <div class="lesson-preview">
-              <span class="preview-label">正在学习</span>
-              <div class="play-button">▶</div>
-              <div class="preview-caption">
-                <small>第 03 章</small>
-                <strong>核心知识点精讲</strong>
-              </div>
-            </div>
-            <div class="lesson-list">
-              <div class="lesson-list-title"><strong>课程目录</strong><span>3 / 8</span></div>
-              <div class="lesson-row completed"><i>✓</i><p><strong>课程导学</strong><small>08:24</small></p></div>
-              <div class="lesson-row active"><i>▶</i><p><strong>核心知识点精讲</strong><small>18:42</small></p></div>
-              <div class="lesson-row"><i>03</i><p><strong>课后练习分析</strong><small>12:16</small></p></div>
-            </div>
-          </div>
-        </div>
-        <div class="floating-note">
-          <span>✓</span>
-          <p><strong>视频处理完成</strong><small>已生成 HLS 播放资源</small></p>
-        </div>
-      </div>
+      <aside class="portal-service-card" aria-label="平台服务说明">
+        <div class="portal-card-heading"><h2>平台服务</h2><span>正常运行</span></div>
+        <dl>
+          <div><dt>课程资源</dt><dd>按课程和章节统一管理</dd></div>
+          <div><dt>视频学习</dt><dd>支持电脑与移动端播放</dd></div>
+          <div><dt>教学活动</dt><dd>作业、测验与答疑集中处理</dd></div>
+        </dl>
+      </aside>
     </section>
 
-    <section v-if="notices.length" class="home-notices" aria-labelledby="notice-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">SYSTEM NOTICE</p>
-          <h2 id="notice-title">最新公告</h2>
+    <section class="portal-workbench" aria-label="平台常用内容">
+      <div class="portal-main-column">
+        <div class="portal-section-heading">
+          <div><h2>常用功能</h2><p>根据当前身份进入对应的学习或管理页面</p></div>
         </div>
-        <p>课程安排与系统服务的重要信息会在这里更新。</p>
-      </div>
-      <div class="home-notice-list">
-        <article v-for="notice in notices" :key="notice.id">
-          <div><span>公告</span><small>{{ formatDate(notice.publish_time) }}</small></div>
-          <h3>{{ notice.title }}</h3>
-          <p>{{ notice.content }}</p>
-        </article>
-      </div>
-    </section>
+        <div class="portal-shortcuts">
+          <RouterLink to="/courses"><span>课</span><div><strong>课程中心</strong><small>浏览已发布课程和章节内容</small></div></RouterLink>
+          <RouterLink v-if="auth.user?.role === 'STUDENT'" to="/learning"><span>学</span><div><strong>我的学习</strong><small>查看已加入课程与学习进度</small></div></RouterLink>
+          <RouterLink v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)" to="/classes">
+            <span>班</span><div><strong>{{ auth.user?.role === 'TEACHER' ? '班级管理' : '我的班级' }}</strong><small>查看班级与成员信息</small></div>
+          </RouterLink>
+          <RouterLink v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)" to="/homeworks">
+            <span>作</span><div><strong>{{ auth.user?.role === 'TEACHER' ? '作业管理' : '课程作业' }}</strong><small>发布、提交和批阅课程作业</small></div>
+          </RouterLink>
+          <RouterLink v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)" to="/exams">
+            <span>测</span><div><strong>{{ auth.user?.role === 'TEACHER' ? '测验管理' : '在线测验' }}</strong><small>组织测验并查看成绩</small></div>
+          </RouterLink>
+          <RouterLink v-if="auth.user?.role === 'TEACHER'" to="/teacher/questions"><span>答</span><div><strong>课程答疑</strong><small>集中回复学生课程问题</small></div></RouterLink>
+          <RouterLink v-if="auth.user?.role === 'ADMIN'" to="/admin"><span>管</span><div><strong>系统后台</strong><small>管理账号、分类和系统公告</small></div></RouterLink>
+          <RouterLink v-if="!auth.isAuthenticated" to="/register"><span>注</span><div><strong>学生注册</strong><small>创建学生账号并开始学习</small></div></RouterLink>
+          <RouterLink v-if="!auth.isAuthenticated" to="/login"><span>登</span><div><strong>统一登录</strong><small>学生、教师与管理员账号入口</small></div></RouterLink>
+        </div>
 
-    <section class="feature-section" aria-labelledby="feature-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">CORE EXPERIENCE</p>
-          <h2 id="feature-title">围绕学习本身，保持简单</h2>
+        <div class="portal-guide">
+          <div class="portal-section-heading"><div><h2>使用说明</h2><p>首次使用可按照以下顺序开始</p></div></div>
+          <ol>
+            <li><span>1</span><div><strong>登录平台</strong><p>使用用户名、邮箱、学号或工号登录。</p></div></li>
+            <li><span>2</span><div><strong>选择课程</strong><p>在课程中心查看课程简介和章节安排。</p></div></li>
+            <li><span>3</span><div><strong>完成学习任务</strong><p>按要求观看视频、提交作业并参加测验。</p></div></li>
+          </ol>
         </div>
-        <p>从课程视频到作业、测验与答疑，把课后学习需要的关键环节放在一个空间里。</p>
       </div>
-      <div class="feature-grid">
-        <article>
-          <span class="feature-index">01</span>
-          <div class="feature-icon">课</div>
-          <h3>课程结构清晰</h3>
-          <p>按分类浏览已发布课程，通过章节快速找到当前需要复习的内容。</p>
-          <RouterLink to="/courses">进入课程中心 →</RouterLink>
-        </article>
-        <article>
-          <span class="feature-index">02</span>
-          <div class="feature-icon feature-icon-teal">播</div>
-          <h3>多端视频播放</h3>
-          <p>使用 FFmpeg 转码并生成 HLS 资源，为桌面端与移动端提供稳定播放体验。</p>
-          <span class="feature-meta">FFMPEG + HLS</span>
-        </article>
-        <article>
-          <span class="feature-index">03</span>
-          <div class="feature-icon feature-icon-gold">教</div>
-          <h3>教学内容管理</h3>
-          <p>教师可以创建课程与章节、上传视频，并实时了解视频后台处理状态。</p>
-          <RouterLink v-if="auth.user?.role === 'TEACHER'" to="/teacher/courses">进入教学管理 →</RouterLink>
-          <span v-else class="feature-meta">TEACHER WORKSPACE</span>
-        </article>
-      </div>
+
+      <aside class="portal-notices" aria-labelledby="notice-title">
+        <div class="portal-card-heading"><h2 id="notice-title">通知公告</h2><span>{{ notices.length ? `共 ${notices.length} 条` : '暂无公告' }}</span></div>
+        <div v-if="notices.length" class="portal-notice-list">
+          <article v-for="notice in notices" :key="notice.id">
+            <time>{{ formatDate(notice.publish_time) }}</time>
+            <div><h3>{{ notice.title }}</h3><p>{{ notice.content }}</p></div>
+          </article>
+        </div>
+        <div v-else class="portal-notice-empty">当前没有新的系统公告</div>
+      </aside>
     </section>
   </div>
 </template>

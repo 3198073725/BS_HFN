@@ -244,7 +244,7 @@ onMounted(load)
   <section class="page-section admin-dashboard" v-loading="loading">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">SYSTEM CONSOLE</p>
+        <p class="eyebrow">系统管理</p>
         <h1>系统后台</h1>
         <p>管理教师与学生账号、系统公告，并查看核心业务规模。</p>
       </div>

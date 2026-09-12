@@ -358,7 +358,7 @@ onBeforeUnmount(() => {
         <section class="player-panel">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">NOW PLAYING</p>
+              <p class="eyebrow">当前播放</p>
               <h2>{{ selectedVideo?.title || '选择一个视频开始学习' }}</h2>
             </div>
             <div class="player-status-group">
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
         <aside class="chapter-panel">
           <div class="panel-heading compact">
             <div>
-              <p class="eyebrow">CONTENTS</p>
+              <p class="eyebrow">课程内容</p>
               <h2>课程章节</h2>
             </div>
             <span>{{ course.chapters.length }} 章</span>
@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
         <div v-if="studyTab === 'notes'" class="study-tab-content">
           <div class="study-composer">
             <div>
-              <p class="eyebrow">QUICK NOTE</p>
+              <p class="eyebrow">学习笔记</p>
               <h3>记录当前时间点</h3>
               <small>笔记将定位到 {{ formatTime(currentTime) }}</small>
             </div>
@@ -471,7 +471,7 @@ onBeforeUnmount(() => {
         <div v-else class="study-tab-content">
           <div class="study-composer question-composer">
             <div>
-              <p class="eyebrow">ASK TEACHER</p>
+              <p class="eyebrow">课程提问</p>
               <h3>在 {{ formatTime(currentTime) }} 向教师提问</h3>
             </div>
             <el-input v-model="questionForm.title" maxlength="200" placeholder="用一句话概括问题" />

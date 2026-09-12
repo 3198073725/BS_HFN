@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
   <section class="page-section classroom-page" v-loading="loading">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">CLASSROOM ROSTER</p>
+        <p class="eyebrow">班级与成员</p>
         <h1>{{ isTeacher ? '班级管理' : '我的班级' }}</h1>
         <p>
           {{ isTeacher ? '集中维护班级和学生名册，让后续教学管理更清晰。' : '查看你已经加入的班级和负责教师。' }}
@@ -223,7 +223,7 @@ onBeforeUnmount(() => {
           <div class="classroom-title-group">
             <span class="classroom-mark">{{ String(index + 1).padStart(2, '0') }}</span>
             <div>
-              <p>{{ isTeacher ? 'TEACHING CLASS' : 'MY CLASS' }}</p>
+              <p>{{ isTeacher ? '教学班级' : '所在班级' }}</p>
               <h2>{{ classroom.name }}</h2>
             </div>
           </div>

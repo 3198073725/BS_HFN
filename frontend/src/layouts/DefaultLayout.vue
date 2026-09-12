@@ -49,11 +49,11 @@ onMounted(revealActiveNavigation)
   <el-container class="app-shell">
     <el-header class="app-header">
       <div class="header-inner">
-        <RouterLink class="site-brand" to="/" aria-label="课后辅导系统首页">
-          <span class="brand-mark">辅</span>
+        <RouterLink class="site-brand" to="/" aria-label="课后辅导教学平台首页">
+          <span class="brand-mark">课</span>
           <span class="site-brand-copy">
-            <strong>课后辅导</strong>
-            <small>BS_HFN</small>
+            <strong>课后辅导教学平台</strong>
+            <small>教学与学习管理</small>
           </span>
         </RouterLink>
 
@@ -146,8 +146,8 @@ onMounted(revealActiveNavigation)
     </el-main>
     <footer class="app-footer">
       <div>
-        <span>BS_HFN 课后辅导系统</span>
-        <span>Web · FFmpeg · HLS</span>
+        <span>课后辅导教学平台</span>
+        <span>课程学习与教学管理服务</span>
       </div>
     </footer>
   </el-container>

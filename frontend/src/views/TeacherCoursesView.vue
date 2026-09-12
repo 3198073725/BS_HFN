@@ -318,7 +318,7 @@ onBeforeUnmount(() => {
   <section class="page-section teacher-page">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">TEACHER WORKSPACE</p>
+        <p class="eyebrow">教师工作台</p>
         <h1>教学管理</h1>
         <p>创建课程、组织章节并上传视频；已发布课程下线后可继续编辑。</p>
       </div>

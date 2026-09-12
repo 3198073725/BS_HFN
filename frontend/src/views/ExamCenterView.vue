@@ -395,7 +395,7 @@ onBeforeUnmount(stopCountdown)
   <section class="page-section exam-center" v-loading="loading">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">QUIZ CENTER</p>
+        <p class="eyebrow">在线测验</p>
         <h1>{{ isTeacher ? '测验管理' : '在线测验' }}</h1>
         <p>{{ isTeacher ? '编排客观题、发布测验并查看学生成绩。' : '完成课程测验，提交后即时查看自动评分结果。' }}</p>
       </div>

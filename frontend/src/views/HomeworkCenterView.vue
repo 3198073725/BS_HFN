@@ -318,7 +318,7 @@ onMounted(load)
   <section class="page-section homework-center" v-loading="loading">
     <div class="page-heading">
       <div>
-        <p class="eyebrow">ASSIGNMENT HUB</p>
+        <p class="eyebrow">课程作业</p>
         <h1>{{ isTeacher ? '作业管理' : '课程作业' }}</h1>
         <p>{{ isTeacher ? '发布课程任务，集中查看提交并完成批改。' : '按时完成课程任务，随时查看成绩与教师评语。' }}</p>
       </div>

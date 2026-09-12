@@ -1940,3 +1940,245 @@
     font-size: 22px;
   }
 }
+
+/* Practical academic portal visual system: business pages */
+.hero-small-button,
+.study-tabs > button,
+.time-anchor,
+.progress-chip,
+.question-status,
+.homework-state,
+.exam-state,
+.account-state,
+.notice-state,
+.classroom-student-state,
+.classroom-facts span {
+  border-radius: 3px;
+}
+
+.hero-small-button:hover:not(:disabled) {
+  transform: none;
+}
+
+.study-workspace,
+.study-composer,
+.study-item,
+.learning-summary article,
+.learning-course-card,
+.teacher-question-card,
+.homework-summary article,
+.homework-card,
+.exam-card,
+.exam-question-list,
+.question-create-panel,
+.statistics-grid article,
+.admin-metrics article,
+.notice-management,
+.home-notice-list article,
+.classroom-overview,
+.classroom-card {
+  border-color: #d8dfe6;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.study-tabs {
+  min-height: 58px;
+  background: #fafbfc;
+}
+
+.study-tabs > button {
+  min-height: 34px;
+  font-weight: 600;
+}
+
+.study-tabs > button:hover,
+.study-tabs > button.active {
+  background: #eaf0f5;
+  color: #28577f;
+}
+
+.study-composer {
+  background: #f6f8fa;
+}
+
+.learning-summary article,
+.homework-summary article,
+.statistics-grid article,
+.admin-metrics article {
+  min-height: 96px;
+  padding: 18px;
+}
+
+.learning-summary strong,
+.homework-summary strong {
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.learning-course-card {
+  padding: 18px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.learning-card-mark,
+.favorite-card .learning-card-mark {
+  min-height: 132px;
+  border: 1px solid #c5d1db;
+  border-radius: 4px;
+  background: #e7edf2;
+  color: #28577f;
+  font-size: 26px;
+}
+
+.learning-card-meta {
+  color: #536b7f;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.learning-course-card p {
+  font-size: 12px;
+}
+
+.progress-line > div,
+.progress-line i {
+  border-radius: 2px;
+}
+
+.progress-line i {
+  background: #4f799b;
+}
+
+.teacher-question-card,
+.homework-card,
+.exam-card {
+  padding: 20px;
+}
+
+.homework-card h2,
+.exam-card h2 {
+  font-size: 17px;
+}
+
+.homework-card > p,
+.exam-card > p {
+  font-size: 12px;
+}
+
+.submission-result,
+.exam-score-strip,
+.score-check,
+.answer-box,
+.grade-panel {
+  border-radius: 4px;
+}
+
+.result-score {
+  border-radius: 4px;
+  background: #28577f;
+}
+
+.result-score strong {
+  font-size: 36px;
+}
+
+.statistics-grid strong,
+.admin-metrics strong {
+  font-size: 25px;
+}
+
+.notice-management-heading,
+.classroom-member-toolbar {
+  background: #fafbfc;
+}
+
+.classroom-overview {
+  grid-template-columns: 180px 180px minmax(0, 1fr);
+  background: #fff;
+}
+
+.classroom-overview article {
+  min-height: 112px;
+  padding: 20px;
+  border-right-color: #dce2e8;
+}
+
+.classroom-overview span,
+.classroom-overview small {
+  color: #70808e;
+  font-size: 11px;
+}
+
+.classroom-overview strong {
+  margin-top: 10px;
+  color: #28577f;
+  font-size: 27px;
+}
+
+.classroom-overview > p {
+  padding: 20px 24px;
+  color: #607284;
+  font-size: 12px;
+}
+
+.classroom-card-header {
+  padding-top: 19px;
+}
+
+.classroom-mark {
+  border: 1px solid #b8c8d5;
+  border-radius: 3px;
+  background: #eaf0f5;
+  color: #28577f;
+}
+
+.classroom-title-group p {
+  color: #60778b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.classroom-title-group h2 {
+  font-size: 17px;
+}
+
+.student-classroom-note {
+  border: 1px solid #dce2e8;
+  border-radius: 4px;
+  background: #f6f8fa;
+}
+
+.student-classroom-note > span {
+  border-radius: 3px;
+  background: #28577f;
+}
+
+@media (max-width: 820px) {
+  .classroom-overview > p {
+    border-top-color: #dce2e8;
+  }
+}
+
+@media (max-width: 560px) {
+  .learning-summary,
+  .homework-summary {
+    gap: 8px;
+  }
+
+  .learning-summary article,
+  .homework-summary article {
+    min-height: 86px;
+    padding: 14px;
+  }
+
+  .learning-course-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .learning-card-mark {
+    min-height: 112px;
+  }
+}
