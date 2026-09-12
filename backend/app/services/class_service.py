@@ -46,6 +46,71 @@ def list_course_options(teacher_id: int) -> list[dict]:
     ]
 
 
+def list_course_class_options(course_id: int, student_id: int) -> list[dict]:
+    course = db.session.get(Course, course_id)
+    if course is None or course.status != CourseStatus.PUBLISHED.value:
+        raise ClassNotFound("课程不存在或尚未发布")
+    classrooms = db.session.scalars(
+        db.select(TeachingClass)
+        .options(
+            selectinload(TeachingClass.teacher),
+            selectinload(TeachingClass.student_links),
+        )
+        .join(TeachingClassCourse, TeachingClassCourse.class_id == TeachingClass.id)
+        .where(TeachingClassCourse.course_id == course_id)
+        .order_by(TeachingClass.created_at.desc(), TeachingClass.id.desc())
+    ).all()
+    return [
+        {
+            "id": classroom.id,
+            "name": classroom.name,
+            "description": classroom.description,
+            "teacher_id": classroom.teacher_id,
+            "teacher_name": classroom.teacher.real_name,
+            "member_count": len(classroom.student_links),
+            "joined": any(link.student_id == student_id for link in classroom.student_links),
+        }
+        for classroom in classrooms
+    ]
+
+
+def join_course_class(course_id: int, class_id: int, student_id: int) -> dict:
+    course = db.session.get(Course, course_id)
+    if course is None or course.status != CourseStatus.PUBLISHED.value:
+        raise ClassNotFound("课程不存在或尚未发布")
+    classroom = db.session.scalar(
+        db.select(TeachingClass)
+        .options(
+            selectinload(TeachingClass.teacher),
+            selectinload(TeachingClass.student_links),
+            selectinload(TeachingClass.course_links),
+        )
+        .join(TeachingClassCourse, TeachingClassCourse.class_id == TeachingClass.id)
+        .where(
+            TeachingClass.id == class_id,
+            TeachingClassCourse.course_id == course_id,
+        )
+    )
+    if classroom is None:
+        raise ClassNotFound("该课程没有关联这个班级")
+    if any(link.student_id == student_id for link in classroom.student_links):
+        raise ClassConflict("你已经加入该班级")
+    db.session.add(TeachingClassStudent(class_id=classroom.id, student_id=student_id))
+    _enroll_student_in_class_courses(classroom, student_id)
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        raise ClassConflict("你已经加入该班级") from exc
+    return {
+        "id": classroom.id,
+        "name": classroom.name,
+        "teacher_id": classroom.teacher_id,
+        "teacher_name": classroom.teacher.real_name,
+        "joined": True,
+    }
+
+
 def list_classes(user_id: int, role: str) -> list[dict]:
     statement = db.select(TeachingClass).options(
         selectinload(TeachingClass.teacher),
@@ -212,6 +277,9 @@ def serialize_classroom(
         "teacher_id": classroom.teacher_id,
         "teacher_name": classroom.teacher.real_name,
         "teacher_no": classroom.teacher.teacher_no,
+        "teacher_avatar_url": (
+            f"/media/{classroom.teacher.avatar}" if classroom.teacher.avatar else None
+        ),
         "member_count": len(links),
         "created_at": iso_utc(classroom.created_at),
         "updated_at": iso_utc(classroom.updated_at),

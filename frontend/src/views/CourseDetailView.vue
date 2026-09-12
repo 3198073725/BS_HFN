@@ -28,6 +28,10 @@ const savingProgress = ref(false)
 const noteForm = reactive({ content: '' })
 const questionForm = reactive({ title: '', content: '' })
 const learningState = reactive({ joined: false, favorited: false })
+const classDialogVisible = ref(false)
+const classOptions = ref([])
+const classOptionsLoading = ref(false)
+const joiningClassId = ref(null)
 const isStudent = computed(() => auth.user?.role === 'STUDENT')
 let lastPosition = null
 let pendingWatchDuration = 0
@@ -44,6 +48,8 @@ async function loadCourse() {
   course.value = null
   selectedVideo.value = null
   Object.assign(learningState, { joined: false, favorited: false })
+  classOptions.value = []
+  classDialogVisible.value = false
   resetLearningContext()
   try {
     const response = await api.get(`/courses/${courseId}`, { authMode: 'optional' })
@@ -89,6 +95,40 @@ async function joinCourse() {
     ElMessage.error(error.message || '加入课程失败')
   } finally {
     actionLoading.value = ''
+  }
+}
+
+async function openClassDialog() {
+  if (classOptionsLoading.value) return
+  classOptionsLoading.value = true
+  try {
+    const response = await api.get(`/courses/${route.params.id}/classes`)
+    classOptions.value = response.data
+    if (!classOptions.value.length) {
+      ElMessage.info('授课教师暂未给这门课程关联班级')
+      return
+    }
+    classDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error(error.message || '班级列表加载失败')
+  } finally {
+    classOptionsLoading.value = false
+  }
+}
+
+async function joinClass(classroom) {
+  if (joiningClassId.value !== null || classroom.joined) return
+  joiningClassId.value = classroom.id
+  try {
+    await api.post(`/courses/${route.params.id}/classes/${classroom.id}/join`)
+    classroom.joined = true
+    learningState.joined = true
+    ElMessage.success(`已加入“${classroom.name}”`)
+    if (selectedVideo.value) await loadLearningContext()
+  } catch (error) {
+    ElMessage.error(error.message || '加入班级失败')
+  } finally {
+    joiningClassId.value = null
   }
 }
 
@@ -393,10 +433,13 @@ onBeforeUnmount(() => {
           <h1>{{ course.name }}</h1>
           <p>{{ course.description || '教师暂未填写课程简介。' }}</p>
           <div class="course-hero-footer">
-            <div class="teacher-line">
-              <span class="teacher-avatar">{{ course.teacher_name?.slice(0, 1) || '师' }}</span>
+            <RouterLink class="teacher-line teacher-profile-link" :to="`/users/${course.teacher_id}`">
+              <span class="teacher-avatar">
+                <img v-if="course.teacher_avatar_url" :src="course.teacher_avatar_url" alt="" />
+                <template v-else>{{ course.teacher_name?.slice(0, 1) || '师' }}</template>
+              </span>
               <span><small>授课教师</small><strong>{{ course.teacher_name || '待更新' }}</strong></span>
-            </div>
+            </RouterLink>
             <div class="course-learning-actions">
               <template v-if="isStudent">
                 <button
@@ -414,6 +457,14 @@ onBeforeUnmount(() => {
                   @click="toggleFavorite"
                 >
                   {{ learningState.favorited ? '★ 已收藏' : '☆ 收藏课程' }}
+                </button>
+                <button
+                  class="hero-small-button"
+                  type="button"
+                  :disabled="classOptionsLoading"
+                  @click="openClassDialog"
+                >
+                  {{ classOptionsLoading ? '读取班级中' : '加入班级' }}
                 </button>
               </template>
               <RouterLink
@@ -594,7 +645,34 @@ onBeforeUnmount(() => {
       </section>
     </template>
 
-    <el-result v-else-if="errorMessage" icon="error" title="课程加载失败" :sub-title="errorMessage">
+    <el-dialog
+      v-model="classDialogVisible"
+      title="选择课程班级"
+      width="min(560px, calc(100vw - 28px))"
+      class="course-class-dialog"
+    >
+      <p class="course-class-dialog-tip">加入班级后，教师可按班级安排课程并查看你的学习进展。</p>
+      <div class="course-class-options">
+        <article v-for="classroom in classOptions" :key="classroom.id" class="course-class-option">
+          <span class="course-class-mark">班</span>
+          <div>
+            <strong>{{ classroom.name }}</strong>
+            <p>{{ classroom.description || '授课教师暂未填写班级说明。' }}</p>
+            <small>{{ classroom.teacher_name }} · {{ classroom.member_count }} 名学生</small>
+          </div>
+          <el-button
+            :type="classroom.joined ? '' : 'primary'"
+            :disabled="classroom.joined || joiningClassId !== null"
+            :loading="joiningClassId === classroom.id"
+            @click="joinClass(classroom)"
+          >
+            {{ classroom.joined ? '已加入' : '加入' }}
+          </el-button>
+        </article>
+      </div>
+    </el-dialog>
+
+    <el-result v-if="!course && errorMessage" icon="error" title="课程加载失败" :sub-title="errorMessage">
       <template #extra>
         <el-button type="primary" @click="loadCourse">重新加载</el-button>
       </template>

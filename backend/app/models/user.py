@@ -18,6 +18,7 @@ class User(IdMixin, TimestampMixin, db.Model):
     email = db.Column(db.String(100), unique=True)
     phone = db.Column(db.String(20))
     avatar = db.Column(db.String(255))
+    bio = db.Column(db.String(500))
     role = db.Column(db.String(20), nullable=False)
     status = db.Column(db.Boolean, nullable=False, default=True, server_default="1")
     last_login_at = db.Column(db.DateTime)
@@ -32,6 +33,8 @@ class User(IdMixin, TimestampMixin, db.Model):
             "email": self.email,
             "phone": self.phone,
             "avatar": self.avatar,
+            "avatar_url": f"/media/{self.avatar}" if self.avatar else None,
+            "bio": self.bio,
             "role": self.role,
             "status": bool(self.status),
             "last_login_at": iso_utc(self.last_login_at),

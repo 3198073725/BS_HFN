@@ -108,6 +108,38 @@ def save_course_cover(file: FileStorage, target_dir: Path, maximum_bytes: int) -
     return target
 
 
+def save_profile_avatar(file: FileStorage, target_dir: Path, maximum_bytes: int) -> Path:
+    original_name = Path(str(file.filename or "").replace("\\", "/")).name.strip()
+    suffix = Path(original_name).suffix.lower()
+    if not original_name or suffix not in ALLOWED_COURSE_COVER_EXTENSIONS:
+        raise ValueError("头像仅支持 JPG、PNG 或 WebP 格式")
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{uuid4().hex}{suffix}"
+    size = 0
+    try:
+        try:
+            file.stream.seek(0)
+        except (AttributeError, OSError):
+            pass
+        with target.open("xb") as output:
+            while chunk := file.stream.read(64 * 1024):
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise ValueError(f"头像不能超过{maximum_bytes // 1024 // 1024}MB")
+                output.write(chunk)
+        if size == 0:
+            raise ValueError("头像文件不能为空")
+        with target.open("rb") as saved_file:
+            header = saved_file.read(16)
+        if not _valid_image_signature(suffix, header):
+            raise ValueError("头像文件内容与图片格式不匹配")
+    except Exception:
+        remove_file(target)
+        raise
+    return target
+
+
 def remove_media_file(media_root: Path, relative_path: str | None) -> None:
     if not relative_path:
         return

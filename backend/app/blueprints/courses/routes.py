@@ -3,6 +3,12 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.constants import CourseStatus, UserRole
 from app.services.auth_service import AuthenticationError, get_active_user
+from app.services.class_service import (
+    ClassConflict,
+    ClassNotFound,
+    join_course_class,
+    list_course_class_options,
+)
 from app.services.course_service import (
     CourseNotFound,
     CoursePermissionDenied,
@@ -47,6 +53,28 @@ def published_courses():
 @roles_required(UserRole.TEACHER)
 def teacher_courses():
     return success(list_teacher_courses(int(get_jwt_identity())))
+
+
+@courses_bp.get("/<int:course_id>/classes")
+@roles_required(UserRole.STUDENT)
+def course_classes(course_id: int):
+    try:
+        classes = list_course_class_options(course_id, int(get_jwt_identity()))
+    except ClassNotFound as exc:
+        return error(str(exc), 404)
+    return success(classes)
+
+
+@courses_bp.post("/<int:course_id>/classes/<int:class_id>/join")
+@roles_required(UserRole.STUDENT)
+def join_class_from_course(course_id: int, class_id: int):
+    try:
+        classroom = join_course_class(course_id, class_id, int(get_jwt_identity()))
+    except ClassNotFound as exc:
+        return error(str(exc), 404)
+    except ClassConflict as exc:
+        return error(str(exc), 409)
+    return success(classroom, "班级加入成功", 201)
 
 
 @courses_bp.get("/<int:course_id>")

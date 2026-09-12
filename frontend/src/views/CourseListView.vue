@@ -82,7 +82,13 @@ onMounted(load)
           <span class="course-state"><i></i> 已发布</span>
         </div>
         <div class="course-card-body">
-          <p class="course-teacher">授课教师 · {{ course.teacher_name || '待更新' }}</p>
+          <p class="course-teacher">
+            授课教师 ·
+            <RouterLink v-if="course.teacher_id" :to="`/users/${course.teacher_id}`">
+              {{ course.teacher_name || '待更新' }}
+            </RouterLink>
+            <span v-else>{{ course.teacher_name || '待更新' }}</span>
+          </p>
           <h2>
             <RouterLink :to="`/courses/${course.id}`">{{ course.name }}</RouterLink>
           </h2>

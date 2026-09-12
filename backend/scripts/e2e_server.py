@@ -17,6 +17,7 @@ from app.models import (
     CourseStudent,
     Notification,
     TeachingClass,
+    TeachingClassCourse,
     TeachingClassStudent,
     User,
     Video,
@@ -171,6 +172,19 @@ def create_e2e_app():
         )
         db.session.add(course)
         db.session.flush()
+        join_classroom = TeachingClass(
+            teacher_id=teacher.id,
+            name="端测自主加入班",
+            description="用于验证学生从课程详情页加入班级。",
+        )
+        db.session.add(join_classroom)
+        db.session.flush()
+        db.session.add_all(
+            [
+                TeachingClassCourse(class_id=reset_classroom.id, course_id=course.id),
+                TeachingClassCourse(class_id=join_classroom.id, course_id=course.id),
+            ]
+        )
         chapter = Chapter(course_id=course.id, title="第一章 HLS 播放验证", sort_order=0)
         db.session.add(chapter)
         db.session.flush()

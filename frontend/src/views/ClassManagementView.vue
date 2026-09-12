@@ -465,7 +465,9 @@ onBeforeUnmount(() => {
         <div class="classroom-facts">
           <span><strong>{{ classroom.member_count }}</strong> 名学生</span>
           <span><strong>{{ classroom.course_count }}</strong> 门课程</span>
-          <span v-if="!isTeacher">负责教师 · {{ classroom.teacher_name }}</span>
+          <span v-if="!isTeacher">
+            负责教师 · <RouterLink :to="`/users/${classroom.teacher_id}`">{{ classroom.teacher_name }}</RouterLink>
+          </span>
           <span v-if="!isTeacher && classroom.teacher_no">工号 · {{ classroom.teacher_no }}</span>
           <span>{{ isTeacher ? '创建' : '加入' }} · {{ formatDate(isTeacher ? classroom.created_at : classroom.joined_at) }}</span>
         </div>
@@ -681,10 +683,13 @@ onBeforeUnmount(() => {
           </el-table>
         </template>
 
-        <div v-else class="student-classroom-note">
-          <span>{{ classroom.teacher_name.slice(0, 1) }}</span>
-          <p><strong>{{ classroom.teacher_name }}</strong><small>班级负责教师</small></p>
-        </div>
+        <RouterLink v-else class="student-classroom-note" :to="`/users/${classroom.teacher_id}`">
+          <span>
+            <img v-if="classroom.teacher_avatar_url" :src="classroom.teacher_avatar_url" alt="" />
+            <template v-else>{{ classroom.teacher_name.slice(0, 1) }}</template>
+          </span>
+          <p><strong>{{ classroom.teacher_name }}</strong><small>班级负责教师 · 查看主页</small></p>
+        </RouterLink>
       </article>
     </div>
 

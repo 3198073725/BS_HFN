@@ -211,6 +211,59 @@ def test_classroom_input_and_student_status_validation(app, client):
     assert disabled.get_json()["message"] == "该学生账号已被禁用"
 
 
+def test_student_can_join_a_linked_class_from_published_course(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+
+    with app.app_context():
+        category = CourseCategory(name="公开加入班级分类")
+        db.session.add(category)
+        db.session.flush()
+        course = Course(
+            teacher_id=context["teacher_id"],
+            category_id=category.id,
+            name="公开班级课程",
+            status=CourseStatus.PUBLISHED.value,
+        )
+        db.session.add(course)
+        db.session.commit()
+        course_id = course.id
+
+    classroom = client.post(
+        "/api/classes",
+        headers=bearer(teacher),
+        json={"name": "可加入班级"},
+    ).get_json()["data"]
+    assert client.post(
+        f"/api/classes/{classroom['id']}/courses",
+        headers=bearer(teacher),
+        json={"course_id": course_id},
+    ).status_code == 201
+
+    options = client.get(f"/api/courses/{course_id}/classes", headers=bearer(student))
+    assert options.status_code == 200
+    assert options.get_json()["data"][0]["joined"] is False
+    joined = client.post(
+        f"/api/courses/{course_id}/classes/{classroom['id']}/join",
+        headers=bearer(student),
+    )
+    assert joined.status_code == 201
+    assert joined.get_json()["data"]["name"] == "可加入班级"
+    assert client.post(
+        f"/api/courses/{course_id}/classes/{classroom['id']}/join",
+        headers=bearer(student),
+    ).status_code == 409
+    with app.app_context():
+        assert db.session.scalar(
+            db.select(CourseStudent).where(
+                CourseStudent.course_id == course_id,
+                CourseStudent.student_id == context["student_id"],
+                CourseStudent.status.is_(True),
+            )
+        ) is not None
+
+
 def test_classroom_course_assignment_enrolls_existing_and_future_students(app, client):
     context = create_context(app)
     with app.app_context():

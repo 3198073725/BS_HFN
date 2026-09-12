@@ -5,6 +5,104 @@
   gap: 28px;
 }
 
+.teacher-profile-link {
+  padding: 4px 6px 4px 4px;
+  border-radius: 6px;
+  transition: background-color 0.16s ease;
+}
+
+.teacher-profile-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.teacher-avatar {
+  overflow: hidden;
+}
+
+.teacher-avatar img,
+.student-classroom-note > span img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.course-class-dialog-tip {
+  margin: 0 0 16px;
+  color: #687d8d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.course-class-options {
+  display: grid;
+  max-height: min(460px, 56vh);
+  overflow-y: auto;
+  border: 1px solid #d1dce3;
+  border-radius: 8px;
+}
+
+.course-class-option {
+  display: grid;
+  min-height: 104px;
+  padding: 17px 18px;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  background: #fff;
+}
+
+.course-class-option + .course-class-option {
+  border-top: 1px solid #dfe6ea;
+}
+
+.course-class-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #b9cad5;
+  border-radius: 6px;
+  place-items: center;
+  background: #eaf0f3;
+  color: #28577f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.course-class-option > div {
+  min-width: 0;
+}
+
+.course-class-option strong {
+  display: block;
+  color: #1c3c54;
+  font-size: 15px;
+}
+
+.course-class-option p {
+  margin: 5px 0;
+  overflow: hidden;
+  color: #6d808e;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-class-option small {
+  color: #81909b;
+  font-size: 11px;
+}
+
+@media (max-width: 520px) {
+  .course-class-option {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .course-class-option .el-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 .course-learning-actions,
 .player-status-group {
   display: flex;

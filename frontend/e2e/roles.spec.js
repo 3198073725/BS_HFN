@@ -171,6 +171,43 @@ test('公开课程在本地会话完全失效后自动降级为匿名访问', as
 })
 
 
+test('学生可从课程详情查看教师主页并加入关联班级', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.goto('/courses/1')
+
+  const teacherLink = page.locator('.teacher-profile-link')
+  await expect(teacherLink).toContainText('端测教师')
+  await teacherLink.click()
+  await expect(page).toHaveURL(/\/users\/\d+$/)
+  await expect(page.getByRole('heading', { name: '端测教师', exact: true })).toBeVisible()
+  await expect(page.getByText('已发布课程', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: /端测基础课程/ })).toBeVisible()
+
+  await page.goto('/courses/1')
+  await page.getByRole('button', { name: '加入班级', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '选择课程班级' })
+  await expect(dialog.getByText('端测密码审批班', { exact: true })).toBeVisible()
+  const availableClass = dialog.locator('.course-class-option').filter({ hasText: '端测自主加入班' })
+  await availableClass.getByRole('button', { name: '加入', exact: true }).click()
+  await expect(page.getByText('已加入“端测自主加入班”')).toBeVisible()
+  await expect(availableClass.getByRole('button', { name: '已加入', exact: true })).toBeDisabled()
+})
+
+
+test('右上角头像进入个人主页并可编辑资料', async ({ page }) => {
+  await login(page, 'e2e_student')
+  const profileEntry = page.locator('.user-chip')
+  await expect(profileEntry).toHaveAttribute('href', '/profile')
+  await profileEntry.click()
+  await expect(page).toHaveURL('/profile')
+  await expect(page.getByRole('heading', { name: '编辑我的主页', exact: true })).toBeVisible()
+  await page.getByPlaceholder('介绍你的教学方向、学习兴趣或个人经历').fill('喜欢通过课程练习巩固知识。')
+  await page.getByRole('button', { name: '保存资料', exact: true }).click()
+  await expect(page.getByText('个人资料已保存')).toBeVisible()
+  await expect(page.getByPlaceholder('介绍你的教学方向、学习兴趣或个人经历')).toHaveValue('喜欢通过课程练习巩固知识。')
+})
+
+
 test('其他标签页退出后当前受保护页面同步返回登录页', async ({ page, context }) => {
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '我的学习', exact: true }).click()
@@ -302,7 +339,7 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '我的班级', exact: true }).click()
   const studentCard = page.locator('.classroom-card').filter({ hasText: className })
-  await expect(studentCard.getByText('端测教师', { exact: true })).toBeVisible()
+  await expect(studentCard.getByRole('link', { name: /端测教师.*查看主页/ })).toBeVisible()
   await expect(studentCard.getByText('2026 秋季端到端班级', { exact: true })).toBeVisible()
   await expect(studentCard.getByRole('link', { name: /端测基础课程/ })).toBeVisible()
   await expect(studentCard.locator('.el-table')).toHaveCount(0)

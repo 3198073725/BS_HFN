@@ -18,6 +18,10 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function updateUser(payload) {
+    user.value = payload
+  }
+
   async function login(credentials) {
     const response = await api.post('/auth/login', credentials)
     setSession(response.data)
@@ -79,6 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
     register,
     restoreUser,
     setSession,
+    updateUser,
     user,
   }
 })

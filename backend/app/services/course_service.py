@@ -210,6 +210,9 @@ def serialize_course(
         "id": course.id,
         "teacher_id": course.teacher_id,
         "teacher_name": course.teacher.real_name if course.teacher else None,
+        "teacher_avatar_url": (
+            f"/media/{course.teacher.avatar}" if course.teacher and course.teacher.avatar else None
+        ),
         "category_id": course.category_id,
         "category_name": course.category.name if course.category else None,
         "name": course.name,

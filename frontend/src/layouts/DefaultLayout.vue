@@ -152,13 +152,23 @@ onBeforeUnmount(() => window.removeEventListener('bs-hfn:notification-count', up
         </nav>
 
         <div class="session-actions">
-          <div v-if="auth.user" class="user-chip">
-            <span class="user-avatar">{{ (auth.user.real_name || auth.user.username || '用').slice(0, 1) }}</span>
+          <RouterLink
+            v-if="auth.user"
+            class="user-chip"
+            :class="{ active: route.name === 'my-profile' }"
+            to="/profile"
+            title="查看并编辑个人主页"
+            aria-label="查看并编辑个人主页"
+          >
+            <span class="user-avatar">
+              <img v-if="auth.user.avatar_url" :src="auth.user.avatar_url" alt="" />
+              <template v-else>{{ (auth.user.real_name || auth.user.username || '用').slice(0, 1) }}</template>
+            </span>
             <span class="user-copy">
               <strong>{{ auth.user.real_name || auth.user.username }}</strong>
               <small>{{ roleLabel }}</small>
             </span>
-          </div>
+          </RouterLink>
           <button
             v-if="auth.isAuthenticated"
             class="header-action"
