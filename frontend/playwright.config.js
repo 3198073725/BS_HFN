@@ -12,6 +12,7 @@ const pythonExecutable = resolve(configDirectory, '../.venv/Scripts/python.exe')
 
 export default defineConfig({
   testDir: './e2e',
+  timeout: 60_000,
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 2 : 0,

@@ -106,6 +106,152 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
 })
 
 
+test('学生提交作业后教师可以批改并回传成绩', async ({ page }) => {
+  const homeworkTitle = '端到端作业'
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '作业管理', exact: true }).click()
+
+  await page.getByRole('button', { name: '＋ 创建作业' }).click()
+  const createDialog = page.getByRole('dialog', { name: '创建作业草稿' })
+  await createDialog.getByText('请选择课程', { exact: true }).click()
+  await page.getByRole('option', { name: '端测基础课程（已发布）' }).click()
+  await createDialog.getByPlaceholder('例如：第一章知识总结').fill(homeworkTitle)
+  await createDialog.getByPlaceholder('说明完成要求、提交格式与评分要点…').fill('请提交自动化测试答案。')
+  await createDialog.getByRole('button', { name: '保存草稿', exact: true }).click()
+  await expect(page.getByText('作业草稿已创建')).toBeVisible()
+
+  let homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
+  await homeworkCard.getByRole('button', { name: '发布', exact: true }).click()
+  await page.getByRole('dialog', { name: '发布作业' }).getByRole('button', { name: '确定' }).click()
+  await expect(homeworkCard.getByText('进行中', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await expect(page).toHaveURL('/')
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '课程作业', exact: true }).click()
+  homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
+  await homeworkCard.getByRole('button', { name: '提交作业', exact: true }).click()
+  const submissionDialog = page.getByRole('dialog', { name: homeworkTitle })
+  await submissionDialog.getByPlaceholder('请输入作业答案或总结…').fill('学生端到端答案')
+  await submissionDialog.getByRole('button', { name: '确认提交', exact: true }).click()
+  await expect(page.getByText('作业提交成功')).toBeVisible()
+  await expect(homeworkCard.getByText('已提交', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await expect(page).toHaveURL('/')
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '作业管理', exact: true }).click()
+  homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
+  await homeworkCard.getByRole('button', { name: '查看提交（1）', exact: true }).click()
+  const gradeDialog = page.getByRole('dialog', { name: `${homeworkTitle} · 提交记录` })
+  await expect(gradeDialog.getByText('端测学生', { exact: true })).toBeVisible()
+  await gradeDialog.getByRole('button', { name: '批改', exact: true }).click()
+  await gradeDialog.getByRole('spinbutton').fill('88')
+  await gradeDialog.getByPlaceholder('填写教师评语（可选）').fill('完成良好')
+  await gradeDialog.getByRole('button', { name: '保存批改', exact: true }).click()
+  await expect(page.getByText('批改结果已保存')).toBeVisible()
+  await expect(gradeDialog.getByText('88', { exact: true })).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(gradeDialog).toBeHidden()
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await expect(page).toHaveURL('/')
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '课程作业', exact: true }).click()
+  homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
+  await expect(homeworkCard.getByText('88 分', { exact: true })).toBeVisible()
+  await expect(homeworkCard.getByText('教师评语：完成良好', { exact: true })).toBeVisible()
+})
+
+
+test('学生提交测验后教师可以查看自动评分结果', async ({ page }) => {
+  const examTitle = '端到端测验'
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '测验管理', exact: true }).click()
+
+  await page.getByRole('button', { name: '＋ 创建测验' }).click()
+  const createDialog = page.getByRole('dialog', { name: '创建测验草稿' })
+  await createDialog.getByText('请选择课程', { exact: true }).click()
+  await page.getByRole('option', { name: '端测基础课程', exact: true }).click()
+  await createDialog.getByPlaceholder('例如：第一章基础测验').fill(examTitle)
+  await createDialog.getByPlaceholder('填写作答要求…').fill('请选择正确答案。')
+  await createDialog.getByRole('button', { name: '保存并添加试题', exact: true }).click()
+  await expect(page.getByText('测验草稿已创建，请继续添加试题')).toBeVisible()
+
+  const questionDialog = page.getByRole('dialog', { name: `${examTitle} · 试题管理` })
+  await questionDialog.getByPlaceholder('请输入题目内容').fill('HTTP 默认端口是多少？')
+  await questionDialog.getByPlaceholder('选项 A').fill('80')
+  await questionDialog.getByPlaceholder('选项 B').fill('443')
+  await questionDialog.locator('.question-number-row input[role="spinbutton"]').first().fill('100')
+  await questionDialog.getByRole('button', { name: '添加到测验', exact: true }).click()
+  await expect(page.getByText('试题已添加')).toBeVisible()
+  await expect(questionDialog.getByText('分值已匹配，可以发布')).toBeVisible()
+  await questionDialog.getByRole('button', { name: '发布测验', exact: true }).click()
+  await page.getByRole('dialog', { name: '发布测验' }).getByRole('button', { name: '确定' }).click()
+  await expect(page.getByText('测验已发布')).toBeVisible()
+
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await expect(page).toHaveURL('/')
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '在线测验', exact: true }).click()
+  let examCard = page.locator('.exam-card').filter({ hasText: examTitle })
+  await examCard.getByRole('button', { name: '开始测验', exact: true }).click()
+  const takeDialog = page.getByRole('dialog', { name: examTitle })
+  await takeDialog.locator('label.el-radio').filter({ hasText: '80' }).click()
+  await takeDialog.getByRole('button', { name: '提交测验', exact: true }).click()
+  await page.getByRole('dialog', { name: '提交测验' }).getByRole('button', { name: '确定' }).click()
+  await expect(page.getByText('交卷成功，得分 100')).toBeVisible()
+  await expect(takeDialog.locator('.result-score strong')).toHaveText('100')
+
+  await takeDialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await expect(page).toHaveURL('/')
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '测验管理', exact: true }).click()
+  examCard = page.locator('.exam-card').filter({ hasText: examTitle })
+  await examCard.getByRole('button', { name: '成绩（1）', exact: true }).click()
+  const recordsDialog = page.getByRole('dialog', { name: `${examTitle} · 成绩记录` })
+  await expect(recordsDialog.getByText('端测学生', { exact: true })).toBeVisible()
+  await expect(recordsDialog.getByText('100 / 100', { exact: true })).toBeVisible()
+})
+
+
+test('网络故障时显示中文提示且页面保持可用', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.route('**/api/homeworks', (route) => route.abort())
+  await page.getByRole('link', { name: '课程作业', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: '课程作业', exact: true })).toBeVisible()
+  await expect(page.getByText('网络连接失败，请检查网络或服务状态')).toBeVisible()
+})
+
+
+test('项目内 FFmpeg 生成的 HLS 可以在 Chromium 中播放', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '课程中心', exact: true }).click()
+  const playlistResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/index.m3u8'),
+  )
+  await page.getByRole('link', { name: '端测基础课程', exact: true }).click()
+  expect((await playlistResponse).ok()).toBe(true)
+
+  const video = page.locator('video')
+  await expect(video).toBeVisible()
+  await expect.poll(
+    () => video.evaluate((element) => element.readyState),
+    { timeout: 15000 },
+  ).toBeGreaterThanOrEqual(1)
+  await video.evaluate(async (element) => {
+    element.muted = true
+    await element.play()
+  })
+  await expect.poll(
+    () => video.evaluate((element) => element.currentTime),
+    { timeout: 15000 },
+  ).toBeGreaterThan(0.25)
+})
+
+
 test('移动端登录页无横向溢出且可以正常登录', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/login')

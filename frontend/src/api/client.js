@@ -61,6 +61,12 @@ api.interceptors.response.use(
         clearStoredSession()
       }
     }
+    if (!error.response) {
+      const message = error.code === 'ECONNABORTED'
+        ? '请求超时，请检查网络后重试'
+        : '网络连接失败，请检查网络或服务状态'
+      return Promise.reject({ message })
+    }
     return Promise.reject(error.response?.data || error)
   },
 )
