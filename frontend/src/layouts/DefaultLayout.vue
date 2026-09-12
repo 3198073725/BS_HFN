@@ -49,11 +49,53 @@ async function handleLogout() {
             课程中心
           </RouterLink>
           <RouterLink
+            v-if="auth.user?.role === 'STUDENT'"
+            to="/learning"
+            :class="{ active: route.name === 'learning' }"
+          >
+            我的学习
+          </RouterLink>
+          <RouterLink
+            v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)"
+            to="/homeworks"
+            :class="{ active: route.name === 'homeworks' }"
+          >
+            {{ auth.user?.role === 'TEACHER' ? '作业管理' : '课程作业' }}
+          </RouterLink>
+          <RouterLink
+            v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)"
+            to="/exams"
+            :class="{ active: route.name === 'exams' }"
+          >
+            {{ auth.user?.role === 'TEACHER' ? '测验管理' : '在线测验' }}
+          </RouterLink>
+          <RouterLink
             v-if="auth.user?.role === 'TEACHER'"
             to="/teacher/courses"
             :class="{ active: route.name === 'teacher-courses' }"
           >
             教学管理
+          </RouterLink>
+          <RouterLink
+            v-if="auth.user?.role === 'TEACHER'"
+            to="/teacher/questions"
+            :class="{ active: route.name === 'teacher-questions' }"
+          >
+            课程答疑
+          </RouterLink>
+          <RouterLink
+            v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)"
+            to="/statistics"
+            :class="{ active: route.name === 'statistics' }"
+          >
+            数据概览
+          </RouterLink>
+          <RouterLink
+            v-if="auth.user?.role === 'ADMIN'"
+            to="/admin"
+            :class="{ active: route.name === 'admin-dashboard' }"
+          >
+            系统后台
           </RouterLink>
         </nav>
 

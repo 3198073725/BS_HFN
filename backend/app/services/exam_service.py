@@ -1,0 +1,458 @@
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload, selectinload
+
+from app.constants import CourseStatus, PublishStatus, UserRole
+from app.extensions import db
+from app.models import Course, CourseStudent, Exam, ExamAnswer, ExamQuestion, ExamRecord
+
+
+class ExamNotFound(ValueError):
+    pass
+
+
+class ExamPermissionDenied(PermissionError):
+    pass
+
+
+class ExamConflict(ValueError):
+    pass
+
+
+def create_exam(teacher_id: int, data: dict) -> dict:
+    course = _teacher_course(data["course_id"], teacher_id)
+    if course.status == CourseStatus.OFFLINE.value:
+        raise ExamConflict("下线课程不能创建测验")
+    exam = Exam(teacher_id=teacher_id, **data)
+    db.session.add(exam)
+    db.session.commit()
+    return serialize_exam(_get_exam(exam.id), reveal_answers=True)
+
+
+def update_exam(exam_id: int, teacher_id: int, data: dict) -> dict:
+    exam = _teacher_exam(exam_id, teacher_id)
+    _require_draft(exam)
+    if "course_id" in data:
+        course = _teacher_course(data["course_id"], teacher_id)
+        if course.status == CourseStatus.OFFLINE.value:
+            raise ExamConflict("下线课程不能设置测验")
+    for field, value in data.items():
+        setattr(exam, field, value)
+    _validate_time_window(exam)
+    db.session.commit()
+    return serialize_exam(_get_exam(exam.id), reveal_answers=True)
+
+
+def add_question(exam_id: int, teacher_id: int, data: dict) -> dict:
+    exam = _teacher_exam(exam_id, teacher_id)
+    _require_draft(exam)
+    question = ExamQuestion(exam_id=exam.id, **data)
+    db.session.add(question)
+    db.session.commit()
+    return serialize_question(question, reveal_answer=True)
+
+
+def update_question(question_id: int, teacher_id: int, data: dict) -> dict:
+    question = _get_question(question_id)
+    if question.exam.teacher_id != teacher_id:
+        raise ExamPermissionDenied("不能操作其他教师的试题")
+    _require_draft(question.exam)
+    for field, value in data.items():
+        setattr(question, field, value)
+    db.session.commit()
+    return serialize_question(question, reveal_answer=True)
+
+
+def delete_question(question_id: int, teacher_id: int) -> None:
+    question = _get_question(question_id)
+    if question.exam.teacher_id != teacher_id:
+        raise ExamPermissionDenied("不能操作其他教师的试题")
+    _require_draft(question.exam)
+    db.session.delete(question)
+    db.session.commit()
+
+
+def change_exam_status(exam_id: int, teacher_id: int, status: PublishStatus) -> dict:
+    exam = _teacher_exam(exam_id, teacher_id)
+    if status is PublishStatus.PUBLISHED:
+        _require_draft(exam)
+        if exam.course.status != CourseStatus.PUBLISHED.value:
+            raise ExamConflict("课程发布后才能发布测验")
+        _validate_time_window(exam)
+        if exam.end_time and exam.end_time <= _now():
+            raise ExamConflict("结束时间已过，不能发布测验")
+        if not exam.questions:
+            raise ExamConflict("请至少添加一道试题")
+        question_total = sum((item.score for item in exam.questions), Decimal("0"))
+        if question_total != exam.total_score:
+            raise ExamConflict(
+                f"试题分值合计为{float(question_total):g}，应与测验总分{float(exam.total_score):g}一致"
+            )
+        exam.published_at = _now()
+    elif status is PublishStatus.CLOSED:
+        if exam.status != PublishStatus.PUBLISHED.value:
+            raise ExamConflict("只有已发布测验可以关闭")
+    exam.status = status.value
+    db.session.commit()
+    return serialize_exam(exam, reveal_answers=True, include_record_count=True)
+
+
+def list_teacher_exams(teacher_id: int) -> list[dict]:
+    exams = db.session.scalars(
+        _exam_query()
+        .where(Exam.teacher_id == teacher_id)
+        .order_by(Exam.created_at.desc(), Exam.id.desc())
+    ).unique().all()
+    return [serialize_exam(item, reveal_answers=True, include_record_count=True) for item in exams]
+
+
+def list_student_exams(student_id: int) -> list[dict]:
+    exams = db.session.scalars(
+        _exam_query()
+        .join(Course, Course.id == Exam.course_id)
+        .join(CourseStudent, CourseStudent.course_id == Exam.course_id)
+        .where(
+            CourseStudent.student_id == student_id,
+            CourseStudent.status.is_(True),
+            Exam.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)),
+            Course.status == CourseStatus.PUBLISHED.value,
+        )
+        .order_by(Exam.start_time.asc(), Exam.published_at.desc(), Exam.id.desc())
+    ).unique().all()
+    return [serialize_exam(item, student_id=student_id) for item in exams]
+
+
+def get_visible_exam(exam_id: int, user_id: int, role: str) -> dict:
+    exam = _get_exam(exam_id)
+    if role == UserRole.TEACHER.value:
+        if exam.teacher_id != user_id:
+            raise ExamPermissionDenied("不能查看其他教师的测验")
+        return serialize_exam(exam, reveal_answers=True, include_record_count=True)
+    if role == UserRole.STUDENT.value:
+        _ensure_student_access(exam, user_id)
+        record = _student_record(exam.id, user_id)
+        reveal_answers = record is not None and record.status == "SUBMITTED"
+        return serialize_exam(exam, student_id=user_id, reveal_answers=reveal_answers)
+    raise ExamPermissionDenied("无权查看该测验")
+
+
+def start_exam(exam_id: int, student_id: int) -> dict:
+    exam = _get_exam(exam_id)
+    _ensure_can_take(exam, student_id)
+    existing = _student_record(exam.id, student_id)
+    if existing is not None:
+        if existing.status == "SUBMITTED":
+            raise ExamConflict("该测验已经正式提交，不能重复作答")
+        _ensure_record_time(existing)
+        return serialize_record(existing, include_answers=False)
+    record = ExamRecord(
+        exam_id=exam.id,
+        student_id=student_id,
+        status="DOING",
+        started_at=_now(),
+    )
+    db.session.add(record)
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        raise ExamConflict("测验开始冲突，请刷新后重试") from exc
+    return serialize_record(_get_record(record.id), include_answers=False)
+
+
+def submit_exam(exam_id: int, student_id: int, submitted_answers: dict[int, str]) -> dict:
+    exam = _get_exam(exam_id)
+    _ensure_student_access(exam, student_id)
+    if exam.status != PublishStatus.PUBLISHED.value:
+        raise ExamConflict("测验已关闭，不能继续提交")
+    record = _student_record(exam.id, student_id)
+    if record is None:
+        raise ExamConflict("请先开始测验")
+    if record.status == "SUBMITTED":
+        raise ExamConflict("该测验已经正式提交")
+    _ensure_record_time(record)
+
+    question_ids = {question.id for question in exam.questions}
+    unexpected = set(submitted_answers) - question_ids
+    if unexpected:
+        raise ExamConflict("答案中包含不属于该测验的试题")
+
+    total = Decimal("0")
+    correct_count = 0
+    for question in exam.questions:
+        answer = submitted_answers.get(question.id)
+        normalized = answer.strip().upper() if answer else None
+        is_correct = normalized == question.correct_answer.upper()
+        earned = question.score if is_correct else Decimal("0")
+        if is_correct:
+            correct_count += 1
+            total += earned
+        db.session.add(
+            ExamAnswer(
+                exam_record_id=record.id,
+                question_id=question.id,
+                student_answer=normalized,
+                is_correct=is_correct,
+                score=earned,
+            )
+        )
+
+    now = _now()
+    record.score = total
+    record.correct_count = correct_count
+    record.wrong_count = len(exam.questions) - correct_count
+    record.status = "SUBMITTED"
+    record.submit_time = now
+    record.duration_seconds = max(0, int((now - record.started_at).total_seconds()))
+    db.session.commit()
+    return serialize_record(_get_record(record.id), include_answers=True)
+
+
+def list_exam_records(exam_id: int, teacher_id: int) -> list[dict]:
+    _teacher_exam(exam_id, teacher_id)
+    records = db.session.scalars(
+        _record_query()
+        .where(ExamRecord.exam_id == exam_id)
+        .order_by(ExamRecord.submit_time.desc(), ExamRecord.id.desc())
+    ).unique().all()
+    return [serialize_record(item, include_answers=item.status == "SUBMITTED") for item in records]
+
+
+def get_visible_record(record_id: int, user_id: int, role: str) -> dict:
+    record = _get_record(record_id)
+    if role == UserRole.TEACHER.value and record.exam.teacher_id == user_id:
+        return serialize_record(record, include_answers=record.status == "SUBMITTED")
+    if role == UserRole.STUDENT.value and record.student_id == user_id:
+        return serialize_record(record, include_answers=record.status == "SUBMITTED")
+    raise ExamPermissionDenied("无权查看该测验记录")
+
+
+def serialize_exam(
+    exam: Exam,
+    student_id: int | None = None,
+    reveal_answers: bool = False,
+    include_record_count: bool = False,
+) -> dict:
+    payload = {
+        "id": exam.id,
+        "course_id": exam.course_id,
+        "course_name": exam.course.name if exam.course else None,
+        "teacher_id": exam.teacher_id,
+        "teacher_name": exam.teacher.real_name if exam.teacher else None,
+        "title": exam.title,
+        "description": exam.description,
+        "total_score": float(exam.total_score),
+        "status": exam.status,
+        "start_time": _iso(exam.start_time),
+        "end_time": _iso(exam.end_time),
+        "time_limit_minutes": exam.time_limit_minutes,
+        "published_at": _iso(exam.published_at),
+        "created_at": _iso(exam.created_at),
+        "updated_at": _iso(exam.updated_at),
+        "availability": _availability(exam),
+        "questions": [
+            serialize_question(item, reveal_answer=reveal_answers)
+            for item in sorted(exam.questions, key=lambda value: (value.sort_order, value.id))
+        ],
+    }
+    if student_id is not None:
+        record = next((item for item in exam.records if item.student_id == student_id), None)
+        payload["record"] = (
+            serialize_record(record, include_answers=record.status == "SUBMITTED") if record else None
+        )
+    if include_record_count:
+        payload["record_count"] = len(exam.records)
+        payload["submitted_count"] = sum(item.status == "SUBMITTED" for item in exam.records)
+    return payload
+
+
+def serialize_question(question: ExamQuestion, reveal_answer: bool = False) -> dict:
+    payload = {
+        "id": question.id,
+        "exam_id": question.exam_id,
+        "question_type": question.question_type,
+        "content": question.content,
+        "options": {
+            key: value
+            for key, value in {
+                "A": question.option_a,
+                "B": question.option_b,
+                "C": question.option_c,
+                "D": question.option_d,
+            }.items()
+            if value is not None
+        },
+        "score": float(question.score),
+        "sort_order": question.sort_order,
+    }
+    if reveal_answer:
+        payload["correct_answer"] = question.correct_answer
+    return payload
+
+
+def serialize_record(record: ExamRecord, include_answers: bool) -> dict:
+    payload = {
+        "id": record.id,
+        "exam_id": record.exam_id,
+        "exam_title": record.exam.title if record.exam else None,
+        "student_id": record.student_id,
+        "student_name": record.student.real_name if record.student else None,
+        "score": float(record.score),
+        "total_score": float(record.exam.total_score) if record.exam else None,
+        "correct_count": record.correct_count,
+        "wrong_count": record.wrong_count,
+        "status": record.status,
+        "started_at": _iso(record.started_at),
+        "submit_time": _iso(record.submit_time),
+        "duration_seconds": record.duration_seconds,
+    }
+    if include_answers:
+        by_question = {item.question_id: item for item in record.answers}
+        payload["answers"] = []
+        for question in sorted(record.exam.questions, key=lambda item: (item.sort_order, item.id)):
+            answer = by_question.get(question.id)
+            payload["answers"].append(
+                {
+                    "question": serialize_question(question, reveal_answer=True),
+                    "student_answer": answer.student_answer if answer else None,
+                    "is_correct": bool(answer.is_correct) if answer else False,
+                    "score": float(answer.score) if answer else 0.0,
+                }
+            )
+    return payload
+
+
+def _exam_query():
+    return db.select(Exam).options(
+        joinedload(Exam.course),
+        joinedload(Exam.teacher),
+        selectinload(Exam.questions),
+        selectinload(Exam.records).joinedload(ExamRecord.student),
+    )
+
+
+def _record_query():
+    return db.select(ExamRecord).options(
+        joinedload(ExamRecord.exam).selectinload(Exam.questions),
+        joinedload(ExamRecord.student),
+        selectinload(ExamRecord.answers).joinedload(ExamAnswer.question),
+    )
+
+
+def _get_exam(exam_id: int) -> Exam:
+    exam = db.session.scalar(_exam_query().where(Exam.id == exam_id))
+    if exam is None:
+        raise ExamNotFound("测验不存在")
+    return exam
+
+
+def _get_question(question_id: int) -> ExamQuestion:
+    question = db.session.scalar(
+        db.select(ExamQuestion)
+        .options(joinedload(ExamQuestion.exam))
+        .where(ExamQuestion.id == question_id)
+    )
+    if question is None:
+        raise ExamNotFound("试题不存在")
+    return question
+
+
+def _get_record(record_id: int) -> ExamRecord:
+    record = db.session.scalar(_record_query().where(ExamRecord.id == record_id))
+    if record is None:
+        raise ExamNotFound("测验记录不存在")
+    return record
+
+
+def _student_record(exam_id: int, student_id: int) -> ExamRecord | None:
+    return db.session.scalar(
+        _record_query().where(
+            ExamRecord.exam_id == exam_id,
+            ExamRecord.student_id == student_id,
+        )
+    )
+
+
+def _teacher_exam(exam_id: int, teacher_id: int) -> Exam:
+    exam = _get_exam(exam_id)
+    if exam.teacher_id != teacher_id:
+        raise ExamPermissionDenied("不能操作其他教师的测验")
+    return exam
+
+
+def _teacher_course(course_id: int, teacher_id: int) -> Course:
+    course = db.session.get(Course, course_id)
+    if course is None:
+        raise ExamNotFound("课程不存在")
+    if course.teacher_id != teacher_id:
+        raise ExamPermissionDenied("不能操作其他教师的课程")
+    return course
+
+
+def _ensure_student_access(exam: Exam, student_id: int) -> None:
+    if (
+        exam.status not in (PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)
+        or exam.course.status != CourseStatus.PUBLISHED.value
+    ):
+        raise ExamNotFound("测验不存在或尚未发布")
+    joined = db.session.scalar(
+        db.select(CourseStudent.id).where(
+            CourseStudent.course_id == exam.course_id,
+            CourseStudent.student_id == student_id,
+            CourseStudent.status.is_(True),
+        )
+    )
+    if joined is None:
+        raise ExamPermissionDenied("请先加入课程")
+
+
+def _ensure_can_take(exam: Exam, student_id: int) -> None:
+    _ensure_student_access(exam, student_id)
+    if exam.status != PublishStatus.PUBLISHED.value:
+        raise ExamConflict("测验已关闭")
+    availability = _availability(exam)
+    if availability == "NOT_STARTED":
+        raise ExamConflict("测验尚未开始")
+    if availability == "ENDED":
+        raise ExamConflict("测验已经结束")
+
+
+def _ensure_record_time(record: ExamRecord) -> None:
+    now = _now()
+    deadline = record.exam.end_time
+    if record.exam.time_limit_minutes and record.started_at:
+        limit = record.started_at + timedelta(minutes=record.exam.time_limit_minutes)
+        deadline = min(deadline, limit) if deadline else limit
+    if deadline and now > deadline:
+        raise ExamConflict("作答时间已经结束")
+
+
+def _require_draft(exam: Exam) -> None:
+    if exam.status != PublishStatus.DRAFT.value:
+        raise ExamConflict("只有草稿测验可以编辑")
+
+
+def _validate_time_window(exam: Exam) -> None:
+    if exam.start_time and exam.end_time and exam.start_time >= exam.end_time:
+        raise ExamConflict("测验结束时间必须晚于开始时间")
+
+
+def _availability(exam: Exam) -> str:
+    if exam.status == PublishStatus.CLOSED.value:
+        return "CLOSED"
+    now = _now()
+    if exam.start_time and now < exam.start_time:
+        return "NOT_STARTED"
+    if exam.end_time and now > exam.end_time:
+        return "ENDED"
+    return "AVAILABLE" if exam.status == PublishStatus.PUBLISHED.value else "DRAFT"
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)

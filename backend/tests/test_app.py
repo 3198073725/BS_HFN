@@ -13,6 +13,7 @@ def test_expected_blueprints_are_registered(app):
         "exams",
         "homework",
         "learning",
+        "notices",
         "questions",
         "statistics",
         "system",

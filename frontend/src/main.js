@@ -4,6 +4,7 @@ import {
   ElButton,
   ElCard,
   ElContainer,
+  ElDatePicker,
   ElDialog,
   ElDivider,
   ElEmpty,
@@ -17,6 +18,9 @@ import {
   ElMenu,
   ElMenuItem,
   ElOption,
+  ElRadio,
+  ElRadioButton,
+  ElRadioGroup,
   ElResult,
   ElSelect,
   ElTable,
@@ -30,6 +34,7 @@ import 'element-plus/dist/index.css'
 import App from './App.vue'
 import router from './router'
 import './assets/main.css'
+import './assets/learning.css'
 
 
 const app = createApp(App)
@@ -37,6 +42,7 @@ const components = [
   ElButton,
   ElCard,
   ElContainer,
+  ElDatePicker,
   ElDialog,
   ElDivider,
   ElEmpty,
@@ -49,6 +55,9 @@ const components = [
   ElMenu,
   ElMenuItem,
   ElOption,
+  ElRadio,
+  ElRadioButton,
+  ElRadioGroup,
   ElResult,
   ElSelect,
   ElTable,

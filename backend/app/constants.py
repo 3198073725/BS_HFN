@@ -37,3 +37,9 @@ class PublishStatus(StrEnum):
     DRAFT = "DRAFT"
     PUBLISHED = "PUBLISHED"
     CLOSED = "CLOSED"
+
+
+class NoticeStatus(StrEnum):
+    DRAFT = "DRAFT"
+    PUBLISHED = "PUBLISHED"
+    OFFLINE = "OFFLINE"

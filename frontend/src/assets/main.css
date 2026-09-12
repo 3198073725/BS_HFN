@@ -2074,6 +2074,20 @@ button:focus-visible {
 }
 
 @media (max-width: 1080px) {
+  .header-inner {
+    gap: 18px;
+  }
+
+  .main-nav a {
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  .main-nav a::after {
+    right: 10px;
+    left: 10px;
+  }
+
   .home-hero {
     grid-template-columns: minmax(0, 0.9fr) minmax(430px, 1.1fr);
     gap: 40px;
@@ -2094,7 +2108,11 @@ button:focus-visible {
 
 @media (max-width: 900px) {
   .header-inner {
-    gap: 24px;
+    gap: 12px;
+  }
+
+  .site-brand-copy {
+    display: none;
   }
 
   .auth-shell,

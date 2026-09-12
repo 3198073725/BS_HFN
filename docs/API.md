@@ -24,11 +24,13 @@ Authorization: Bearer <access_token>
 | --- | --- | --- | --- |
 | GET | `/api/health` | 公开 | 健康检查 |
 | POST | `/api/auth/register` | 公开 | 注册学生账号 |
-| POST | `/api/auth/login` | 公开 | 用户名、邮箱或手机号登录 |
+| POST | `/api/auth/login` | 公开 | 用户名、邮箱、学号或工号登录 |
 | POST | `/api/auth/refresh` | Refresh Token | 轮换 Token 对；旧 Refresh Token 立即失效 |
 | POST | `/api/auth/logout` | 任意 JWT | 注销当前及请求体中属于同一用户的 Token |
 | GET | `/api/users/me` | 登录用户 | 当前用户资料 |
+| GET | `/api/admin/users` | 管理员 | 查询用户；支持 `role`、`status`、`keyword` |
 | POST | `/api/admin/users` | 管理员 | 创建教师或学生账号 |
+| PUT | `/api/admin/users/{id}/status` | 管理员 | 启用或禁用教师/学生账号 |
 
 注册核心字段：`username`、`password`、`real_name`，可选 `email`、`phone`、`student_no`。登录字段为 `account`、`password`。退出时可在 JSON 中附带 `access_token`、`refresh_token`，后端会校验归属后统一注销。
 
@@ -63,3 +65,91 @@ Authorization: Bearer <access_token>
 上传使用 `multipart/form-data`：必填 `video_file`、`chapter_id`、`title`，可选 `description`、`sort_order`。支持 `.mp4`、`.mov`、`.mkv`、`.avi`、`.webm`。
 
 同步模式完成时返回 `201`，处理失败返回 `422`，异步任务成功入队返回 `202`，队列不可用返回 `503` 并将视频标记为失败。状态依次为 `PENDING`、`PROCESSING`、`READY` 或 `FAILED`；处理步骤采用 `PROBING`、`TRANSCODING`、`HLS`、`COVER`、`FINISHED`。
+
+## 学习与收藏
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/learning/courses` | 学生 | 已加入课程及聚合学习进度 |
+| POST | `/api/learning/courses/{id}/join` | 学生 | 加入已发布课程 |
+| DELETE | `/api/learning/courses/{id}/join` | 学生 | 退出课程并保留历史学习数据 |
+| GET | `/api/learning/courses/{id}/state` | 学生 | 查询加入与收藏状态 |
+| GET | `/api/learning/favorites` | 学生 | 收藏课程列表 |
+| POST | `/api/learning/courses/{id}/favorite` | 学生 | 收藏课程 |
+| DELETE | `/api/learning/courses/{id}/favorite` | 学生 | 取消收藏 |
+| GET | `/api/learning/videos/{id}/progress` | 已加入课程的学生 | 获取断点与学习进度 |
+| PUT | `/api/learning/videos/{id}/progress` | 已加入课程的学生 | 更新断点与累计观看时长 |
+| GET | `/api/learning/videos/{id}/notes` | 已加入课程的学生 | 当前视频的个人笔记 |
+| POST | `/api/learning/videos/{id}/notes` | 已加入课程的学生 | 在视频时间点创建笔记 |
+| PUT | `/api/learning/notes/{id}` | 笔记所有者 | 更新笔记 |
+| DELETE | `/api/learning/notes/{id}` | 笔记所有者 | 删除笔记 |
+
+学习进度更新字段为 `current_time` 和 `watch_duration_delta`。进度由后端根据视频时长计算，达到 90% 后自动标记为 `COMPLETED`；单次累计观看增量限制为 0–60 秒。
+
+## 视频答疑
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/questions` | 学生/教师 | 学生查看自己的问题，教师查看自己课程的问题 |
+| POST | `/api/questions` | 已加入课程的学生 | 在视频时间点提问 |
+| GET | `/api/questions/{id}` | 提问学生/课程教师 | 问题详情 |
+| POST | `/api/questions/{id}/answer` | 课程教师 | 提交唯一正式回答 |
+| PUT | `/api/questions/{id}/answer` | 回答教师 | 更新正式回答 |
+| POST | `/api/questions/{id}/close` | 提问学生/课程教师 | 关闭问题 |
+
+问题列表可使用 `status=WAITING|ANSWERED|CLOSED` 和 `video_id` 过滤。教师只能查看和处理自己课程下的问题，学生只能查看自己的问题。
+
+## 作业
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/homeworks` | 学生 | 已加入课程的已发布/已关闭作业及本人提交 |
+| GET | `/api/homeworks/manage` | 教师 | 我的作业及提交数量 |
+| POST | `/api/homeworks` | 教师 | 创建作业草稿 |
+| GET | `/api/homeworks/{id}` | 课程成员/课程教师 | 作业详情 |
+| PUT | `/api/homeworks/{id}` | 课程教师 | 编辑草稿作业 |
+| POST | `/api/homeworks/{id}/attachment` | 课程教师 | 上传或替换草稿作业附件 |
+| POST | `/api/homeworks/{id}/publish` | 课程教师 | 发布作业 |
+| POST | `/api/homeworks/{id}/close` | 课程教师 | 关闭作业 |
+| PUT | `/api/homeworks/{id}/submission` | 课程学生 | 提交或更新文字答案 |
+| POST | `/api/homeworks/{id}/submission/attachment` | 课程学生 | 提交或替换本人附件 |
+| GET | `/api/homeworks/{id}/submissions` | 课程教师 | 学生提交列表 |
+| PUT | `/api/homeworks/submissions/{id}/grade` | 课程教师 | 保存得分和评语 |
+
+作业状态为 `DRAFT/PUBLISHED/CLOSED`。同一学生同一作业只保留一条最终提交；重新提交会将状态恢复为 `SUBMITTED` 并清除旧成绩。附件使用 `multipart/form-data` 的 `attachment` 字段，支持常用文档、压缩包和图片格式，最大 50 MB。
+
+## 在线测验
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/exams` | 学生 | 已加入课程的测验及本人记录 |
+| GET | `/api/exams/manage` | 教师 | 我的测验、题目和提交数量 |
+| POST | `/api/exams` | 教师 | 创建测验草稿 |
+| GET | `/api/exams/{id}` | 课程成员/课程教师 | 测验详情 |
+| PUT | `/api/exams/{id}` | 课程教师 | 编辑草稿测验 |
+| POST | `/api/exams/{id}/questions` | 课程教师 | 添加单选题或判断题 |
+| PUT | `/api/exams/questions/{id}` | 课程教师 | 更新草稿试题 |
+| DELETE | `/api/exams/questions/{id}` | 课程教师 | 删除草稿试题 |
+| POST | `/api/exams/{id}/publish` | 课程教师 | 校验题目总分并发布 |
+| POST | `/api/exams/{id}/close` | 课程教师 | 关闭测验 |
+| POST | `/api/exams/{id}/start` | 课程学生 | 开始或继续未提交测验 |
+| POST | `/api/exams/{id}/submit` | 课程学生 | 正式交卷并自动评分 |
+| GET | `/api/exams/{id}/records` | 课程教师 | 查看成绩记录 |
+| GET | `/api/exams/records/{id}` | 本人/课程教师 | 测验结果和逐题明细 |
+
+第一版题型为 `SINGLE` 和 `JUDGE`，答案分别使用 `A/B/C/D` 与 `TRUE/FALSE`。交卷体为 `{"answers": [{"question_id": 1, "answer": "A"}]}`。每名学生每个测验只能正式提交一次；未交卷时响应不会包含 `correct_answer`。
+
+## 公告、统计与后台
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/notices` | 公开 | 已发布公告 |
+| GET | `/api/notices/manage` | 管理员 | 全部公告 |
+| POST | `/api/notices` | 管理员 | 创建公告草稿 |
+| PUT | `/api/notices/{id}` | 管理员 | 编辑草稿或已下线公告 |
+| PUT | `/api/notices/{id}/status` | 管理员 | 发布或下线公告 |
+| DELETE | `/api/notices/{id}` | 管理员 | 删除未发布公告 |
+| GET | `/api/statistics` | 学生/教师/管理员 | 当前角色的实时聚合概览 |
+| GET | `/api/statistics/courses` | 教师 | 本人课程的学生、进度、作业和测验聚合 |
+
+公告状态为 `DRAFT/PUBLISHED/OFFLINE`。统计结果实时读取业务表，不维护独立统计表。

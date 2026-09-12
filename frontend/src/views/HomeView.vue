@@ -1,8 +1,29 @@
 <script setup>
+import { onMounted, ref } from 'vue'
+
+import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 
 const auth = useAuthStore()
+const notices = ref([])
+
+async function loadNotices() {
+  try {
+    const response = await api.get('/notices')
+    notices.value = response.data.slice(0, 3)
+  } catch {
+    notices.value = []
+  }
+}
+
+function formatDate(value) {
+  if (!value) return ''
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : value + 'Z'
+  return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date(normalized))
+}
+
+onMounted(loadNotices)
 </script>
 
 <template>
@@ -29,6 +50,20 @@ const auth = useAuthStore()
             to="/teacher/courses"
           >
             进入教学管理
+          </RouterLink>
+          <RouterLink
+            v-else-if="auth.user?.role === 'STUDENT'"
+            class="action-link action-link-ghost"
+            to="/learning"
+          >
+            继续我的学习
+          </RouterLink>
+          <RouterLink
+            v-else-if="auth.user?.role === 'ADMIN'"
+            class="action-link action-link-ghost"
+            to="/admin"
+          >
+            进入系统后台
           </RouterLink>
         </div>
         <div class="hero-proof">
@@ -70,13 +105,30 @@ const auth = useAuthStore()
       </div>
     </section>
 
+    <section v-if="notices.length" class="home-notices" aria-labelledby="notice-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">SYSTEM NOTICE</p>
+          <h2 id="notice-title">最新公告</h2>
+        </div>
+        <p>课程安排与系统服务的重要信息会在这里更新。</p>
+      </div>
+      <div class="home-notice-list">
+        <article v-for="notice in notices" :key="notice.id">
+          <div><span>公告</span><small>{{ formatDate(notice.publish_time) }}</small></div>
+          <h3>{{ notice.title }}</h3>
+          <p>{{ notice.content }}</p>
+        </article>
+      </div>
+    </section>
+
     <section class="feature-section" aria-labelledby="feature-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">CORE EXPERIENCE</p>
           <h2 id="feature-title">围绕学习本身，保持简单</h2>
         </div>
-        <p>第一阶段聚焦最重要的课程、章节和视频闭环，为后续学习功能建立稳定基础。</p>
+        <p>从课程视频到作业、测验与答疑，把课后学习需要的关键环节放在一个空间里。</p>
       </div>
       <div class="feature-grid">
         <article>
