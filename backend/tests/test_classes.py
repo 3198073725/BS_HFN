@@ -267,6 +267,32 @@ def test_student_class_join_request_requires_teacher_approval(app, client):
         headers=bearer(student),
     ).status_code == 409
 
+    my_requests = client.get("/api/classes/join-requests/mine", headers=bearer(student))
+    assert my_requests.status_code == 200
+    assert my_requests.get_json()["data"][0]["id"] == request_id
+    assert my_requests.get_json()["data"][0]["teacher_name"] == "class_teacher"
+    assert my_requests.get_json()["data"][0]["source_course_name"] == "公开班级课程"
+    assert client.delete(
+        f"/api/classes/join-requests/{request_id}",
+        headers=bearer(other_student),
+    ).status_code == 403
+    cancelled = client.delete(
+        f"/api/classes/join-requests/{request_id}",
+        headers=bearer(student),
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.get_json()["data"]["status"] == "CANCELLED"
+    assert client.delete(
+        f"/api/classes/join-requests/{request_id}",
+        headers=bearer(student),
+    ).status_code == 409
+    reapplied_after_cancel = client.post(
+        f"/api/courses/{course_id}/classes/{classroom['id']}/apply",
+        headers=bearer(student),
+    )
+    assert reapplied_after_cancel.status_code == 202
+    assert reapplied_after_cancel.get_json()["data"]["id"] == request_id
+
     with app.app_context():
         assert db.session.scalar(
             db.select(TeachingClassStudent).where(
@@ -303,6 +329,12 @@ def test_student_class_join_request_requires_teacher_approval(app, client):
     )
     assert approved.status_code == 200
     assert approved.get_json()["data"]["status"] == "APPROVED"
+    approved_history = client.get(
+        "/api/classes/join-requests/mine",
+        headers=bearer(student),
+    ).get_json()["data"]
+    assert approved_history[0]["status"] == "APPROVED"
+    assert approved_history[0]["reviewed_at"] is not None
     assert client.put(
         f"/api/classes/join-requests/{request_id}",
         headers=bearer(teacher),

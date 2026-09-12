@@ -3235,17 +3235,18 @@ favorite
 | class_id | BIGINT UNSIGNED | 目标班级，关联 `teaching_class.id` |
 | student_id | BIGINT UNSIGNED | 申请学生，关联 `sys_user.id` |
 | source_course_id | BIGINT UNSIGNED | 发起申请时所在课程，可空，关联 `course.id` |
-| status | VARCHAR(20) | `PENDING/APPROVED/REJECTED` |
+| status | VARCHAR(20) | `PENDING/APPROVED/REJECTED/CANCELLED` |
 | reviewer_id | BIGINT UNSIGNED | 实际处理申请的教师，可空 |
-| reviewed_at | DATETIME | 同意或拒绝的 UTC 时间，可空 |
+| reviewed_at | DATETIME | 同意、拒绝或学生撤回的 UTC 时间，可空 |
 | created_at | DATETIME | 首次申请或再次申请时间 |
 | updated_at | DATETIME | 最近状态更新时间 |
 
 约束与索引：
 
-- `(class_id, student_id)` 唯一，拒绝后再次申请复用原记录并恢复为 `PENDING`，避免同一学生产生重复历史行。
+- `(class_id, student_id)` 唯一，拒绝或撤回后再次申请复用原记录并恢复为 `PENDING`，页面展示每个班级的最新申请状态。
 - `(class_id, status)` 支持教师按班级查询待办，`(student_id, status)` 支持课程详情显示个人申请状态。
 - 申请课程必须已发布，并且目标班级必须真实关联该课程；待审批阶段不写入 `teaching_class_student` 或 `course_student`。
 - 审批时实时校验 `teaching_class.teacher_id`，只有当前班级教师可以处理；同意后才创建班级成员并同步该班全部课程。
+- 撤回时校验 `student_id` 与当前登录学生一致，只有 `PENDING` 申请可以撤回，已审批申请不可逆向修改。
 
 对应迁移版本为 `c3d4e5f6a7b8`，上一版本为用户公开主页资料迁移 `b2c3d4e5f6a7`。

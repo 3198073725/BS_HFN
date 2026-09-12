@@ -664,7 +664,7 @@ onBeforeUnmount(() => {
             :loading="joiningClassId === classroom.id"
             @click="applyForClass(classroom)"
           >
-            {{ classroom.joined ? '已加入' : classroom.request_status === 'PENDING' ? '待教师审批' : classroom.request_status === 'REJECTED' ? '再次申请' : '申请加入' }}
+            {{ classroom.joined ? '已加入' : classroom.request_status === 'PENDING' ? '待教师审批' : ['REJECTED', 'CANCELLED'].includes(classroom.request_status) ? '再次申请' : '申请加入' }}
           </el-button>
         </article>
       </div>

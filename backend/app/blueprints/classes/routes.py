@@ -7,10 +7,12 @@ from app.services.class_service import (
     ClassPermissionDenied,
     add_student,
     assign_course,
+    cancel_class_join_request,
     create_classroom,
     delete_classroom,
     list_classes,
     list_course_options,
+    list_student_class_join_requests,
     list_teacher_class_join_requests,
     remove_student,
     review_class_join_request,
@@ -50,6 +52,26 @@ def classroom_course_options():
 @roles_required(UserRole.TEACHER)
 def classroom_join_requests():
     return success(list_teacher_class_join_requests(int(get_jwt_identity())))
+
+
+@classes_bp.get("/join-requests/mine")
+@roles_required(UserRole.STUDENT)
+def my_classroom_join_requests():
+    return success(list_student_class_join_requests(int(get_jwt_identity())))
+
+
+@classes_bp.delete("/join-requests/<int:request_id>")
+@roles_required(UserRole.STUDENT)
+def cancel_my_classroom_join_request(request_id: int):
+    try:
+        result = cancel_class_join_request(request_id, int(get_jwt_identity()))
+    except ClassNotFound as exc:
+        return error(str(exc), 404)
+    except ClassPermissionDenied as exc:
+        return error(str(exc), 403)
+    except ClassConflict as exc:
+        return error(str(exc), 409)
+    return success(result, "入班申请已撤回")
 
 
 @classes_bp.put("/join-requests/<int:request_id>")

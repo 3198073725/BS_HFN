@@ -162,7 +162,7 @@ def list_teacher_class_join_requests(teacher_id: int) -> list[dict]:
     requests = db.session.scalars(
         db.select(TeachingClassJoinRequest)
         .options(
-            selectinload(TeachingClassJoinRequest.classroom),
+            selectinload(TeachingClassJoinRequest.classroom).selectinload(TeachingClass.teacher),
             selectinload(TeachingClassJoinRequest.student),
             selectinload(TeachingClassJoinRequest.source_course),
         )
@@ -174,6 +174,52 @@ def list_teacher_class_join_requests(teacher_id: int) -> list[dict]:
         .order_by(TeachingClassJoinRequest.created_at.asc(), TeachingClassJoinRequest.id.asc())
     ).all()
     return [_serialize_join_request(item) for item in requests]
+
+
+def list_student_class_join_requests(student_id: int) -> list[dict]:
+    requests = db.session.scalars(
+        db.select(TeachingClassJoinRequest)
+        .options(
+            selectinload(TeachingClassJoinRequest.classroom).selectinload(TeachingClass.teacher),
+            selectinload(TeachingClassJoinRequest.student),
+            selectinload(TeachingClassJoinRequest.source_course),
+        )
+        .where(TeachingClassJoinRequest.student_id == student_id)
+        .order_by(TeachingClassJoinRequest.created_at.desc(), TeachingClassJoinRequest.id.desc())
+    ).all()
+    return [_serialize_join_request(item) for item in requests]
+
+
+def cancel_class_join_request(request_id: int, student_id: int) -> dict:
+    join_request = db.session.scalar(
+        db.select(TeachingClassJoinRequest)
+        .options(
+            selectinload(TeachingClassJoinRequest.classroom).selectinload(TeachingClass.teacher),
+            selectinload(TeachingClassJoinRequest.student),
+            selectinload(TeachingClassJoinRequest.source_course),
+        )
+        .where(TeachingClassJoinRequest.id == request_id)
+    )
+    if join_request is None:
+        raise ClassNotFound("入班申请不存在")
+    if join_request.student_id != student_id:
+        raise ClassPermissionDenied("只能撤回自己的入班申请")
+    if join_request.status != ClassJoinRequestStatus.PENDING.value:
+        raise ClassConflict("只有待审批的入班申请可以撤回")
+
+    join_request.status = ClassJoinRequestStatus.CANCELLED.value
+    join_request.reviewer_id = None
+    join_request.reviewed_at = utc_now()
+    queue_notification(
+        join_request.classroom.teacher_id,
+        "学生撤回入班申请",
+        f"{join_request.student.real_name}已撤回加入“{join_request.classroom.name}”的申请。",
+        category="CLASS",
+        sender_id=student_id,
+        link="/classes",
+    )
+    db.session.commit()
+    return _serialize_join_request(join_request)
 
 
 def review_class_join_request(
@@ -252,6 +298,8 @@ def _serialize_join_request(join_request: TeachingClassJoinRequest) -> dict:
         "id": join_request.id,
         "class_id": join_request.class_id,
         "class_name": join_request.classroom.name,
+        "teacher_id": join_request.classroom.teacher_id,
+        "teacher_name": join_request.classroom.teacher.real_name,
         "student_id": join_request.student_id,
         "student_name": join_request.student.real_name,
         "student_no": join_request.student.student_no,

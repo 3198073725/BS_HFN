@@ -194,6 +194,24 @@ test('学生从课程详情申请入班并由教师审批', async ({ page }) => 
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
 
+  await page.getByRole('link', { name: '我的班级', exact: true }).click()
+  const joinHistory = page.locator('[aria-label="我的入班申请"]')
+  await expect(joinHistory).toContainText('端测自主加入班')
+  await expect(joinHistory).toContainText('待教师审批')
+  await joinHistory.getByRole('button', { name: '撤回申请', exact: true }).click()
+  await page.getByRole('dialog', { name: '撤回入班申请' })
+    .getByRole('button', { name: '确认撤回', exact: true }).click()
+  await expect(page.getByText('入班申请已撤回')).toBeVisible()
+  await expect(joinHistory).toContainText('已撤回')
+
+  await page.goto('/courses/1')
+  await page.getByRole('button', { name: '加入班级', exact: true }).click()
+  const reopenedDialog = page.getByRole('dialog', { name: '选择课程班级' })
+  const cancelledClass = reopenedDialog.locator('.course-class-option').filter({ hasText: '端测自主加入班' })
+  await cancelledClass.getByRole('button', { name: '再次申请', exact: true }).click()
+  await expect(cancelledClass.getByRole('button', { name: '待教师审批', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+
   await page.getByRole('button', { name: '退出', exact: true }).click()
   await login(page, 'e2e_teacher')
   await page.getByRole('link', { name: '班级管理', exact: true }).click()
@@ -210,6 +228,10 @@ test('学生从课程详情申请入班并由教师审批', async ({ page }) => 
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '我的班级', exact: true }).click()
   await expect(page.locator('.classroom-card').filter({ hasText: '端测自主加入班' })).toBeVisible()
+  await expect(page.locator('[aria-label="我的入班申请"]')).toContainText('已通过')
+  await page.locator('a[href="/notifications"]').click()
+  await expect(page.getByText('班级通知', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('CLASS', { exact: true })).toHaveCount(0)
 })
 
 

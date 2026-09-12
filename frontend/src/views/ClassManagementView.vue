@@ -57,6 +57,9 @@ const totalCourseAssignments = computed(() => classrooms.value.reduce(
   (total, classroom) => total + Number(classroom.course_count || 0),
   0,
 ))
+const pendingJoinRequestCount = computed(() => joinRequests.value.filter(
+  (item) => item.status === 'PENDING',
+).length)
 
 const filteredClassrooms = computed(() => {
   const keyword = classKeyword.value.trim().toLowerCase()
@@ -104,7 +107,7 @@ async function loadClasses() {
       api.get('/classes'),
       isTeacher.value ? api.get('/classes/course-options') : Promise.resolve({ data: [] }),
       isTeacher.value ? api.get('/classes/password-reset-requests') : Promise.resolve({ data: [] }),
-      isTeacher.value ? api.get('/classes/join-requests') : Promise.resolve({ data: [] }),
+      api.get(isTeacher.value ? '/classes/join-requests' : '/classes/join-requests/mine'),
     ])
     if (requestId !== requestSequence) return
     classrooms.value = response.data
@@ -135,6 +138,40 @@ function resetRequestsForClass(classId) {
 
 function joinRequestsForClass(classId) {
   return joinRequests.value.filter((item) => item.class_id === classId)
+}
+
+function joinRequestStatusLabel(status) {
+  return {
+    PENDING: '待教师审批',
+    APPROVED: '已通过',
+    REJECTED: '未通过',
+    CANCELLED: '已撤回',
+  }[status] || status
+}
+
+async function cancelJoinRequest(item) {
+  if (handlingJoinRequestId.value !== null || item.status !== 'PENDING') return
+  try {
+    await ElMessageBox.confirm(
+      `确定撤回加入“${item.class_name}”的申请吗？撤回后可以从课程详情再次申请。`,
+      '撤回入班申请',
+      { confirmButtonText: '确认撤回', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  handlingJoinRequestId.value = item.id
+  try {
+    const response = await api.delete(`/classes/join-requests/${item.id}`)
+    const index = joinRequests.value.findIndex((request) => request.id === item.id)
+    if (index !== -1) joinRequests.value[index] = response.data
+    ElMessage.success(response.message || '入班申请已撤回')
+  } catch (error) {
+    ElMessage.error(error.message || '入班申请撤回失败')
+    await loadClasses()
+  } finally {
+    handlingJoinRequestId.value = null
+  }
 }
 
 async function reviewJoinRequest(item, action) {
@@ -436,6 +473,51 @@ onBeforeUnmount(() => {
       </article>
       <p>关联课程会将当前名册整班加入，后续新增学生也会自动同步；解除关联不会删除已有学习记录。</p>
     </div>
+
+    <section v-else class="student-join-history surface-card" aria-label="我的入班申请">
+      <div class="student-join-history-heading">
+        <div>
+          <strong>入班申请记录</strong>
+          <small>在课程详情提交申请后，可在这里查看教师处理结果</small>
+        </div>
+        <span>{{ pendingJoinRequestCount }} 项待处理</span>
+      </div>
+      <div v-if="joinRequests.length" class="student-join-history-list">
+        <article v-for="item in joinRequests" :key="item.id">
+          <div class="student-join-history-main">
+            <span class="student-join-class-mark">班</span>
+            <div>
+              <strong>{{ item.class_name }}</strong>
+              <small>
+                负责教师
+                <RouterLink :to="`/users/${item.teacher_id}`">{{ item.teacher_name }}</RouterLink>
+                <template v-if="item.source_course_name"> · 来源课程 {{ item.source_course_name }}</template>
+              </small>
+            </div>
+          </div>
+          <div class="student-join-history-time">
+            <span>申请于 {{ formatDate(item.requested_at) }}</span>
+            <small v-if="item.reviewed_at">处理于 {{ formatDate(item.reviewed_at) }}</small>
+          </div>
+          <span :class="['student-join-status', `is-${item.status.toLowerCase()}`]">
+            {{ joinRequestStatusLabel(item.status) }}
+          </span>
+          <div class="student-join-history-actions">
+            <RouterLink v-if="item.source_course_id" :to="`/courses/${item.source_course_id}`">
+              {{ ['REJECTED', 'CANCELLED'].includes(item.status) ? '重新申请' : '查看课程' }}
+            </RouterLink>
+            <el-button
+              v-if="item.status === 'PENDING'"
+              text
+              :loading="handlingJoinRequestId === item.id"
+              :disabled="handlingJoinRequestId !== null && handlingJoinRequestId !== item.id"
+              @click="cancelJoinRequest(item)"
+            >撤回申请</el-button>
+          </div>
+        </article>
+      </div>
+      <p v-else class="student-join-history-empty">还没有入班申请，可从已发布课程详情选择关联班级。</p>
+    </section>
 
     <div v-if="classrooms.length" :class="isTeacher ? 'classroom-workspace' : 'classroom-grid'">
       <aside v-if="isTeacher" class="classroom-list-panel" aria-label="班级列表">

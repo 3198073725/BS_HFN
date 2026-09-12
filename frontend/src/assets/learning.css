@@ -1995,6 +1995,179 @@
   background: #edf0f4;
 }
 
+.student-join-history {
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.student-join-history-heading {
+  display: flex;
+  min-height: 68px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #dfe5ea;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #fafbfc;
+}
+
+.student-join-history-heading strong,
+.student-join-history-heading small {
+  display: block;
+}
+
+.student-join-history-heading strong {
+  color: #263848;
+  font-size: 14px;
+}
+
+.student-join-history-heading small {
+  margin-top: 4px;
+  color: #7b8995;
+  font-size: 11px;
+}
+
+.student-join-history-heading > span {
+  flex: 0 0 auto;
+  color: #516879;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.student-join-history-list {
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.student-join-history-list > article {
+  display: grid;
+  min-height: 78px;
+  padding: 13px 20px;
+  border-bottom: 1px solid #e5e9ed;
+  grid-template-columns: minmax(220px, 1fr) minmax(130px, auto) auto auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.student-join-history-list > article:last-child {
+  border-bottom: 0;
+}
+
+.student-join-history-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.student-join-class-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid #c1ced7;
+  border-radius: 5px;
+  place-items: center;
+  color: #28577f;
+  background: #f1f5f8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.student-join-history-main > div {
+  min-width: 0;
+}
+
+.student-join-history-main strong,
+.student-join-history-main small,
+.student-join-history-time span,
+.student-join-history-time small {
+  display: block;
+}
+
+.student-join-history-main strong {
+  overflow: hidden;
+  color: #263848;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-join-history-main small,
+.student-join-history-time {
+  color: #7b8995;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.student-join-history-main small {
+  margin-top: 4px;
+}
+
+.student-join-history-main a,
+.student-join-history-actions a {
+  color: #28577f;
+}
+
+.student-join-history-time small {
+  margin-top: 3px;
+  color: #909ca6;
+}
+
+.student-join-history-actions {
+  display: flex;
+  min-width: 118px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.student-join-history-actions a {
+  display: inline-flex;
+  min-height: 32px;
+  padding: 5px 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.student-join-history-empty {
+  margin: 0;
+  padding: 24px 20px;
+  color: #7b8995;
+  font-size: 12px;
+  text-align: center;
+}
+
+.student-join-status {
+  display: inline-flex;
+  min-width: 70px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid #cbd5dc;
+  border-radius: 4px;
+  align-items: center;
+  justify-content: center;
+  color: #506879;
+  background: #f7f9fa;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.student-join-status.is-approved {
+  border-color: #b9d2c6;
+  color: #356850;
+  background: #f2f8f5;
+}
+
+.student-join-status.is-rejected,
+.student-join-status.is-cancelled {
+  color: #737d85;
+  background: #f7f7f7;
+}
+
 .student-classroom-note {
   display: flex;
   margin: 0 24px 22px;
@@ -2065,6 +2238,16 @@
     flex-direction: column;
   }
 
+  .student-join-history-list > article {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 14px;
+  }
+
+  .student-join-history-main,
+  .student-join-history-actions {
+    grid-column: 1 / -1;
+  }
+
   .classroom-add-student {
     width: 100%;
   }
@@ -2120,6 +2303,31 @@
   .student-classroom-note {
     margin-right: 16px;
     margin-left: 16px;
+  }
+
+  .student-join-history-heading {
+    padding-right: 16px;
+    padding-left: 16px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .student-join-history-list > article {
+    padding-right: 16px;
+    padding-left: 16px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .student-join-status {
+    justify-self: end;
+  }
+
+  .student-join-history-actions {
+    min-width: 0;
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 
   .statistics-grid,
