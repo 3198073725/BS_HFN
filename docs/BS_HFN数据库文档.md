@@ -3140,3 +3140,30 @@ favorite
 ```
 
 通过这种顺序开发，可以最大程度降低数据库结构反复修改带来的返工。
+
+# 58. 当前实现扩展：管理员操作审计表
+
+第一版核心业务完成后，为管理员运维增加 `admin_audit_log`。该表只记录关键管理变更，不作为业务状态来源，也不保存密码、Token、上传文件内容等敏感数据。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGINT UNSIGNED | 审计记录主键 |
+| admin_id | BIGINT UNSIGNED | 操作管理员，关联 `sys_user.id` |
+| action | VARCHAR(50) | 稳定动作代码，例如 `VIDEO_RETRY` |
+| resource_type | VARCHAR(50) | 资源类型，例如 `VIDEO`、`USER` |
+| resource_id | BIGINT UNSIGNED | 资源编号；资源已删除时仍保留原编号 |
+| summary | VARCHAR(500) | 适合后台直接展示的操作摘要 |
+| details | JSON | 必要的非敏感结构化上下文 |
+| ip_address | VARCHAR(45) | IPv4 或 IPv6 来源地址 |
+| user_agent | VARCHAR(255) | 截断后的客户端标识 |
+| created_at | DATETIME | UTC 操作时间 |
+
+约束与索引：
+
+- `admin_id` 使用 `ON DELETE RESTRICT`，避免删除管理员后丢失审计责任主体；更新主键时级联。
+- `(admin_id, created_at)` 支持按管理员追溯时间线。
+- `(action, created_at)` 支持按动作筛选近期操作。
+- `(resource_type, resource_id)` 支持追溯某个业务对象的管理历史。
+- 审计接口只提供分页读取，不提供修改和删除能力。
+
+对应迁移版本为 `8b7c6d5e4f32`，上一版本为班级课程关系迁移 `f4a2b9d7e6c1`。

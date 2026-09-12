@@ -30,7 +30,7 @@ Authorization: Bearer <access_token>
 | POST | `/api/auth/refresh` | Refresh Token | 轮换 Token 对；旧 Refresh Token 立即失效 |
 | POST | `/api/auth/logout` | 任意 JWT | 注销当前及请求体中属于同一用户的 Token |
 | GET | `/api/users/me` | 登录用户 | 当前用户资料 |
-| GET | `/api/admin/users` | 管理员 | 查询用户；支持 `role`、`status`、`keyword` |
+| GET | `/api/admin/users` | 管理员 | 分页查询用户；支持 `role`、`status`、`keyword`、`page`、`page_size` |
 | POST | `/api/admin/users` | 管理员 | 创建教师或学生账号 |
 | PUT | `/api/admin/users/{id}/status` | 管理员 | 启用或禁用教师/学生账号 |
 
@@ -187,10 +187,10 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 用途 |
 | --- | --- | --- | --- |
-| GET | `/api/admin/videos` | 管理员 | 转码任务、状态汇总和 FFmpeg/ffprobe 运行状态；支持 `status`、`keyword` |
+| GET | `/api/admin/videos` | 管理员 | 分页查询转码任务、状态汇总和 FFmpeg/ffprobe 运行状态；支持 `status`、`keyword`、`page`、`page_size` |
 | POST | `/api/admin/videos/{id}/retry` | 管理员 | 重新处理失败任务，或恢复超过 30 分钟未更新的等待/处理任务 |
 | DELETE | `/api/admin/videos/{id}` | 管理员 | 清理失败任务、原始文件和派生文件 |
-| GET | `/api/admin/courses` | 管理员 | 跨教师查询课程、章节、视频和学生数量；支持 `status`、`keyword` |
+| GET | `/api/admin/courses` | 管理员 | 跨教师分页查询课程、章节、视频和学生数量；支持 `status`、`keyword`、`page`、`page_size` |
 | PUT | `/api/admin/courses/{id}/status` | 管理员 | 强制下线课程或恢复发布 |
 | GET | `/api/admin/classes` | 管理员 | 跨教师查询班级与成员数量；支持 `keyword` |
 | DELETE | `/api/admin/classes/{id}` | 管理员 | 删除班级及成员关系，不删除师生账号 |
@@ -198,6 +198,11 @@ Authorization: Bearer <access_token>
 | POST | `/api/admin/categories` | 管理员 | 创建课程分类 |
 | PUT | `/api/admin/categories/{id}` | 管理员 | 修改课程分类资料和排序 |
 | PUT | `/api/admin/categories/{id}/status` | 管理员 | 启用或禁用课程分类 |
+| GET | `/api/admin/audit-logs` | 管理员 | 分页查询管理操作审计；支持 `action`、`resource_type`、`keyword`、`page`、`page_size` |
+
+管理员用户、视频、课程和审计查询统一使用 `page` 与 `page_size`，默认分别为 1 和 20，`page_size` 最大为 100。用户、课程和审计接口的 `data` 结构为 `{ "items": [], "pagination": { "page", "page_size", "total", "pages" } }`；视频接口还会同时返回全局状态 `summary` 与媒体工具 `runtime`。非法页码返回 400，超出末页时返回空 `items` 和实际分页元数据。
+
+审计日志记录管理员、动作、资源类型与编号、可读摘要、必要的非敏感详情、来源 IP、User-Agent 和 UTC 时间。当前覆盖账号创建与启停、视频重试与失败文件清理、课程状态、班级删除、分类维护及公告创建、编辑、状态变更和删除；日志只读，不提供修改或删除接口。
 
 视频任务只有在 `FAILED`，或 `PENDING/PROCESSING` 超过 30 分钟未更新时才能重新处理；重新处理前必须确认受控媒体目录内的原始文件仍存在。清理操作仅允许 `FAILED` 状态，接口会拒绝删除正常处理或可播放的视频。
 

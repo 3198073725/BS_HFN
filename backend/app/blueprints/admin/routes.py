@@ -1,8 +1,11 @@
 from flask import current_app, request
+from flask_jwt_extended import get_jwt_identity
 from kombu.exceptions import OperationalError
 
 from app.constants import CourseStatus, UserRole, VideoStatus
+from app.extensions import db
 from app.services.auth_service import ConflictError, create_user
+from app.services.audit_service import list_admin_audit_logs, record_admin_action
 from app.services.admin_service import (
     AdminConflict,
     AdminNotFound,
@@ -42,7 +45,10 @@ def users():
     keyword = str(request.args.get("keyword") or "").strip() or None
     if keyword and len(keyword) > 100:
         return error("搜索关键词不能超过100位", 400)
-    return success(list_users(role, status, keyword))
+    paging = _pagination()
+    if not isinstance(paging, dict):
+        return paging
+    return success(list_users(**paging, role=role, status=status, keyword=keyword))
 
 
 @admin_bp.post("/users")
@@ -55,6 +61,13 @@ def create_managed_user():
         return error(str(exc), 400)
     except ConflictError as exc:
         return error(str(exc), 409)
+    _record_audit(
+        "USER_CREATE",
+        "USER",
+        user.id,
+        f"创建{data['role']}账号：{user.username}",
+        {"role": data["role"], "username": user.username},
+    )
     return success(user.to_dict(), "用户创建成功", 201)
 
 
@@ -70,6 +83,13 @@ def set_user_status(user_id: int):
         return error(str(exc), 404)
     except AdminConflict as exc:
         return error(str(exc), 409)
+    _record_audit(
+        "USER_STATUS_CHANGE",
+        "USER",
+        user_id,
+        f"将用户 {user['username']} 设为{'启用' if raw_status else '禁用'}",
+        {"status": raw_status},
+    )
     return success(user, "用户状态更新成功")
 
 
@@ -82,7 +102,10 @@ def video_operations():
     keyword = _keyword()
     if isinstance(keyword, tuple):
         return keyword
-    return success(list_video_operations(status, keyword))
+    paging = _pagination()
+    if not isinstance(paging, dict):
+        return paging
+    return success(list_video_operations(**paging, status=status, keyword=keyword))
 
 
 @admin_bp.post("/videos/<int:video_id>/retry")
@@ -98,18 +121,40 @@ def retry_video(video_id: int):
             except OperationalError:
                 current_app.logger.exception("管理员重新投递视频 %s 失败", video.id)
                 failed = mark_video_failed(video.id, "后台任务队列暂不可用", "QUEUE")
+                _record_audit(
+                    "VIDEO_RETRY",
+                    "VIDEO",
+                    video.id,
+                    f"重新投递视频失败：{video.title}",
+                    {"result": "QUEUE_FAILED"},
+                )
                 return error(
                     "重新投递失败，后台任务队列暂不可用",
                     503,
                     serialize_admin_video(get_admin_video(failed.id)),
                 )
+            serialized = serialize_admin_video(get_admin_video(video.id))
+            _record_audit(
+                "VIDEO_RETRY",
+                "VIDEO",
+                video.id,
+                f"重新投递视频：{video.title}",
+                {"result": "QUEUED"},
+            )
             return success(
-                serialize_admin_video(get_admin_video(video.id)),
+                serialized,
                 "视频已重新加入转码队列",
                 202,
             )
         processed = process_video_sync(video.id)
         serialized = serialize_admin_video(get_admin_video(processed.id))
+        _record_audit(
+            "VIDEO_RETRY",
+            "VIDEO",
+            video.id,
+            f"重新处理视频：{video.title}",
+            {"result": processed.status},
+        )
         if processed.status == VideoStatus.READY.value:
             return success(serialized, "视频重新转码完成")
         return error("视频重新转码失败", 422, serialized)
@@ -123,11 +168,14 @@ def retry_video(video_id: int):
 @roles_required(UserRole.ADMIN)
 def remove_failed_video(video_id: int):
     try:
+        video = get_admin_video(video_id)
+        title = video.title
         delete_failed_video(video_id)
     except AdminNotFound as exc:
         return error(str(exc), 404)
     except AdminConflict as exc:
         return error(str(exc), 409)
+    _record_audit("VIDEO_DELETE", "VIDEO", video_id, f"清理失败视频任务：{title}")
     return success(message="失败的视频任务及文件已清理")
 
 
@@ -140,7 +188,35 @@ def managed_courses():
     keyword = _keyword()
     if isinstance(keyword, tuple):
         return keyword
-    return success(list_admin_courses(status, keyword))
+    paging = _pagination()
+    if not isinstance(paging, dict):
+        return paging
+    return success(list_admin_courses(**paging, status=status, keyword=keyword))
+
+
+@admin_bp.get("/audit-logs")
+@roles_required(UserRole.ADMIN)
+def audit_logs():
+    paging = _pagination()
+    if not isinstance(paging, dict):
+        return paging
+    action = str(request.args.get("action") or "").strip().upper() or None
+    resource_type = str(request.args.get("resource_type") or "").strip().upper() or None
+    if action and len(action) > 50:
+        return error("审计动作参数不能超过50位", 400)
+    if resource_type and len(resource_type) > 50:
+        return error("资源类型参数不能超过50位", 400)
+    keyword = _keyword()
+    if isinstance(keyword, tuple):
+        return keyword
+    return success(
+        list_admin_audit_logs(
+            **paging,
+            action=action,
+            resource_type=resource_type,
+            keyword=keyword,
+        )
+    )
 
 
 @admin_bp.put("/courses/<int:course_id>/status")
@@ -155,6 +231,13 @@ def set_course_status(course_id: int):
         return error(str(exc), 404)
     except AdminConflict as exc:
         return error(str(exc), 409)
+    _record_audit(
+        "COURSE_STATUS_CHANGE",
+        "COURSE",
+        course_id,
+        f"将课程 {course['name']} 设为{raw_status}",
+        {"status": raw_status},
+    )
     return success(course, "课程状态更新成功")
 
 
@@ -171,9 +254,15 @@ def managed_classes():
 @roles_required(UserRole.ADMIN)
 def remove_class(class_id: int):
     try:
-        delete_admin_class(class_id)
+        class_name = delete_admin_class(class_id)
     except AdminNotFound as exc:
         return error(str(exc), 404)
+    _record_audit(
+        "CLASS_DELETE",
+        "CLASS",
+        class_id,
+        f"删除教学班级：{class_name}",
+    )
     return success(message="班级及成员关系已删除")
 
 
@@ -192,6 +281,12 @@ def add_category():
         return error(str(exc), 400)
     except AdminConflict as exc:
         return error(str(exc), 409)
+    _record_audit(
+        "CATEGORY_CREATE",
+        "CATEGORY",
+        category["id"],
+        f"创建课程分类：{category['name']}",
+    )
     return success(category, "课程分类已创建", 201)
 
 
@@ -209,6 +304,12 @@ def edit_category(category_id: int):
         return error(str(exc), 404)
     except AdminConflict as exc:
         return error(str(exc), 409)
+    _record_audit(
+        "CATEGORY_UPDATE",
+        "CATEGORY",
+        category_id,
+        f"更新课程分类：{category['name']}",
+    )
     return success(category, "课程分类已更新")
 
 
@@ -222,6 +323,13 @@ def set_category_status(category_id: int):
         category = change_admin_category_status(category_id, raw_status)
     except AdminNotFound as exc:
         return error(str(exc), 404)
+    _record_audit(
+        "CATEGORY_STATUS_CHANGE",
+        "CATEGORY",
+        category_id,
+        f"将课程分类 {category['name']} 设为{'启用' if raw_status else '禁用'}",
+        {"status": raw_status},
+    )
     return success(category, "课程分类状态更新成功")
 
 
@@ -230,3 +338,39 @@ def _keyword():
     if keyword and len(keyword) > 100:
         return error("搜索关键词不能超过100位", 400)
     return keyword
+
+
+def _pagination():
+    try:
+        page = int(request.args.get("page", 1))
+        page_size = int(request.args.get("page_size", 20))
+    except (TypeError, ValueError):
+        return error("分页参数必须是整数", 400)
+    if page < 1:
+        return error("页码必须大于等于1", 400)
+    if page_size < 1 or page_size > 100:
+        return error("每页数量必须在1到100之间", 400)
+    return {"page": page, "page_size": page_size}
+
+
+def _record_audit(
+    action: str,
+    resource_type: str,
+    resource_id: int | None,
+    summary: str,
+    details: dict | None = None,
+) -> None:
+    try:
+        record_admin_action(
+            int(get_jwt_identity()),
+            action,
+            resource_type,
+            resource_id,
+            summary,
+            details=details,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+        )
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("管理员操作审计写入失败：%s", action)

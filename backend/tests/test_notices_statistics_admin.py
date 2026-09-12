@@ -224,7 +224,15 @@ def test_notice_lifecycle_and_admin_user_management(app, client):
         headers=bearer(admin),
     )
     assert users.status_code == 200
-    assert len(users.get_json()["data"]) == 1
+    user_data = users.get_json()["data"]
+    assert len(user_data["items"]) == 1
+    assert user_data["pagination"]["total"] == 1
+    assert client.get(
+        "/api/admin/users?page=0", headers=bearer(admin)
+    ).status_code == 400
+    assert client.get(
+        "/api/admin/users?page_size=101", headers=bearer(admin)
+    ).status_code == 400
     disabled = client.put(
         f"/api/admin/users/{context['teacher_id']}/status",
         headers=bearer(admin),
@@ -237,6 +245,13 @@ def test_notice_lifecycle_and_admin_user_management(app, client):
         json={"account": context["teacher"], "password": "Password123!"},
     )
     assert denied_login.status_code == 401
+    audit_data = client.get(
+        "/api/admin/audit-logs?resource_type=NOTICE&page_size=2", headers=bearer(admin)
+    ).get_json()["data"]
+    assert audit_data["pagination"]["total"] == 4
+    assert len(audit_data["items"]) == 2
+    assert audit_data["items"][0]["action"] == "NOTICE_UPDATE"
+    assert audit_data["items"][0]["admin_username"] == context["admin"]
 
 
 def test_role_overviews_and_teacher_course_statistics(app, client):
@@ -302,6 +317,33 @@ def test_role_overviews_and_teacher_course_statistics(app, client):
     assert client.get(
         "/api/statistics/classes/999999", headers=bearer(teacher)
     ).status_code == 404
+
+
+def test_admin_user_list_uses_server_side_pagination(app, client):
+    context = create_context(app)
+    admin = login(client, context["admin"])
+    with app.app_context():
+        for index in range(24):
+            create_user(
+                f"paged_student_{index:02d}",
+                UserRole.STUDENT.value,
+                f"PAGE{index:03d}",
+            )
+        db.session.commit()
+
+    second_page = client.get(
+        "/api/admin/users?role=STUDENT&page=2&page_size=10",
+        headers=bearer(admin),
+    )
+    assert second_page.status_code == 200
+    data = second_page.get_json()["data"]
+    assert data["pagination"] == {"page": 2, "page_size": 10, "total": 25, "pages": 3}
+    assert len(data["items"]) == 10
+    last_page = client.get(
+        "/api/admin/users?role=STUDENT&page=3&page_size=10",
+        headers=bearer(admin),
+    ).get_json()["data"]
+    assert len(last_page["items"]) == 5
 
 
 def test_admin_can_manage_video_operations_courses_classes_and_categories(app, client):
@@ -394,7 +436,9 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
 
     courses = client.get("/api/admin/courses", headers=bearer(admin))
     assert courses.status_code == 200
-    course = courses.get_json()["data"][0]
+    course_data = courses.get_json()["data"]
+    assert course_data["pagination"]["total"] == 1
+    course = course_data["items"][0]
     assert course["ready_video_count"] == 1
     assert course["student_count"] == 1
     offline = client.put(
@@ -438,3 +482,17 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
     )
     assert disabled.status_code == 200
     assert disabled.get_json()["data"]["status"] is False
+
+    audit_response = client.get(
+        "/api/admin/audit-logs?resource_type=VIDEO", headers=bearer(admin)
+    )
+    assert audit_response.status_code == 200
+    video_audits = audit_response.get_json()["data"]
+    assert video_audits["pagination"]["total"] == 3
+    assert {item["action"] for item in video_audits["items"]} == {
+        "VIDEO_RETRY",
+        "VIDEO_DELETE",
+    }
+    assert client.get(
+        "/api/admin/audit-logs", headers=bearer(teacher)
+    ).status_code == 403

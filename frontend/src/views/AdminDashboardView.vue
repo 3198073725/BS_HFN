@@ -10,12 +10,13 @@ const loading = ref(false)
 const refreshingVideos = ref(false)
 const saving = ref(false)
 const overview = ref({})
-const videoOperations = ref({ items: [], summary: {}, runtime: {} })
+const videoOperations = ref({ items: [], pagination: {}, summary: {}, runtime: {} })
 const users = ref([])
 const courses = ref([])
 const classrooms = ref([])
 const categories = ref([])
 const notices = ref([])
+const auditLogs = ref([])
 const userDialog = ref(false)
 const noticeDialog = ref(false)
 const categoryDialog = ref(false)
@@ -25,6 +26,11 @@ const editingCategoryId = ref(null)
 const userFilters = reactive({ role: '', status: '', keyword: '' })
 const videoFilters = reactive({ status: '', keyword: '' })
 const courseFilters = reactive({ status: '', keyword: '' })
+const auditFilters = reactive({ action: '', resource_type: '', keyword: '' })
+const videoPage = reactive({ page: 1, page_size: 20, total: 0 })
+const userPage = reactive({ page: 1, page_size: 20, total: 0 })
+const coursePage = reactive({ page: 1, page_size: 20, total: 0 })
+const auditPage = reactive({ page: 1, page_size: 20, total: 0 })
 const classKeyword = ref('')
 const userForm = reactive({
   role: 'STUDENT', username: '', password: '', real_name: '',
@@ -85,9 +91,10 @@ const videoSummaryItems = computed(() => [
 const sections = computed(() => [
   { value: 'videos', label: '视频处理', count: videoOperations.value.summary?.total || 0 },
   { value: 'users', label: '用户账号', count: overview.value.users || 0 },
-  { value: 'resources', label: '课程与班级', count: courses.value.length + classrooms.value.length },
+  { value: 'resources', label: '课程与班级', count: (overview.value.courses || 0) + classrooms.value.length },
   { value: 'categories', label: '课程分类', count: categories.value.length },
   { value: 'notices', label: '系统公告', count: notices.value.length },
+  { value: 'audits', label: '操作审计', count: auditPage.total || 0 },
 ])
 
 const metrics = computed(() => [
@@ -112,6 +119,12 @@ function compactParams(filters) {
   )
 }
 
+function applyPagination(target, pagination = {}) {
+  target.page = pagination.page || 1
+  target.page_size = pagination.page_size || 20
+  target.total = pagination.total || 0
+}
+
 async function loadOverview() {
   overview.value = (await api.get('/statistics')).data
 }
@@ -120,8 +133,13 @@ async function loadVideos({ quiet = false } = {}) {
   const requestId = ++videoSearchSequence
   if (!quiet) refreshingVideos.value = true
   try {
-    const response = await api.get('/admin/videos', { params: compactParams(videoFilters) })
-    if (requestId === videoSearchSequence) videoOperations.value = response.data
+    const response = await api.get('/admin/videos', {
+      params: compactParams({ ...videoFilters, page: videoPage.page, page_size: videoPage.page_size }),
+    })
+    if (requestId === videoSearchSequence) {
+      videoOperations.value = response.data
+      applyPagination(videoPage, response.data.pagination)
+    }
   } catch (error) {
     if (!quiet && requestId === videoSearchSequence) ElMessage.error(error.message || '视频任务加载失败')
   } finally {
@@ -131,18 +149,38 @@ async function loadVideos({ quiet = false } = {}) {
 
 async function loadUsers() {
   const requestId = ++userSearchSequence
-  const response = await api.get('/admin/users', { params: compactParams(userFilters) })
-  if (requestId === userSearchSequence) users.value = response.data
+  const response = await api.get('/admin/users', {
+    params: compactParams({ ...userFilters, page: userPage.page, page_size: userPage.page_size }),
+  })
+  if (requestId === userSearchSequence) {
+    users.value = response.data.items
+    applyPagination(userPage, response.data.pagination)
+  }
 }
 
 async function searchUsers() {
+  userPage.page = 1
   try { await loadUsers() } catch (error) { ElMessage.error(error.message || '用户查询失败') }
+}
+
+async function searchVideos() {
+  videoPage.page = 1
+  await loadVideos()
 }
 
 async function loadCourses() {
   try {
-    courses.value = (await api.get('/admin/courses', { params: compactParams(courseFilters) })).data
+    const response = await api.get('/admin/courses', {
+      params: compactParams({ ...courseFilters, page: coursePage.page, page_size: coursePage.page_size }),
+    })
+    courses.value = response.data.items
+    applyPagination(coursePage, response.data.pagination)
   } catch (error) { ElMessage.error(error.message || '课程查询失败') }
+}
+
+async function searchCourses() {
+  coursePage.page = 1
+  await loadCourses()
 }
 
 async function loadClasses() {
@@ -159,11 +197,46 @@ async function loadNotices() {
   notices.value = (await api.get('/notices/manage')).data
 }
 
+async function loadAuditLogs() {
+  try {
+    const response = await api.get('/admin/audit-logs', {
+      params: compactParams({ ...auditFilters, page: auditPage.page, page_size: auditPage.page_size }),
+    })
+    auditLogs.value = response.data.items
+    applyPagination(auditPage, response.data.pagination)
+  } catch (error) { ElMessage.error(error.message || '操作审计加载失败') }
+}
+
+async function searchAuditLogs() {
+  auditPage.page = 1
+  await loadAuditLogs()
+}
+
+function changeVideoPage(page) {
+  videoPage.page = page
+  void loadVideos()
+}
+
+function changeUserPage(page) {
+  userPage.page = page
+  void loadUsers()
+}
+
+function changeCoursePage(page) {
+  coursePage.page = page
+  void loadCourses()
+}
+
+function changeAuditPage(page) {
+  auditPage.page = page
+  void loadAuditLogs()
+}
+
 async function load() {
   loading.value = true
   const results = await Promise.allSettled([
     loadOverview(), loadVideos({ quiet: true }), loadUsers(), loadCourses(),
-    loadClasses(), loadCategories(), loadNotices(),
+    loadClasses(), loadCategories(), loadNotices(), loadAuditLogs(),
   ])
   loading.value = false
   if (results.some((item) => item.status === 'rejected')) {
@@ -382,6 +455,10 @@ watch(() => userForm.role, (role) => {
   userFormRef.value?.clearValidate(['student_no', 'teacher_no'])
 })
 
+watch(activeSection, (section) => {
+  if (section === 'audits') void loadAuditLogs()
+})
+
 function roleLabel(role) { return { ADMIN: '管理员', TEACHER: '教师', STUDENT: '学生' }[role] || role }
 function courseStatusLabel(status) { return { DRAFT: '草稿', PUBLISHED: '已发布', OFFLINE: '已下线' }[status] || status }
 function videoStatusLabel(status) { return { UPLOADING: '上传中', PENDING: '等待处理', PROCESSING: '处理中', READY: '可播放', FAILED: '失败' }[status] || status }
@@ -389,6 +466,19 @@ function videoStepLabel(step) {
   return { QUEUED: '等待队列', PROBING: '读取媒体信息', TRANSCODING: '生成标准 MP4', HLS: '生成 HLS 分片', COVER: '提取封面', FINISHED: '处理完成' }[step] || (step || '等待处理')
 }
 function noticeStatusLabel(status) { return { DRAFT: '草稿', PUBLISHED: '已发布', OFFLINE: '已下线' }[status] || status }
+function auditActionLabel(action) {
+  return {
+    USER_CREATE: '创建用户', USER_STATUS_CHANGE: '用户状态',
+    VIDEO_RETRY: '重新转码', VIDEO_DELETE: '清理视频',
+    COURSE_STATUS_CHANGE: '课程状态', CLASS_DELETE: '删除班级',
+    CATEGORY_CREATE: '创建分类', CATEGORY_UPDATE: '编辑分类',
+    CATEGORY_STATUS_CHANGE: '分类状态', NOTICE_CREATE: '创建公告',
+    NOTICE_UPDATE: '编辑公告', NOTICE_STATUS_CHANGE: '公告状态', NOTICE_DELETE: '删除公告',
+  }[action] || action
+}
+function auditResourceLabel(resource) {
+  return { USER: '用户', VIDEO: '视频', COURSE: '课程', CLASS: '班级', CATEGORY: '分类', NOTICE: '公告' }[resource] || resource
+}
 
 function formatDate(value) {
   if (!value) return '—'
@@ -454,11 +544,11 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         </article>
       </div>
       <div class="admin-filters video-filters">
-        <el-input v-model="videoFilters.keyword" clearable placeholder="搜索视频、课程、教师或文件名" @keyup.enter="loadVideos()" />
+        <el-input v-model="videoFilters.keyword" clearable placeholder="搜索视频、课程、教师或文件名" @keyup.enter="searchVideos" />
         <el-select v-model="videoFilters.status" placeholder="全部状态">
           <el-option label="全部状态" value="" /><el-option label="上传中" value="UPLOADING" /><el-option label="等待处理" value="PENDING" /><el-option label="处理中" value="PROCESSING" /><el-option label="可播放" value="READY" /><el-option label="失败" value="FAILED" />
         </el-select>
-        <el-button @click="loadVideos()">查询任务</el-button>
+        <el-button @click="searchVideos">查询任务</el-button>
       </div>
       <p class="table-scroll-hint">左右滑动表格可查看媒体参数、错误原因和操作</p>
       <el-table :data="videoOperations.items" max-height="530" empty-text="没有符合条件的视频任务">
@@ -478,10 +568,20 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
           <template #default="scope"><el-button v-if="scope.row.retryable" link @click="retryVideo(scope.row)">重新转码</el-button><el-button v-if="scope.row.removable" link @click="removeVideo(scope.row)">清理</el-button><span v-if="!scope.row.retryable && !scope.row.removable" class="no-action">无需处理</span></template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="videoPage.total > videoPage.page_size"
+        class="admin-pagination"
+        background
+        layout="prev, pager, next, total"
+        :current-page="videoPage.page"
+        :page-size="videoPage.page_size"
+        :total="videoPage.total"
+        @current-change="changeVideoPage"
+      />
     </div>
 
     <div v-else-if="activeSection === 'users'" class="management-surface admin-panel admin-users">
-      <div class="surface-heading admin-panel-heading"><div><strong>用户账号管理</strong><span>{{ users.length }} 条结果</span></div><el-button @click="userDialog = true">＋ 创建用户</el-button></div>
+      <div class="surface-heading admin-panel-heading"><div><strong>用户账号管理</strong><span>共 {{ userPage.total }} 条结果</span></div><el-button @click="userDialog = true">＋ 创建用户</el-button></div>
       <div class="admin-filters">
         <el-input v-model="userFilters.keyword" clearable placeholder="搜索用户名、姓名、学号或工号" @keyup.enter="searchUsers" />
         <el-select v-model="userFilters.role" placeholder="全部角色"><el-option label="全部角色" value="" /><el-option label="学生" value="STUDENT" /><el-option label="教师" value="TEACHER" /><el-option label="管理员" value="ADMIN" /></el-select>
@@ -497,15 +597,25 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <el-table-column label="状态" width="90"><template #default="scope"><span :class="['account-state', scope.row.status ? 'active' : 'disabled']">{{ scope.row.status ? '正常' : '禁用' }}</span></template></el-table-column>
         <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button v-if="scope.row.role !== 'ADMIN'" link @click="toggleUser(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
       </el-table>
+      <el-pagination
+        v-if="userPage.total > userPage.page_size"
+        class="admin-pagination"
+        background
+        layout="prev, pager, next, total"
+        :current-page="userPage.page"
+        :page-size="userPage.page_size"
+        :total="userPage.total"
+        @current-change="changeUserPage"
+      />
     </div>
 
     <div v-else-if="activeSection === 'resources'" class="admin-resource-grid">
       <div class="management-surface admin-panel admin-courses">
         <div class="surface-heading admin-panel-heading"><div><strong>课程监管</strong><span>跨教师查看并处理发布状态</span></div></div>
         <div class="admin-filters resource-filters">
-          <el-input v-model="courseFilters.keyword" clearable placeholder="搜索课程、教师或工号" @keyup.enter="loadCourses" />
+          <el-input v-model="courseFilters.keyword" clearable placeholder="搜索课程、教师或工号" @keyup.enter="searchCourses" />
           <el-select v-model="courseFilters.status" placeholder="全部状态"><el-option label="全部状态" value="" /><el-option label="草稿" value="DRAFT" /><el-option label="已发布" value="PUBLISHED" /><el-option label="已下线" value="OFFLINE" /></el-select>
-          <el-button @click="loadCourses">查询课程</el-button>
+          <el-button @click="searchCourses">查询课程</el-button>
         </div>
         <el-table :data="courses" max-height="470" empty-text="没有符合条件的课程">
           <el-table-column label="课程" min-width="185"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.category_name }} · {{ scope.row.teacher_name }}</span></div></template></el-table-column>
@@ -514,6 +624,16 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
           <el-table-column label="状态" width="90"><template #default="scope"><span :class="['operation-state', `state-${scope.row.status.toLowerCase()}`]">{{ courseStatusLabel(scope.row.status) }}</span></template></el-table-column>
           <el-table-column label="操作" width="105" fixed="right"><template #default="scope"><el-button v-if="scope.row.status === 'PUBLISHED'" link @click="changeCourseStatus(scope.row, 'OFFLINE')">下线</el-button><el-button v-else link @click="changeCourseStatus(scope.row, 'PUBLISHED')">发布</el-button></template></el-table-column>
         </el-table>
+        <el-pagination
+          v-if="coursePage.total > coursePage.page_size"
+          class="admin-pagination"
+          background
+          layout="prev, pager, next, total"
+          :current-page="coursePage.page"
+          :page-size="coursePage.page_size"
+          :total="coursePage.total"
+          @current-change="changeCoursePage"
+        />
       </div>
       <div class="management-surface admin-panel admin-classes">
         <div class="surface-heading admin-panel-heading"><div><strong>班级监管</strong><span>删除班级不会删除师生账号</span></div></div>
@@ -536,12 +656,48 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
       </el-table>
     </div>
 
-    <div v-else class="notice-management admin-panel">
+    <div v-else-if="activeSection === 'notices'" class="notice-management admin-panel">
       <div class="notice-management-heading"><div><strong>系统公告</strong><span>{{ notices.length }} 条公告，可编辑下线内容后再次发布</span></div><el-button @click="openNotice()">＋ 新建公告</el-button></div>
       <div class="admin-notice-list">
         <article v-for="notice in notices" :key="notice.id"><div><span :class="['notice-state', `state-${notice.status.toLowerCase()}`]">{{ noticeStatusLabel(notice.status) }}</span><small>{{ formatDate(notice.publish_time || notice.created_at) }}</small></div><h3>{{ notice.title }}</h3><p>{{ notice.content }}</p><footer><el-button v-if="notice.status !== 'PUBLISHED'" link @click="openNotice(notice)">编辑</el-button><el-button v-if="notice.status !== 'PUBLISHED'" link @click="changeNoticeStatus(notice, 'PUBLISHED')">发布</el-button><el-button v-else link @click="changeNoticeStatus(notice, 'OFFLINE')">下线</el-button><el-button v-if="notice.status !== 'PUBLISHED'" link @click="removeNotice(notice)">删除</el-button></footer></article>
         <el-empty v-if="!notices.length" description="暂无公告" :image-size="60" />
       </div>
+    </div>
+
+    <div v-else class="management-surface admin-panel admin-audits">
+      <div class="surface-heading admin-panel-heading">
+        <div><strong>管理员操作审计</strong><span>记录高风险管理操作及来源信息</span></div>
+        <el-button text class="admin-quiet-button" @click="loadAuditLogs">刷新</el-button>
+      </div>
+      <div class="admin-filters audit-filters">
+        <el-input v-model="auditFilters.keyword" clearable placeholder="搜索管理员或操作摘要" @keyup.enter="searchAuditLogs" />
+        <el-select v-model="auditFilters.resource_type" placeholder="全部对象">
+          <el-option label="全部对象" value="" /><el-option label="用户" value="USER" /><el-option label="视频" value="VIDEO" /><el-option label="课程" value="COURSE" /><el-option label="班级" value="CLASS" /><el-option label="分类" value="CATEGORY" /><el-option label="公告" value="NOTICE" />
+        </el-select>
+        <el-select v-model="auditFilters.action" placeholder="全部操作">
+          <el-option label="全部操作" value="" /><el-option label="创建用户" value="USER_CREATE" /><el-option label="用户状态" value="USER_STATUS_CHANGE" /><el-option label="重新转码" value="VIDEO_RETRY" /><el-option label="清理视频" value="VIDEO_DELETE" /><el-option label="课程状态" value="COURSE_STATUS_CHANGE" /><el-option label="删除班级" value="CLASS_DELETE" /><el-option label="创建分类" value="CATEGORY_CREATE" /><el-option label="编辑分类" value="CATEGORY_UPDATE" /><el-option label="分类状态" value="CATEGORY_STATUS_CHANGE" /><el-option label="创建公告" value="NOTICE_CREATE" /><el-option label="编辑公告" value="NOTICE_UPDATE" /><el-option label="公告状态" value="NOTICE_STATUS_CHANGE" /><el-option label="删除公告" value="NOTICE_DELETE" />
+        </el-select>
+        <el-button @click="searchAuditLogs">查询记录</el-button>
+      </div>
+      <p class="table-scroll-hint">审计记录只读，保留管理员、对象、来源地址与操作时间</p>
+      <el-table :data="auditLogs" max-height="530" empty-text="暂无管理员操作记录">
+        <el-table-column label="管理员" min-width="145"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.admin_name }}</strong><span>{{ scope.row.admin_username }}</span></div></template></el-table-column>
+        <el-table-column label="操作" min-width="120"><template #default="scope">{{ auditActionLabel(scope.row.action) }}</template></el-table-column>
+        <el-table-column label="对象" min-width="110"><template #default="scope">{{ auditResourceLabel(scope.row.resource_type) }}<span v-if="scope.row.resource_id"> #{{ scope.row.resource_id }}</span></template></el-table-column>
+        <el-table-column prop="summary" label="操作摘要" min-width="260" show-overflow-tooltip />
+        <el-table-column label="来源 IP" min-width="130"><template #default="scope">{{ scope.row.ip_address || '—' }}</template></el-table-column>
+        <el-table-column label="操作时间" width="145"><template #default="scope">{{ formatDate(scope.row.created_at) }}</template></el-table-column>
+      </el-table>
+      <el-pagination
+        v-if="auditPage.total > auditPage.page_size"
+        class="admin-pagination"
+        background
+        layout="prev, pager, next, total"
+        :current-page="auditPage.page"
+        :page-size="auditPage.page_size"
+        :total="auditPage.total"
+        @current-change="changeAuditPage"
+      />
     </div>
 
     <el-dialog v-model="userDialog" class="admin-neutral-dialog" title="创建教师或学生账号" width="min(620px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetUserForm">

@@ -1,3 +1,4 @@
+from .admin_audit_log import AdminAuditLog
 from .category import CourseCategory
 from .chapter import Chapter
 from .course import Course, CourseStudent, Favorite
@@ -12,6 +13,7 @@ from .video import Video
 
 
 __all__ = [
+    "AdminAuditLog",
     "Answer",
     "Chapter",
     "Course",

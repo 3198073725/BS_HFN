@@ -35,7 +35,13 @@ class AdminConflict(ValueError):
 VIDEO_STALE_AFTER = timedelta(minutes=30)
 
 
-def list_users(role: str | None = None, status: bool | None = None, keyword: str | None = None) -> list[dict]:
+def list_users(
+    page: int,
+    page_size: int,
+    role: str | None = None,
+    status: bool | None = None,
+    keyword: str | None = None,
+) -> dict:
     statement = db.select(User)
     if role:
         statement = statement.where(User.role == role)
@@ -52,8 +58,16 @@ def list_users(role: str | None = None, status: bool | None = None, keyword: str
                 User.email.ilike(pattern),
             )
         )
-    users = db.session.scalars(statement.order_by(User.created_at.desc(), User.id.desc())).all()
-    return [item.to_dict() for item in users]
+    pagination = db.paginate(
+        statement.order_by(User.created_at.desc(), User.id.desc()),
+        page=page,
+        per_page=page_size,
+        error_out=False,
+    )
+    return {
+        "items": [item.to_dict() for item in pagination.items],
+        "pagination": _pagination_payload(pagination),
+    }
 
 
 def change_user_status(user_id: int, status: bool) -> dict:
@@ -69,7 +83,12 @@ def change_user_status(user_id: int, status: bool) -> dict:
     return user.to_dict()
 
 
-def list_video_operations(status: str | None = None, keyword: str | None = None) -> dict:
+def list_video_operations(
+    page: int,
+    page_size: int,
+    status: str | None = None,
+    keyword: str | None = None,
+) -> dict:
     statement = db.select(Video).options(
         joinedload(Video.chapter)
         .joinedload(Chapter.course)
@@ -93,16 +112,20 @@ def list_video_operations(status: str | None = None, keyword: str | None = None)
                 )
             )
         )
-    videos = db.session.scalars(
-        statement.order_by(Video.updated_at.desc(), Video.id.desc())
-    ).unique().all()
+    pagination = db.paginate(
+        statement.order_by(Video.updated_at.desc(), Video.id.desc()),
+        page=page,
+        per_page=page_size,
+        error_out=False,
+    )
     counts = {item.value: 0 for item in VideoStatus}
     for current_status, count in db.session.execute(
         db.select(Video.status, func.count(Video.id)).group_by(Video.status)
     ).all():
         counts[current_status] = int(count)
     return {
-        "items": [serialize_admin_video(video) for video in videos],
+        "items": [serialize_admin_video(video) for video in pagination.items],
+        "pagination": _pagination_payload(pagination),
         "summary": {"total": sum(counts.values()), **counts},
         "runtime": video_runtime_status(),
     }
@@ -190,7 +213,12 @@ def video_runtime_status() -> dict:
     }
 
 
-def list_admin_courses(status: str | None = None, keyword: str | None = None) -> list[dict]:
+def list_admin_courses(
+    page: int,
+    page_size: int,
+    status: str | None = None,
+    keyword: str | None = None,
+) -> dict:
     statement = db.select(Course).options(
         selectinload(Course.teacher),
         selectinload(Course.category),
@@ -208,31 +236,54 @@ def list_admin_courses(status: str | None = None, keyword: str | None = None) ->
                 User.teacher_no.ilike(pattern),
             )
         )
-    courses = db.session.scalars(
-        statement.order_by(Course.updated_at.desc(), Course.id.desc())
-    ).unique().all()
-    return [
-        {
-            "id": course.id,
-            "name": course.name,
-            "status": course.status,
-            "teacher_id": course.teacher_id,
-            "teacher_name": course.teacher.real_name,
-            "teacher_no": course.teacher.teacher_no,
-            "category_name": course.category.name,
-            "chapter_count": len(course.chapters),
-            "video_count": sum(len(chapter.videos) for chapter in course.chapters),
-            "ready_video_count": sum(
-                video.status == VideoStatus.READY.value
-                for chapter in course.chapters
-                for video in chapter.videos
-            ),
-            "student_count": sum(link.status for link in course.student_links),
-            "published_at": iso_utc(course.published_at),
-            "updated_at": iso_utc(course.updated_at),
-        }
-        for course in courses
-    ]
+    pagination = db.paginate(
+        statement.order_by(Course.updated_at.desc(), Course.id.desc()),
+        page=page,
+        per_page=page_size,
+        error_out=False,
+    )
+    return {
+        "items": [serialize_admin_course(course) for course in pagination.items],
+        "pagination": _pagination_payload(pagination),
+    }
+
+
+def serialize_admin_course(course: Course) -> dict:
+    return {
+        "id": course.id,
+        "name": course.name,
+        "status": course.status,
+        "teacher_id": course.teacher_id,
+        "teacher_name": course.teacher.real_name,
+        "teacher_no": course.teacher.teacher_no,
+        "category_name": course.category.name,
+        "chapter_count": len(course.chapters),
+        "video_count": sum(len(chapter.videos) for chapter in course.chapters),
+        "ready_video_count": sum(
+            video.status == VideoStatus.READY.value
+            for chapter in course.chapters
+            for video in chapter.videos
+        ),
+        "student_count": sum(link.status for link in course.student_links),
+        "published_at": iso_utc(course.published_at),
+        "updated_at": iso_utc(course.updated_at),
+    }
+
+
+def _get_admin_course(course_id: int) -> Course:
+    course = db.session.scalar(
+        db.select(Course)
+        .options(
+            selectinload(Course.teacher),
+            selectinload(Course.category),
+            selectinload(Course.chapters).selectinload(Chapter.videos),
+            selectinload(Course.student_links),
+        )
+        .where(Course.id == course_id)
+    )
+    if course is None:
+        raise AdminNotFound("课程不存在")
+    return course
 
 
 def change_admin_course_status(course_id: int, status: CourseStatus) -> dict:
@@ -240,7 +291,7 @@ def change_admin_course_status(course_id: int, status: CourseStatus) -> dict:
     if course is None:
         raise AdminNotFound("课程不存在")
     if course.status == status.value:
-        return next(item for item in list_admin_courses() if item["id"] == course.id)
+        return serialize_admin_course(_get_admin_course(course.id))
     if status is CourseStatus.OFFLINE:
         if course.status != CourseStatus.PUBLISHED.value:
             raise AdminConflict("只有已发布课程可以强制下线")
@@ -257,7 +308,7 @@ def change_admin_course_status(course_id: int, status: CourseStatus) -> dict:
         raise AdminConflict("管理员只能发布或下线课程")
     course.status = status.value
     db.session.commit()
-    return next(item for item in list_admin_courses() if item["id"] == course.id)
+    return serialize_admin_course(_get_admin_course(course.id))
 
 
 def list_admin_classes(keyword: str | None = None) -> list[dict]:
@@ -294,12 +345,14 @@ def list_admin_classes(keyword: str | None = None) -> list[dict]:
     ]
 
 
-def delete_admin_class(class_id: int) -> None:
+def delete_admin_class(class_id: int) -> str:
     classroom = db.session.get(TeachingClass, class_id)
     if classroom is None:
         raise AdminNotFound("班级不存在")
+    name = classroom.name
     db.session.delete(classroom)
     db.session.commit()
+    return name
 
 
 def list_admin_categories() -> list[dict]:
@@ -403,3 +456,12 @@ def _binary_status(command: str) -> dict:
     except (OSError, subprocess.TimeoutExpired):
         result["available"] = False
     return result
+
+
+def _pagination_payload(pagination) -> dict:
+    return {
+        "page": pagination.page,
+        "page_size": pagination.per_page,
+        "total": pagination.total,
+        "pages": pagination.pages,
+    }

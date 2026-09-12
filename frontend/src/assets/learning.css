@@ -3196,6 +3196,10 @@
   grid-template-columns: minmax(240px, 1fr) 150px auto;
 }
 
+.admin-filters.audit-filters {
+  grid-template-columns: minmax(240px, 1fr) 140px 150px auto;
+}
+
 .admin-filters.class-filters {
   grid-template-columns: minmax(240px, 1fr) auto;
 }
@@ -3376,8 +3380,20 @@
 }
 
 .admin-resource-grid .admin-panel,
-.admin-users.admin-panel {
+.admin-users.admin-panel,
+.admin-audits.admin-panel {
   height: auto;
+}
+
+.admin-pagination {
+  display: flex;
+  min-height: 58px;
+  margin: 0;
+  padding: 10px 16px;
+  border-top: 1px solid #e2e2e2;
+  align-items: center;
+  justify-content: flex-end;
+  overflow-x: auto;
 }
 
 .admin-notice-list {
@@ -3448,12 +3464,14 @@
   }
 
   .admin-filters.video-filters,
-  .admin-filters.resource-filters {
+  .admin-filters.resource-filters,
+  .admin-filters.audit-filters {
     grid-template-columns: 1fr 1fr;
   }
 
   .admin-filters.video-filters .el-button,
-  .admin-filters.resource-filters .el-button {
+  .admin-filters.resource-filters .el-button,
+  .admin-filters.audit-filters .el-button {
     grid-column: 1 / -1;
   }
 
@@ -3480,7 +3498,8 @@
 
   .admin-filters.video-filters,
   .admin-filters.resource-filters,
-  .admin-filters.class-filters {
+  .admin-filters.class-filters,
+  .admin-filters.audit-filters {
     grid-template-columns: 1fr;
   }
 
