@@ -881,6 +881,48 @@ test('教师上传视频时拒绝错误格式并完成真实 MP4 转码', async 
   await expect(page.getByText('视频处理完成')).toBeVisible()
   await courseRow.getByRole('button', { name: '展开当前行' }).click()
   await expect(page.getByText('浏览器上传视频 · 可播放', { exact: true })).toBeVisible()
+
+  let videoRow = page.locator('.video-management-row').filter({ hasText: '浏览器上传视频' })
+  await videoRow.getByRole('button', { name: '编辑视频', exact: true }).click()
+  let manageDialog = page.getByRole('dialog', { name: '编辑视频资料' })
+  await manageDialog.getByPlaceholder('请输入视频标题').fill('浏览器更新视频')
+  const editedResponse = page.waitForResponse((response) =>
+    /\/api\/videos\/\d+$/.test(new URL(response.url()).pathname) && response.request().method() === 'PUT',
+  )
+  await manageDialog.getByRole('button', { name: '保存修改', exact: true }).click()
+  expect((await editedResponse).status()).toBe(200)
+  await expect(page.getByText('视频资料已更新')).toBeVisible()
+  if (await courseRow.getByRole('button', { name: '展开当前行' }).isVisible()) {
+    await courseRow.getByRole('button', { name: '展开当前行' }).click()
+  }
+  await expect(page.getByText('浏览器更新视频 · 可播放', { exact: true })).toBeVisible()
+
+  videoRow = page.locator('.video-management-row').filter({ hasText: '浏览器更新视频' })
+  await videoRow.getByRole('button', { name: '替换文件', exact: true }).click()
+  manageDialog = page.getByRole('dialog', { name: '替换视频文件' })
+  await manageDialog.locator('input[type="file"]').setInputFiles(uploadFixture)
+  const replacedResponse = page.waitForResponse((response) =>
+    /\/api\/videos\/\d+\/replace$/.test(new URL(response.url()).pathname),
+  )
+  await manageDialog.getByRole('button', { name: '替换并处理', exact: true }).click()
+  await page.getByRole('dialog', { name: '确认替换视频' })
+    .getByRole('button', { name: '确认替换', exact: true }).click()
+  expect((await replacedResponse).status()).toBe(201)
+  await expect(page.getByText('视频替换完成')).toBeVisible()
+  if (await courseRow.getByRole('button', { name: '展开当前行' }).isVisible()) {
+    await courseRow.getByRole('button', { name: '展开当前行' }).click()
+  }
+  await expect(page.getByText('浏览器更新视频 · 可播放', { exact: true })).toBeVisible()
+
+  videoRow = page.locator('.video-management-row').filter({ hasText: '浏览器更新视频' })
+  const deletedResponse = page.waitForResponse((response) =>
+    /\/api\/videos\/\d+$/.test(new URL(response.url()).pathname) && response.request().method() === 'DELETE',
+  )
+  await videoRow.getByRole('button', { name: '删除视频', exact: true }).click()
+  await page.getByRole('dialog', { name: '删除视频' })
+    .getByRole('button', { name: '确认删除', exact: true }).click()
+  expect((await deletedResponse).status()).toBe(200)
+  await expect(page.getByText('视频已删除')).toBeVisible()
 })
 
 

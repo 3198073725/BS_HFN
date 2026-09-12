@@ -14,8 +14,10 @@ const videoFormRef = ref(null)
 const courseDialog = ref(false)
 const chapterDialog = ref(false)
 const videoDialog = ref(false)
+const videoDialogMode = ref('upload')
 const selectedCourse = ref(null)
 const selectedChapter = ref(null)
+const selectedVideo = ref(null)
 const editingCourseId = ref(null)
 const editingCourseStatus = ref(null)
 const editingChapterId = ref(null)
@@ -29,6 +31,7 @@ const courseCoverInputKey = ref(0)
 const uploading = ref(false)
 const savingCourse = ref(false)
 const savingChapter = ref(false)
+const processingVideoId = ref(null)
 let disposed = false
 const courseForm = reactive({ name: '', category_id: null, description: '', detail: '' })
 const chapterForm = reactive({ title: '', description: '', sort_order: 0 })
@@ -234,9 +237,43 @@ async function saveChapter() {
 }
 
 function openVideo(chapter) {
+  videoDialogMode.value = 'upload'
   selectedChapter.value = chapter
+  selectedVideo.value = null
   videoFile.value = null
   Object.assign(videoForm, { title: '', description: '', sort_order: 0 })
+  videoInputKey.value += 1
+  videoFormRef.value?.clearValidate()
+  videoDialog.value = true
+}
+
+function openVideoEdit(course, chapter, video) {
+  videoDialogMode.value = 'edit'
+  selectedCourse.value = course
+  selectedChapter.value = chapter
+  selectedVideo.value = video
+  videoFile.value = null
+  Object.assign(videoForm, {
+    title: video.title || '',
+    description: video.description || '',
+    sort_order: video.sort_order || 0,
+  })
+  videoInputKey.value += 1
+  videoFormRef.value?.clearValidate()
+  videoDialog.value = true
+}
+
+function openVideoReplace(course, chapter, video) {
+  videoDialogMode.value = 'replace'
+  selectedCourse.value = course
+  selectedChapter.value = chapter
+  selectedVideo.value = video
+  videoFile.value = null
+  Object.assign(videoForm, {
+    title: video.title || '',
+    description: video.description || '',
+    sort_order: video.sort_order || 0,
+  })
   videoInputKey.value += 1
   videoFormRef.value?.clearValidate()
   videoDialog.value = true
@@ -273,41 +310,94 @@ function canDeleteChapter(course) {
   return ['DRAFT', 'OFFLINE'].includes(course.status)
 }
 
+function canChangeVideoContent(course, video) {
+  return ['DRAFT', 'OFFLINE'].includes(course.status)
+    && !['PENDING', 'PROCESSING'].includes(video.status)
+}
+
+function videoDialogTitle() {
+  return { upload: '上传视频', edit: '编辑视频资料', replace: '替换视频文件' }[videoDialogMode.value]
+}
+
+function resetVideoForm() {
+  if (uploading.value) return
+  videoDialogMode.value = 'upload'
+  selectedVideo.value = null
+  videoFile.value = null
+  Object.assign(videoForm, { title: '', description: '', sort_order: 0 })
+  videoInputKey.value += 1
+  videoFormRef.value?.clearValidate()
+}
+
 function selectVideoFile(event) {
   videoFile.value = event.target.files?.[0] || null
 }
 
-async function uploadVideo() {
+async function saveVideo() {
   const valid = await videoFormRef.value?.validate().catch(() => false)
   if (!valid || uploading.value) return
 
-  if (!videoFile.value) {
+  if (videoDialogMode.value !== 'edit' && !videoFile.value) {
     ElMessage.warning('请选择视频文件')
     return
   }
+  if (videoDialogMode.value === 'replace') {
+    try {
+      await ElMessageBox.confirm(
+        '替换会创建新的视频记录，并清除原视频对应的学习进度、笔记和答疑，确认继续？',
+        '确认替换视频',
+        { confirmButtonText: '确认替换', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return
+    }
+  }
+
+  if (videoDialogMode.value === 'edit') {
+    uploading.value = true
+    try {
+      await api.put(`/videos/${selectedVideo.value.id}`, {
+        title: videoForm.title,
+        description: videoForm.description,
+        sort_order: videoForm.sort_order,
+      })
+      ElMessage.success('视频资料已更新')
+      videoDialog.value = false
+      await load()
+    } catch (error) {
+      ElMessage.error(error.message || '视频资料保存失败')
+    } finally {
+      uploading.value = false
+    }
+    return
+  }
+
   const data = new FormData()
-  data.append('chapter_id', selectedChapter.value.id)
+  if (videoDialogMode.value === 'upload') data.append('chapter_id', selectedChapter.value.id)
   data.append('title', videoForm.title)
   data.append('description', videoForm.description)
   data.append('sort_order', videoForm.sort_order)
   data.append('video_file', videoFile.value)
   uploading.value = true
   try {
-    const response = await api.post('/videos/upload', data, { timeout: 0 })
+    const endpoint = videoDialogMode.value === 'replace'
+      ? `/videos/${selectedVideo.value.id}/replace`
+      : '/videos/upload'
+    const response = await api.post(endpoint, data, { timeout: 0 })
     if (response.data.status === 'READY') {
-      ElMessage.success('视频处理完成')
+      ElMessage.success(videoDialogMode.value === 'replace' ? '视频替换完成' : '视频处理完成')
       await load()
     } else if (response.data.status === 'FAILED') {
       ElMessage.error(response.data.error_message || '视频处理失败')
       await load()
     } else {
-      ElMessage.success('视频已提交后台处理，可继续编辑其他内容')
+      ElMessage.success(videoDialogMode.value === 'replace' ? '替换视频已提交后台处理' : '视频已提交后台处理，可继续编辑其他内容')
       await load()
       void monitorVideo(response.data.id)
     }
     videoDialog.value = false
   } catch (error) {
-    ElMessage.error(error.message || '视频上传失败')
+    ElMessage.error(error.message || (videoDialogMode.value === 'replace' ? '视频替换失败' : '视频上传失败'))
   } finally {
     uploading.value = false
   }
@@ -340,6 +430,51 @@ async function monitorVideo(videoId) {
     }
   }
   if (!disposed) ElMessage.warning('视频仍在后台处理，请稍后刷新课程列表')
+}
+
+async function retryVideo(video) {
+  if (processingVideoId.value !== null) return
+  processingVideoId.value = video.id
+  try {
+    const response = await api.post(`/videos/${video.id}/retry`, null, { timeout: 0 })
+    if (response.data.status === 'READY') {
+      ElMessage.success('视频重新转码完成')
+      await load()
+    } else if (response.data.status === 'FAILED') {
+      ElMessage.error(response.data.error_message || '视频重新转码失败')
+      await load()
+    } else {
+      ElMessage.success('视频已重新提交后台处理')
+      await load()
+      void monitorVideo(response.data.id)
+    }
+  } catch (error) {
+    ElMessage.error(error.message || '视频重新处理失败')
+  } finally {
+    processingVideoId.value = null
+  }
+}
+
+async function removeVideo(course, video) {
+  try {
+    await ElMessageBox.confirm(
+      `删除“${video.title}”会同时清除相关学习进度、笔记和答疑，确定继续吗？`,
+      '删除视频',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  processingVideoId.value = video.id
+  try {
+    await api.delete(`/videos/${video.id}`)
+    ElMessage.success('视频已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error(error.message || '视频删除失败')
+  } finally {
+    processingVideoId.value = null
+  }
 }
 
 async function publish(course) {
@@ -436,9 +571,32 @@ onBeforeUnmount(() => {
                   <div>
                     <strong>{{ chapter.title }}</strong>
                     <span class="muted"> · {{ chapter.videos.length }} 个视频</span>
-                    <div v-for="video in chapter.videos" :key="video.id" class="video-status">
-                      <span :class="`video-state state-${video.status.toLowerCase()}`"></span>
-                      {{ video.title }} · {{ statusLabel(video.status) }}
+                    <div v-for="video in chapter.videos" :key="video.id" class="video-management-row">
+                      <div class="video-status">
+                        <span :class="`video-state state-${video.status.toLowerCase()}`"></span>
+                        <span>{{ video.title }} · {{ statusLabel(video.status) }}</span>
+                      </div>
+                      <div class="video-inline-actions">
+                        <el-button text @click="openVideoEdit(scope.row, chapter, video)">编辑视频</el-button>
+                        <el-button
+                          v-if="video.status === 'FAILED'"
+                          text
+                          :loading="processingVideoId === video.id"
+                          @click="retryVideo(video)"
+                        >重新处理</el-button>
+                        <el-button
+                          v-if="canChangeVideoContent(scope.row, video)"
+                          text
+                          @click="openVideoReplace(scope.row, chapter, video)"
+                        >替换文件</el-button>
+                        <el-button
+                          v-if="canChangeVideoContent(scope.row, video)"
+                          text
+                          type="danger"
+                          :loading="processingVideoId === video.id"
+                          @click="removeVideo(scope.row, video)"
+                        >删除视频</el-button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -613,11 +771,12 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="videoDialog"
-      title="上传视频"
+      :title="videoDialogTitle()"
       width="min(520px, 92vw)"
       :close-on-click-modal="!uploading"
       :close-on-press-escape="!uploading"
       :show-close="!uploading"
+      @closed="resetVideoForm"
     >
       <el-form ref="videoFormRef" :model="videoForm" :rules="videoRules" label-position="top">
         <el-form-item label="视频标题" prop="title">
@@ -632,7 +791,7 @@ onBeforeUnmount(() => {
           />
         </el-form-item>
         <el-form-item label="排序"><el-input-number v-model="videoForm.sort_order" :min="0" :max="100000" /></el-form-item>
-        <el-form-item label="视频文件" required>
+        <el-form-item v-if="videoDialogMode !== 'edit'" label="视频文件" required>
           <label class="file-picker">
             <input
               :key="videoInputKey"
@@ -640,15 +799,23 @@ onBeforeUnmount(() => {
               accept=".mp4,.mov,.mkv,.avi,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm"
               @change="selectVideoFile"
             />
-            <span>选择视频文件</span>
+            <span>{{ videoDialogMode === 'replace' ? '选择新文件' : '选择视频文件' }}</span>
             <strong>{{ videoFile?.name || '尚未选择文件' }}</strong>
           </label>
         </el-form-item>
       </el-form>
-      <p class="dialog-tip">支持 MP4、MOV、MKV、AVI、WebM；大视频将在后台处理，完成后会提示结果。</p>
+      <p v-if="videoDialogMode === 'upload'" class="dialog-tip">
+        支持 MP4、MOV、MKV、AVI、WebM；大视频将在后台处理，完成后会提示结果。
+      </p>
+      <p v-else-if="videoDialogMode === 'replace'" class="dialog-tip video-destructive-tip">
+        替换仅允许草稿或已下线课程。系统会创建新视频并清除原视频对应的学习进度、笔记和答疑。
+      </p>
+      <p v-else class="dialog-tip">修改标题、描述和排序不会影响学生已有学习记录。</p>
       <template #footer>
         <el-button :disabled="uploading" @click="videoDialog = false">取消</el-button>
-        <el-button type="primary" :loading="uploading" @click="uploadVideo">上传并处理</el-button>
+        <el-button type="primary" :loading="uploading" @click="saveVideo">
+          {{ videoDialogMode === 'edit' ? '保存修改' : (videoDialogMode === 'replace' ? '替换并处理' : '上传并处理') }}
+        </el-button>
       </template>
     </el-dialog>
   </section>

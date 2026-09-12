@@ -10,7 +10,12 @@ from app.extensions import db
 from app.models import Chapter, Video
 from .ffmpeg_service import generate_cover, generate_hls, transcode_video
 from .ffprobe_service import probe_video
-from .file_service import clear_generated_video_files, remove_file, save_original_video
+from .file_service import (
+    clear_generated_video_files,
+    remove_all_video_files,
+    remove_file,
+    save_original_video,
+)
 
 
 class VideoNotFound(ValueError):
@@ -26,6 +31,10 @@ class VideoProcessingError(RuntimeError):
 
 
 class VideoFileValidationError(ValueError):
+    pass
+
+
+class VideoStateError(ValueError):
     pass
 
 
@@ -170,10 +179,123 @@ def get_visible_video(video_id: int, viewer_id: int | None, viewer_role: str | N
     return video
 
 
+def update_video(video_id: int, teacher_id: int, data: dict) -> Video:
+    video = _owned_video(video_id, teacher_id)
+    for field, value in data.items():
+        setattr(video, field, value)
+    db.session.commit()
+    return video
+
+
+def prepare_teacher_retry(video_id: int, teacher_id: int) -> Video:
+    video = _owned_video(video_id, teacher_id)
+    if video.status != VideoStatus.FAILED.value:
+        raise VideoStateError("只有处理失败的视频可以重新转码")
+    original_path = _original_path(video)
+    if original_path is None or not original_path.is_file():
+        raise VideoStateError("原始视频文件已丢失，无法重新转码")
+    clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
+    video.status = VideoStatus.PENDING.value
+    video.process_step = "QUEUED"
+    video.error_message = None
+    video.processed_file = None
+    video.hls_path = None
+    video.cover = None
+    db.session.commit()
+    return video
+
+
+def delete_teacher_video(video_id: int, teacher_id: int) -> None:
+    video = _owned_video(video_id, teacher_id)
+    _ensure_content_change_allowed(video)
+    original_file = video.original_file
+    db.session.delete(video)
+    db.session.commit()
+    try:
+        remove_all_video_files(
+            Path(current_app.config["MEDIA_ROOT"]),
+            video_id,
+            original_file,
+        )
+    except (OSError, ValueError):
+        current_app.logger.exception("教师删除视频 %s 后清理媒体文件失败", video_id)
+
+
+def replace_video(file, video_id: int, teacher_id: int, data: dict) -> Video:
+    video = _owned_video(video_id, teacher_id)
+    _ensure_content_change_allowed(video)
+    media_root = Path(current_app.config["MEDIA_ROOT"])
+    try:
+        original_path, original_name = save_original_video(
+            file,
+            media_root / "videos" / "original",
+        )
+    except ValueError as exc:
+        raise VideoFileValidationError(str(exc)) from exc
+
+    old_original_file = video.original_file
+    replacement = Video(
+        chapter_id=video.chapter_id,
+        title=data["title"],
+        description=data.get("description"),
+        original_name=original_name,
+        original_file=_relative(original_path, media_root),
+        file_size=original_path.stat().st_size,
+        sort_order=data.get("sort_order", 0),
+        status=VideoStatus.PENDING.value,
+    )
+    db.session.add(replacement)
+    db.session.delete(video)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        remove_file(original_path)
+        raise
+    try:
+        remove_all_video_files(media_root, video_id, old_original_file)
+    except (OSError, ValueError):
+        current_app.logger.exception("替换视频 %s 后清理旧媒体文件失败", video_id)
+    return replacement
+
+
 def _set_step(video: Video, step: str) -> None:
     video.status = VideoStatus.PROCESSING.value
     video.process_step = step
     db.session.commit()
+
+
+def _owned_video(video_id: int, teacher_id: int) -> Video:
+    video = db.session.scalar(
+        db.select(Video)
+        .options(joinedload(Video.chapter).joinedload(Chapter.course))
+        .where(Video.id == video_id)
+    )
+    if video is None:
+        raise VideoNotFound("视频不存在")
+    if video.chapter.course.teacher_id != teacher_id:
+        raise VideoPermissionDenied("不能管理其他教师的视频")
+    return video
+
+
+def _ensure_content_change_allowed(video: Video) -> None:
+    if video.chapter.course.status not in {
+        CourseStatus.DRAFT.value,
+        CourseStatus.OFFLINE.value,
+    }:
+        raise VideoStateError("课程发布期间不能删除或替换视频，请先下线课程")
+    if video.status in {VideoStatus.PENDING.value, VideoStatus.PROCESSING.value}:
+        raise VideoStateError("视频正在处理，暂时不能删除或替换")
+
+
+def _original_path(video: Video) -> Path | None:
+    if not video.original_file:
+        return None
+    media_root = Path(current_app.config["MEDIA_ROOT"]).resolve()
+    candidate = (media_root / video.original_file).resolve()
+    if candidate == media_root or not candidate.is_relative_to(media_root):
+        return None
+    return candidate
 
 
 def _apply_metadata(video: Video, metadata: dict, original_path: Path) -> None:

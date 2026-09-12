@@ -11,7 +11,16 @@ from werkzeug.security import generate_password_hash
 
 from app.constants import CourseStatus, UserRole
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, User, Video
+from app.models import (
+    Chapter,
+    Course,
+    CourseCategory,
+    LearningRecord,
+    Question,
+    User,
+    Video,
+    VideoNote,
+)
 from app.services import generate_cover, generate_hls, probe_video, transcode_video
 from app.services.file_service import save_original_video
 from app.services.video_processing_service import process_video_sync
@@ -402,3 +411,227 @@ def test_celery_task_marks_pending_before_retry(monkeypatch):
 
     assert pending[0][0] == 99
     assert "重试" in pending[0][1]
+
+
+def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch):
+    app.config["VIDEO_PROCESSING_ASYNC"] = True
+    media_root = Path(app.config["MEDIA_ROOT"])
+    original_dir = media_root / "videos" / "original"
+    original_dir.mkdir(parents=True, exist_ok=True)
+
+    with app.app_context():
+        teacher = User(
+            username="manage_video_teacher",
+            password_hash=generate_password_hash("Teach123!"),
+            real_name="视频管理教师",
+            teacher_no="TMV001",
+            role=UserRole.TEACHER.value,
+        )
+        other_teacher = User(
+            username="other_video_teacher",
+            password_hash=generate_password_hash("Teach123!"),
+            real_name="其他视频教师",
+            teacher_no="TMV002",
+            role=UserRole.TEACHER.value,
+        )
+        student = User(
+            username="manage_video_student",
+            password_hash=generate_password_hash("Student123!"),
+            real_name="视频学习学生",
+            student_no="SMV001",
+            role=UserRole.STUDENT.value,
+        )
+        category = CourseCategory(name="视频生命周期")
+        db.session.add_all([teacher, other_teacher, student, category])
+        db.session.flush()
+        published_course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="发布中的课程",
+            status=CourseStatus.PUBLISHED.value,
+        )
+        offline_course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="已下线课程",
+            status=CourseStatus.OFFLINE.value,
+        )
+        other_course = Course(
+            teacher_id=other_teacher.id,
+            category_id=category.id,
+            name="其他教师课程",
+            status=CourseStatus.OFFLINE.value,
+        )
+        db.session.add_all([published_course, offline_course, other_course])
+        db.session.flush()
+        published_chapter = Chapter(course_id=published_course.id, title="发布章节")
+        offline_chapter = Chapter(course_id=offline_course.id, title="维护章节")
+        other_chapter = Chapter(course_id=other_course.id, title="其他章节")
+        db.session.add_all([published_chapter, offline_chapter, other_chapter])
+        db.session.flush()
+
+        files = {
+            "published": "videos/original/published.mp4",
+            "failed": "videos/original/failed.mp4",
+            "replace": "videos/original/replace.mp4",
+            "other": "videos/original/other.mp4",
+        }
+        for relative_path in files.values():
+            path = media_root / relative_path
+            path.write_bytes(b"original-video")
+        published_video = Video(
+            chapter_id=published_chapter.id,
+            title="发布视频",
+            original_file=files["published"],
+            status="READY",
+        )
+        failed_video = Video(
+            chapter_id=offline_chapter.id,
+            title="失败视频",
+            original_file=files["failed"],
+            status="FAILED",
+            process_step="HLS",
+            error_message="处理失败",
+        )
+        replace_target = Video(
+            chapter_id=offline_chapter.id,
+            title="待替换视频",
+            original_file=files["replace"],
+            status="READY",
+        )
+        other_video = Video(
+            chapter_id=other_chapter.id,
+            title="其他教师视频",
+            original_file=files["other"],
+            status="READY",
+        )
+        db.session.add_all([published_video, failed_video, replace_target, other_video])
+        db.session.flush()
+        db.session.add_all(
+            [
+                LearningRecord(
+                    student_id=student.id,
+                    video_id=replace_target.id,
+                    current_time=10,
+                    progress=50,
+                ),
+                VideoNote(
+                    student_id=student.id,
+                    video_id=replace_target.id,
+                    video_time=5,
+                    content="替换前笔记",
+                ),
+                Question(
+                    student_id=student.id,
+                    video_id=replace_target.id,
+                    video_time=8,
+                    title="替换前问题",
+                    content="替换后应一并清理",
+                ),
+            ]
+        )
+        db.session.commit()
+        ids = {
+            "published": published_video.id,
+            "failed": failed_video.id,
+            "replace": replace_target.id,
+            "other": other_video.id,
+        }
+
+    token = client.post(
+        "/api/auth/login",
+        json={"account": "manage_video_teacher", "password": "Teach123!"},
+    ).get_json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    queued_ids = []
+    monkeypatch.setattr(
+        "app.tasks.video_tasks.process_video",
+        SimpleNamespace(delay=lambda video_id: queued_ids.append(video_id)),
+    )
+
+    edited = client.put(
+        f"/api/videos/{ids['published']}",
+        headers=headers,
+        json={"title": "更新后的视频", "description": "资料可直接维护", "sort_order": 8},
+    )
+    assert edited.status_code == 200
+    assert edited.get_json()["data"]["sort_order"] == 8
+    assert client.put(
+        f"/api/videos/{ids['published']}",
+        headers=headers,
+        json={},
+    ).status_code == 400
+    assert client.put(
+        f"/api/videos/{ids['other']}",
+        headers=headers,
+        json={"title": "越权修改"},
+    ).status_code == 403
+
+    retried = client.post(f"/api/videos/{ids['failed']}/retry", headers=headers)
+    assert retried.status_code == 202
+    assert retried.get_json()["data"]["status"] == "PENDING"
+    assert queued_ids == [ids["failed"]]
+    assert client.post(
+        f"/api/videos/{ids['published']}/retry",
+        headers=headers,
+    ).status_code == 409
+
+    assert client.delete(f"/api/videos/{ids['published']}", headers=headers).status_code == 409
+    assert client.delete(f"/api/videos/{ids['other']}", headers=headers).status_code == 403
+    invalid_replace = client.post(
+        f"/api/videos/{ids['replace']}/replace",
+        headers=headers,
+        data={
+            "title": "非法替换",
+            "video_file": (io.BytesIO(b"not-video"), "replace.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert invalid_replace.status_code == 400
+    with app.app_context():
+        assert db.session.get(Video, ids["replace"]) is not None
+
+    replaced = client.post(
+        f"/api/videos/{ids['replace']}/replace",
+        headers=headers,
+        data={
+            "title": "替换后的视频",
+            "description": "使用新的源文件",
+            "sort_order": "3",
+            "video_file": (io.BytesIO(b"replacement-video"), "新的课程视频.mp4"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert replaced.status_code == 202
+    replacement = replaced.get_json()["data"]
+    assert replacement["id"] != ids["replace"]
+    assert replacement["original_name"] == "新的课程视频.mp4"
+    assert queued_ids == [ids["failed"], replacement["id"]]
+    with app.app_context():
+        assert db.session.get(Video, ids["replace"]) is None
+        assert db.session.scalar(
+            db.select(db.func.count(LearningRecord.id)).where(
+                LearningRecord.video_id == ids["replace"]
+            )
+        ) == 0
+        assert db.session.scalar(
+            db.select(db.func.count(VideoNote.id)).where(
+                VideoNote.video_id == ids["replace"]
+            )
+        ) == 0
+        assert db.session.scalar(
+            db.select(db.func.count(Question.id)).where(
+                Question.video_id == ids["replace"]
+            )
+        ) == 0
+        new_video = db.session.get(Video, replacement["id"])
+        new_original = media_root / new_video.original_file
+        assert new_original.is_file()
+        assert not (media_root / files["replace"]).exists()
+        new_video.status = "READY"
+        db.session.commit()
+
+    assert client.delete(f"/api/videos/{replacement['id']}", headers=headers).status_code == 200
+    with app.app_context():
+        assert db.session.get(Video, replacement["id"]) is None
+        assert not new_original.exists()

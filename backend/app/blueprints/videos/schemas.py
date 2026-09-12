@@ -24,3 +24,37 @@ def validate_upload(form) -> dict:
         "description": description,
         "sort_order": sort_order,
     }
+
+
+def validate_update(payload) -> dict:
+    result = {}
+    if "title" in payload:
+        title = str(payload.get("title") or "").strip()
+        if not 1 <= len(title) <= 150:
+            raise ValidationError("视频标题不能为空且不能超过150位")
+        result["title"] = title
+    if "description" in payload:
+        description = str(payload.get("description") or "").strip() or None
+        if description and len(description) > 500:
+            raise ValidationError("视频描述不能超过500位")
+        result["description"] = description
+    if "sort_order" in payload:
+        try:
+            sort_order = int(payload.get("sort_order"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("视频排序参数不正确") from exc
+        if sort_order < 0 or sort_order > 100000:
+            raise ValidationError("视频排序必须在0到100000之间")
+        result["sort_order"] = sort_order
+    if not result:
+        raise ValidationError("没有可更新的视频内容")
+    return result
+
+
+def validate_replacement(form) -> dict:
+    result = validate_update(form)
+    if "title" not in result:
+        raise ValidationError("请输入视频标题")
+    result.setdefault("description", None)
+    result.setdefault("sort_order", 0)
+    return result

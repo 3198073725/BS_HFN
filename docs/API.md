@@ -80,11 +80,17 @@ Authorization: Bearer <access_token>
 | POST | `/api/videos/upload` | 课程教师 | 上传并处理章节视频 |
 | GET | `/api/videos/{id}` | 公开/所有者 | 视频信息 |
 | GET | `/api/videos/{id}/status` | 公开/所有者 | 处理状态 |
+| PUT | `/api/videos/{id}` | 课程教师 | 修改标题、描述和排序 |
+| POST | `/api/videos/{id}/retry` | 课程教师 | 重新处理失败视频 |
+| POST | `/api/videos/{id}/replace` | 课程教师 | 替换源文件并重新处理 |
+| DELETE | `/api/videos/{id}` | 课程教师 | 删除视频及关联学习数据 |
 | GET | `/media/{path}` | 开发环境 | HLS、封面等媒体文件 |
 
 上传使用 `multipart/form-data`：必填 `video_file`、`chapter_id`、`title`，可选 `description`、`sort_order`。支持 `.mp4`、`.mov`、`.mkv`、`.avi`、`.webm`。
 
 同步模式完成时返回 `201`，处理失败返回 `422`，异步任务成功入队返回 `202`，队列不可用返回 `503` 并将视频标记为失败。状态依次为 `PENDING`、`PROCESSING`、`READY` 或 `FAILED`；处理步骤采用 `PROBING`、`TRANSCODING`、`HLS`、`COVER`、`FINISHED`。
+
+视频标题、描述和排序可在课程任意状态下修改。失败重试仅接受 `FAILED` 状态且要求原始文件仍在受控媒体目录内。替换和删除会清理该视频对应的学习进度、笔记与答疑记录，因此仅允许课程处于草稿或已下线状态，且视频不在等待或处理中；替换成功后返回一个新的视频编号。
 
 ## 学习与收藏
 
