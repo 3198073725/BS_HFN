@@ -3586,3 +3586,25 @@ button:focus-visible {
     gap: 11px;
   }
 }
+
+/* Bounded collection navigation */
+.collection-pagination {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 0 2px;
+  justify-content: center;
+}
+
+.collection-pagination.el-pagination.is-background .btn-next,
+.collection-pagination.el-pagination.is-background .btn-prev,
+.collection-pagination.el-pagination.is-background .el-pager li {
+  border: 1px solid #d6dde4;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.collection-pagination.el-pagination.is-background .el-pager li.is-active {
+  border-color: #28577f;
+  background: #28577f;
+}

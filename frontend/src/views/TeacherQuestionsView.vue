@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 
@@ -12,7 +12,14 @@ const answerDialog = ref(false)
 const selectedQuestion = ref(null)
 const submitting = ref(false)
 const answerForm = reactive({ content: '' })
+const currentPage = ref(1)
+const pageSize = 8
 let requestSequence = 0
+
+const pagedQuestions = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return questions.value.slice(start, start + pageSize)
+})
 
 async function load() {
   const requestId = ++requestSequence
@@ -94,7 +101,10 @@ function formatDate(value) {
   }).format(new Date(value))
 }
 
-watch(statusFilter, load)
+watch(statusFilter, () => {
+  currentPage.value = 1
+  load()
+})
 onMounted(load)
 </script>
 
@@ -118,7 +128,7 @@ onMounted(load)
     </div>
 
     <div class="question-board" v-loading="loading">
-      <article v-for="question in questions" :key="question.id" class="teacher-question-card">
+      <article v-for="question in pagedQuestions" :key="question.id" class="teacher-question-card">
         <div class="teacher-question-top">
           <div>
             <span>{{ question.course_name }}</span>
@@ -153,6 +163,16 @@ onMounted(load)
         v-if="!loading && !questions.length"
         class="surface-card question-empty"
         description="当前筛选条件下没有问题"
+      />
+      <el-pagination
+        v-if="questions.length > pageSize"
+        v-model:current-page="currentPage"
+        class="collection-pagination"
+        background
+        layout="prev, pager, next"
+        :page-size="pageSize"
+        :total="questions.length"
+        aria-label="课程答疑分页"
       />
     </div>
 

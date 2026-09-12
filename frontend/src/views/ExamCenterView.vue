@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -24,6 +24,8 @@ const records = ref([])
 const answers = reactive({})
 const remainingSeconds = ref(null)
 const examFormRef = ref(null)
+const currentPage = ref(1)
+const pageSize = 6
 const examForm = reactive({
   course_id: null,
   title: '',
@@ -56,6 +58,10 @@ const questionScoreTotal = computed(() => (
 const scoreMatches = computed(() => (
   Math.abs(questionScoreTotal.value - Number(selectedExam.value?.total_score || 0)) < 0.001
 ))
+const pagedExams = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return exams.value.slice(start, start + pageSize)
+})
 
 async function load() {
   loading.value = true
@@ -113,6 +119,7 @@ async function saveExam() {
       ElMessage.success('测验草稿已更新')
     } else {
       exams.value.unshift(response.data)
+      currentPage.value = 1
       ElMessage.success('测验草稿已创建，请继续添加试题')
       resetExamForm()
       await openQuestionManager(response.data)
@@ -387,6 +394,9 @@ function answerLabel(value) {
   return { TRUE: '正确', FALSE: '错误' }[value] || value || '未作答'
 }
 
+watch(() => exams.value.length, (total) => {
+  currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
+})
 onMounted(load)
 onBeforeUnmount(stopCountdown)
 </script>
@@ -405,7 +415,7 @@ onBeforeUnmount(stopCountdown)
     </div>
 
     <div class="exam-grid">
-      <article v-for="exam in exams" :key="exam.id" class="exam-card">
+      <article v-for="exam in pagedExams" :key="exam.id" class="exam-card">
         <div class="exam-card-top">
           <span>{{ exam.course_name }}</span>
           <i :class="`exam-state state-${exam.status.toLowerCase()}`">{{ statusLabel(exam.status) }}</i>
@@ -457,6 +467,16 @@ onBeforeUnmount(stopCountdown)
         v-if="!loading && !exams.length"
         class="surface-card exam-empty"
         :description="isTeacher ? '还没有测验，先创建一份草稿吧' : '当前没有可参加的课程测验'"
+      />
+      <el-pagination
+        v-if="exams.length > pageSize"
+        v-model:current-page="currentPage"
+        class="collection-pagination"
+        background
+        layout="prev, pager, next"
+        :page-size="pageSize"
+        :total="exams.length"
+        aria-label="测验列表分页"
       />
     </div>
 

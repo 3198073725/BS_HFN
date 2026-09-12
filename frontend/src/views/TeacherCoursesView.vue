@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
         <small>展开课程可查看章节与视频</small>
       </div>
       <p class="table-scroll-hint">左右滑动表格可查看课程状态和全部操作</p>
-      <el-table v-loading="loading" :data="courses">
+      <el-table v-loading="loading" :data="courses" max-height="560">
         <el-table-column type="expand">
           <template #default="scope">
             <div class="chapter-list">

@@ -83,7 +83,7 @@ onMounted(load)
         <div><strong>课程表现</strong><span>{{ courseStatistics.length }} 门课程</span></div>
         <small>进度按“活跃学生 × 可学习视频”计算，未观看视频计入 0%</small>
       </div>
-      <el-table :data="courseStatistics">
+      <el-table :data="courseStatistics" max-height="520">
         <el-table-column prop="course_name" label="课程" min-width="190" />
         <el-table-column label="状态" width="100">
           <template #default="scope">{{ statusLabel(scope.row.status) }}</template>

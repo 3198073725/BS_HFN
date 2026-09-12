@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -20,6 +20,8 @@ const homeworkAttachment = ref(null)
 const submissionAttachment = ref(null)
 const submissions = ref([])
 const saving = ref(false)
+const currentPage = ref(1)
+const pageSize = 6
 const homeworkFormRef = ref(null)
 const pendingHomeworkId = ref(null)
 const editingHomeworkId = ref(null)
@@ -41,6 +43,11 @@ const homeworkRules = {
   ],
   description: [{ required: true, message: '请输入作业要求', trigger: 'blur' }],
 }
+
+const pagedHomeworks = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return homeworks.value.slice(start, start + pageSize)
+})
 
 async function load() {
   loading.value = true
@@ -97,6 +104,7 @@ async function saveHomework() {
         : await api.post('/homeworks', homeworkForm)
       pendingHomeworkId.value = response.data.id
       committedAction = editingHomeworkId.value ? 'updated' : 'created'
+      if (!editingHomeworkId.value) currentPage.value = 1
     }
     if (homeworkAttachment.value) {
       const attachmentData = new FormData()
@@ -311,6 +319,9 @@ function mediaUrl(path) {
   return path ? `/media/${path}` : '#'
 }
 
+watch(() => homeworks.value.length, (total) => {
+  currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
+})
 onMounted(load)
 </script>
 
@@ -343,7 +354,7 @@ onMounted(load)
     </div>
 
     <div class="homework-grid">
-      <article v-for="homework in homeworks" :key="homework.id" class="homework-card">
+      <article v-for="homework in pagedHomeworks" :key="homework.id" class="homework-card">
         <div class="homework-card-top">
           <span>{{ homework.course_name }}</span>
           <i :class="`homework-state state-${homework.status.toLowerCase()}`">
@@ -430,6 +441,16 @@ onMounted(load)
         v-if="!loading && !homeworks.length"
         class="surface-card homework-empty"
         :description="isTeacher ? '还没有作业，先创建一份草稿吧' : '当前没有需要完成的课程作业'"
+      />
+      <el-pagination
+        v-if="homeworks.length > pageSize"
+        v-model:current-page="currentPage"
+        class="collection-pagination"
+        background
+        layout="prev, pager, next"
+        :page-size="pageSize"
+        :total="homeworks.length"
+        aria-label="作业列表分页"
       />
     </div>
 

@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import api from '../api/client'
 
@@ -9,6 +9,17 @@ const loading = ref(false)
 const activeTab = ref('courses')
 const courses = ref([])
 const favorites = ref([])
+const currentPage = ref(1)
+const pageSize = 8
+
+const pagedCourses = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return courses.value.slice(start, start + pageSize)
+})
+const pagedFavorites = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return favorites.value.slice(start, start + pageSize)
+})
 
 async function load() {
   loading.value = true
@@ -56,6 +67,13 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
+watch(activeTab, () => {
+  currentPage.value = 1
+})
+watch([() => courses.value.length, () => favorites.value.length], () => {
+  const total = activeTab.value === 'courses' ? courses.value.length : favorites.value.length
+  currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
+})
 onMounted(load)
 </script>
 
@@ -98,7 +116,7 @@ onMounted(load)
     </div>
 
     <div v-if="activeTab === 'courses'" class="learning-course-grid">
-      <article v-for="course in courses" :key="course.id" class="learning-course-card">
+      <article v-for="course in pagedCourses" :key="course.id" class="learning-course-card">
         <div class="learning-card-mark">{{ course.name?.slice(0, 1) || '课' }}</div>
         <div class="learning-card-content">
           <div class="learning-card-meta">
@@ -122,10 +140,20 @@ onMounted(load)
         class="surface-card learning-empty"
         description="还没有加入课程，先去课程中心看看吧"
       />
+      <el-pagination
+        v-if="courses.length > pageSize"
+        v-model:current-page="currentPage"
+        class="collection-pagination"
+        background
+        layout="prev, pager, next"
+        :page-size="pageSize"
+        :total="courses.length"
+        aria-label="已加入课程分页"
+      />
     </div>
 
     <div v-else class="learning-course-grid">
-      <article v-for="course in favorites" :key="course.id" class="learning-course-card favorite-card">
+      <article v-for="course in pagedFavorites" :key="course.id" class="learning-course-card favorite-card">
         <div class="learning-card-mark">{{ course.name?.slice(0, 1) || '课' }}</div>
         <div class="learning-card-content">
           <div class="learning-card-meta">
@@ -144,6 +172,16 @@ onMounted(load)
         v-if="!loading && !favorites.length"
         class="surface-card learning-empty"
         description="还没有收藏课程"
+      />
+      <el-pagination
+        v-if="favorites.length > pageSize"
+        v-model:current-page="currentPage"
+        class="collection-pagination"
+        background
+        layout="prev, pager, next"
+        :page-size="pageSize"
+        :total="favorites.length"
+        aria-label="收藏课程分页"
       />
     </div>
   </section>

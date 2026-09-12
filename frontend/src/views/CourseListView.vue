@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage } from 'element-plus'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import api from '../api/client'
 
@@ -9,7 +9,14 @@ const categories = ref([])
 const courses = ref([])
 const categoryId = ref(null)
 const loading = ref(false)
+const currentPage = ref(1)
+const pageSize = 9
 let requestSequence = 0
+
+const pagedCourses = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return courses.value.slice(start, start + pageSize)
+})
 
 async function load() {
   const requestId = ++requestSequence
@@ -30,7 +37,10 @@ async function load() {
   }
 }
 
-watch(categoryId, load)
+watch(categoryId, () => {
+  currentPage.value = 1
+  load()
+})
 onMounted(load)
 </script>
 
@@ -57,7 +67,7 @@ onMounted(load)
 
     <div class="course-grid" v-loading="loading">
       <article
-        v-for="(course, index) in courses"
+        v-for="(course, index) in pagedCourses"
         :key="course.id"
         class="course-card"
         :class="`course-accent-${index % 3}`"
@@ -84,5 +94,15 @@ onMounted(load)
         description="该分类下暂无已发布课程"
       />
     </div>
+    <el-pagination
+      v-if="courses.length > pageSize"
+      v-model:current-page="currentPage"
+      class="collection-pagination"
+      background
+      layout="prev, pager, next"
+      :page-size="pageSize"
+      :total="courses.length"
+      aria-label="课程列表分页"
+    />
   </section>
 </template>

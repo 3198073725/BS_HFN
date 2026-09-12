@@ -220,6 +220,47 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
 })
 
 
+test('大量班级使用主从选择且移动端不会纵向复制名册', async ({ page }) => {
+  await login(page, 'e2e_teacher')
+  await page.route('**/api/classes', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json()
+    const base = payload.data[0] || {
+      teacher_name: '端测教师',
+      teacher_no: 'E2ET001',
+      created_at: '2026-09-12T00:00:00Z',
+      students: [],
+    }
+    payload.data = Array.from({ length: 14 }, (_, index) => ({
+      ...base,
+      id: 1000 + index,
+      name: `端测软件工程 ${String(index + 1).padStart(2, '0')} 班`,
+      description: `第 ${index + 1} 个教学班`,
+      member_count: index * 3,
+    }))
+    await route.fulfill({ response, json: payload })
+  })
+
+  await page.goto('/classes')
+  await expect(page.locator('.classroom-list > button')).toHaveCount(14)
+  await expect(page.locator('.classroom-card')).toHaveCount(1)
+  const listSize = await page.locator('.classroom-list').evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }))
+  expect(listSize.scrollHeight).toBeGreaterThan(listSize.clientHeight)
+
+  await page.locator('.classroom-list > button').nth(8).click()
+  await expect(page.getByRole('heading', { name: '端测软件工程 09 班', exact: true })).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.classroom-list-panel')).toBeHidden()
+  await expect(page.locator('.classroom-mobile-selector')).toBeVisible()
+  await expect(page.locator('.classroom-card')).toHaveCount(1)
+  await expectNoHorizontalOverflow(page)
+})
+
+
 test('管理员可以进入系统后台，角色路由不会泄露', async ({ page }) => {
   await login(page, 'e2e_admin')
   await page.getByRole('link', { name: '系统后台', exact: true }).click()
@@ -660,6 +701,34 @@ test('长课程文本在移动端卡片内换行且业务页面无横向溢出',
     elements.map((element) => element.scrollWidth > element.clientWidth),
   )
   expect(textOverflows).toEqual([false, false])
+})
+
+
+test('大量课程使用分页且移动端分页器不产生横向溢出', async ({ page }) => {
+  await page.route('**/api/courses', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json()
+    const base = payload.data[0] || {
+      category_name: '端测分类',
+      teacher_name: '端测教师',
+      description: '用于验证大量课程的分页布局。',
+    }
+    payload.data = Array.from({ length: 25 }, (_, index) => ({
+      ...base,
+      id: 2000 + index,
+      name: `端测分页课程 ${String(index + 1).padStart(2, '0')}`,
+    }))
+    await route.fulfill({ response, json: payload })
+  })
+
+  await page.goto('/courses')
+  await expect(page.locator('.course-card')).toHaveCount(9)
+  await expect(page.getByLabel('课程列表分页')).toBeVisible()
+  await page.getByLabel('课程列表分页').getByText('2', { exact: true }).click()
+  await expect(page.getByRole('link', { name: '端测分页课程 10', exact: true })).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectNoHorizontalOverflow(page)
 })
 
 

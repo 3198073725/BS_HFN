@@ -2182,3 +2182,173 @@
     min-height: 112px;
   }
 }
+
+/* Scalable classroom master-detail workspace */
+.classroom-workspace {
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.classroom-list-panel {
+  position: sticky;
+  top: 84px;
+  overflow: hidden;
+  border: 1px solid #d8dfe6;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.classroom-list-heading {
+  display: flex;
+  min-height: 58px;
+  padding: 0 17px;
+  border-bottom: 1px solid #dde3e9;
+  align-items: center;
+  background: #fafbfc;
+}
+
+.classroom-list-heading strong,
+.classroom-list-heading small {
+  display: block;
+}
+
+.classroom-list-heading strong {
+  color: #263848;
+  font-size: 14px;
+}
+
+.classroom-list-heading small {
+  margin-top: 3px;
+  color: #7b8995;
+  font-size: 10px;
+}
+
+.classroom-list-search {
+  padding: 12px;
+  border-bottom: 1px solid #e2e7ec;
+}
+
+.classroom-list {
+  max-height: min(520px, calc(100vh - 300px));
+  min-height: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.classroom-list > button {
+  display: grid;
+  width: 100%;
+  min-height: 68px;
+  padding: 11px 13px;
+  border: 0;
+  border-bottom: 1px solid #e5e9ed;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.classroom-list > button:hover {
+  background: #f6f8fa;
+}
+
+.classroom-list > button.active {
+  box-shadow: inset 3px 0 #28577f;
+  background: #edf2f6;
+}
+
+.classroom-list > button > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #bdcbd6;
+  border-radius: 3px;
+  place-items: center;
+  color: #28577f;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.classroom-list > button strong,
+.classroom-list > button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classroom-list > button strong {
+  color: #2c3e4e;
+  font-size: 13px;
+}
+
+.classroom-list > button small {
+  margin-top: 5px;
+  color: #7c8995;
+  font-size: 10px;
+}
+
+.classroom-list .el-empty {
+  padding: 24px 12px;
+}
+
+.classroom-list-panel > p {
+  margin: 0;
+  padding: 12px 15px;
+  border-top: 1px solid #e2e7ec;
+  background: #fafbfc;
+  color: #7a8894;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.classroom-workspace > .classroom-card {
+  min-width: 0;
+}
+
+.classroom-selection-empty {
+  min-height: 320px;
+}
+
+.classroom-mobile-selector {
+  display: none;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.notice-management {
+  max-height: 560px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notice-management-heading {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+}
+
+@media (max-width: 960px) {
+  .classroom-workspace {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .classroom-workspace {
+    display: block;
+  }
+
+  .classroom-list-panel {
+    display: none;
+  }
+
+  .classroom-mobile-selector {
+    display: block;
+  }
+}

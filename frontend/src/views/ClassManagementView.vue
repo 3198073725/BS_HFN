@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -17,6 +17,8 @@ const formRef = ref(null)
 const addingClassId = ref(null)
 const removingStudentKey = ref('')
 const accountInputs = reactive({})
+const selectedClassId = ref(null)
+const classKeyword = ref('')
 let requestSequence = 0
 
 const form = reactive({
@@ -39,6 +41,31 @@ const totalMembers = computed(() => classrooms.value.reduce(
   0,
 ))
 
+const filteredClassrooms = computed(() => {
+  const keyword = classKeyword.value.trim().toLowerCase()
+  if (!keyword) return classrooms.value
+  return classrooms.value.filter((classroom) => [classroom.name, classroom.description]
+    .some((value) => String(value || '').toLowerCase().includes(keyword)))
+})
+
+const selectedClassroom = computed(() => {
+  if (!isTeacher.value || !filteredClassrooms.value.length) return null
+  return filteredClassrooms.value.find((classroom) => classroom.id === selectedClassId.value)
+    || filteredClassrooms.value[0]
+})
+
+const displayedClassrooms = computed(() => (
+  isTeacher.value
+    ? (selectedClassroom.value ? [selectedClassroom.value] : [])
+    : classrooms.value
+))
+
+watch(filteredClassrooms, (items) => {
+  if (isTeacher.value && items.length && !items.some((item) => item.id === selectedClassId.value)) {
+    selectedClassId.value = items[0].id
+  }
+})
+
 function formatDate(value) {
   if (!value) return '—'
   return new Intl.DateTimeFormat('zh-CN', {
@@ -55,6 +82,9 @@ async function loadClasses() {
     const response = await api.get('/classes')
     if (requestId !== requestSequence) return
     classrooms.value = response.data
+    if (isTeacher.value && !classrooms.value.some((item) => item.id === selectedClassId.value)) {
+      selectedClassId.value = classrooms.value[0]?.id || null
+    }
   } catch (error) {
     if (requestId === requestSequence) {
       ElMessage.error(error.message || '班级信息加载失败')
@@ -112,6 +142,8 @@ async function saveClassroom() {
       ? await api.put(`/classes/${editingClassId.value}`, payload)
       : await api.post('/classes', payload)
     replaceClassroom(response.data)
+    selectedClassId.value = response.data.id
+    classKeyword.value = ''
     ElMessage.success(editingClassId.value ? '班级信息已更新' : '班级创建成功')
     dialogVisible.value = false
   } catch (error) {
@@ -134,6 +166,9 @@ async function deleteClassroom(classroom) {
   try {
     await api.delete(`/classes/${classroom.id}`)
     classrooms.value = classrooms.value.filter((item) => item.id !== classroom.id)
+    if (selectedClassId.value === classroom.id) {
+      selectedClassId.value = classrooms.value[0]?.id || null
+    }
     delete accountInputs[classroom.id]
     ElMessage.success('班级已删除')
   } catch (error) {
@@ -217,11 +252,55 @@ onBeforeUnmount(() => {
       <p>学生可通过用户名、学号或邮箱加入。移出班级不会删除学生账号，也不会影响其已有课程学习记录。</p>
     </div>
 
-    <div v-if="classrooms.length" class="classroom-grid">
-      <article v-for="(classroom, index) in classrooms" :key="classroom.id" class="classroom-card">
+    <div v-if="classrooms.length" :class="isTeacher ? 'classroom-workspace' : 'classroom-grid'">
+      <aside v-if="isTeacher" class="classroom-list-panel" aria-label="班级列表">
+        <div class="classroom-list-heading">
+          <div><strong>班级列表</strong><small>共 {{ classrooms.length }} 个</small></div>
+        </div>
+        <div class="classroom-list-search">
+          <el-input v-model="classKeyword" clearable placeholder="搜索班级名称或说明" />
+        </div>
+        <div class="classroom-list" role="listbox" aria-label="选择要管理的班级">
+          <button
+            v-for="(classroom, index) in filteredClassrooms"
+            :key="classroom.id"
+            :class="{ active: classroom.id === selectedClassroom?.id }"
+            type="button"
+            role="option"
+            :aria-selected="classroom.id === selectedClassroom?.id"
+            @click="selectedClassId = classroom.id"
+          >
+            <span>{{ String(index + 1).padStart(2, '0') }}</span>
+            <div><strong>{{ classroom.name }}</strong><small>{{ classroom.member_count }} 名学生</small></div>
+          </button>
+          <el-empty v-if="!filteredClassrooms.length" :image-size="54" description="没有匹配的班级" />
+        </div>
+        <p>选择一个班级后，在右侧维护班级资料和学生名册。</p>
+      </aside>
+
+      <el-select
+        v-if="isTeacher"
+        v-model="selectedClassId"
+        class="classroom-mobile-selector"
+        filterable
+        placeholder="选择要管理的班级"
+      >
+        <el-option
+          v-for="classroom in classrooms"
+          :key="classroom.id"
+          :label="`${classroom.name}（${classroom.member_count} 人）`"
+          :value="classroom.id"
+        />
+      </el-select>
+
+      <div v-if="isTeacher && !selectedClassroom" class="surface-card classroom-selection-empty">
+        <el-empty description="没有匹配的班级，请调整搜索条件" />
+      </div>
+
+      <article v-for="(classroom, index) in displayedClassrooms" :key="classroom.id" class="classroom-card">
         <header class="classroom-card-header">
           <div class="classroom-title-group">
-            <span class="classroom-mark">{{ String(index + 1).padStart(2, '0') }}</span>
+            <span class="classroom-mark">{{ isTeacher ? '班' : String(index + 1).padStart(2, '0') }}</span>
             <div>
               <p>{{ isTeacher ? '教学班级' : '所在班级' }}</p>
               <h2>{{ classroom.name }}</h2>
