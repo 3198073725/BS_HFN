@@ -149,6 +149,41 @@ test('教师可以访问班级、教学、作业、测验、答疑和数据页�
 })
 
 
+test('弹窗输入控件保留可见边框、焦点和校验状态', async ({ page }) => {
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '测验管理', exact: true }).click()
+  await page.getByRole('button', { name: '＋ 创建测验', exact: true }).click()
+
+  const dialog = page.getByRole('dialog', { name: '创建测验草稿' })
+  const controlBorders = await dialog.locator(
+    '.el-input__wrapper, .el-textarea__inner, .el-select__wrapper, .el-input-number',
+  ).evaluateAll((elements) => elements.map((element) => {
+    const style = getComputedStyle(element)
+    const isNestedNumberInput = element.classList.contains('el-input__wrapper')
+      && Boolean(element.closest('.el-input-number'))
+    return {
+      isNestedNumberInput,
+      width: style.borderTopWidth,
+      style: style.borderTopStyle,
+    }
+  }))
+  expect(controlBorders.filter((control) => !control.isNestedNumberInput).every(
+    (control) => control.width !== '0px' && control.style !== 'none',
+  )).toBe(true)
+
+  const titleInput = dialog.getByPlaceholder('例如：第一章基础测验')
+  await titleInput.focus()
+  await expect(titleInput.locator('..')).toHaveCSS('border-top-color', 'rgb(40, 87, 127)')
+
+  await dialog.getByRole('button', { name: '保存并添加试题', exact: true }).click()
+  const invalidTitle = titleInput.locator('..')
+  await expect(invalidTitle).toHaveCSS('border-top-color', 'rgb(245, 108, 108)')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectNoHorizontalOverflow(page)
+})
+
+
 test('教师维护班级名册后学生可以查看所属班级', async ({ page }) => {
   const className = '端测软件工程一班'
   await login(page, 'e2e_teacher')
