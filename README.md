@@ -33,6 +33,14 @@ docs/      当前需求与数据库设计基线
 
 当前机器的 Python、前端依赖、MySQL 数据库、迁移、Redis 和便携版 FFmpeg 已配置好。
 
+推荐直接双击项目根目录的 `start-dev.bat`。脚本使用 Windows ANSI（CP936）编码，会先检查依赖，再为 Flask API、Celery worker 和 Vue/Vite 前端分别打开一个独立终端。
+
+只检查环境而不启动任务：
+
+```powershell
+cmd /c start-dev.bat --check
+```
+
 后端：
 
 ```powershell
