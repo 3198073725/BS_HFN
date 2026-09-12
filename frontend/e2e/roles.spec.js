@@ -30,6 +30,32 @@ async function expectNoHorizontalOverflow(page) {
 }
 
 
+async function expectStandardControlSizes(page) {
+  const selector = [
+    '.el-button:not(.is-circle)',
+    '.action-link',
+    '.portal-button',
+    '.header-action',
+    '.hero-small-button',
+    '.study-tabs > button',
+    '.learning-card-actions > a',
+    '.learning-card-actions > button',
+    '.time-anchor',
+  ].join(', ')
+  const undersized = await page.locator(selector).evaluateAll((elements) => elements
+    .filter((element) => {
+      const style = getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getBoundingClientRect().width > 0
+    })
+    .map((element) => ({
+      label: element.textContent?.trim().slice(0, 30),
+      height: element.getBoundingClientRect().height,
+    }))
+    .filter((control) => control.height < 31.5))
+  expect(undersized).toEqual([])
+}
+
+
 test('登录表单提示完整，受保护页面登录后回到原路径', async ({ page }) => {
   await page.goto('/learning')
   await expect(page).toHaveURL(/\/login\?redirect=\/learning$/)
@@ -129,6 +155,7 @@ test('学生可以访问学习、班级、作业、测验和数据页面', async
   ]) {
     await page.getByRole('link', { name: item[0], exact: true }).click()
     await expect(page.getByRole('heading', { name: item[1], exact: true })).toBeVisible()
+    await expectStandardControlSizes(page)
   }
 })
 
@@ -145,6 +172,7 @@ test('教师可以访问班级、教学、作业、测验、答疑和数据页�
   ]) {
     await page.getByRole('link', { name: item[0], exact: true }).click()
     await expect(page.getByRole('heading', { name: item[1], exact: true })).toBeVisible()
+    await expectStandardControlSizes(page)
   }
 })
 
@@ -170,6 +198,13 @@ test('弹窗输入控件保留可见边框、焦点和校验状态', async ({ pa
   expect(controlBorders.filter((control) => !control.isNestedNumberInput).every(
     (control) => control.width !== '0px' && control.style !== 'none',
   )).toBe(true)
+  const singleLineControlHeights = await dialog.locator(
+    '.el-input__wrapper, .el-select__wrapper, .el-input-number',
+  ).evaluateAll((elements) => elements
+    .filter((element) => !element.classList.contains('el-input__wrapper') || !element.closest('.el-input-number'))
+    .map((element) => element.getBoundingClientRect().height))
+  expect(singleLineControlHeights.every((height) => height >= 39.5)).toBe(true)
+  await expectStandardControlSizes(dialog)
 
   const titleInput = dialog.getByPlaceholder('例如：第一章基础测验')
   await titleInput.focus()
@@ -271,6 +306,55 @@ test('大量班级使用主从选择且移动端不会纵向复制名册', async
 })
 
 
+test('我的学习使用统一的卡片与操作控件尺寸', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.route('**/api/learning/courses', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json()
+    const base = payload.data[0] || {
+      id: 1,
+      category_name: '计算机',
+      join_time: '2026-09-12T00:00:00Z',
+    }
+    payload.data = [{
+      ...base,
+      id: 3001,
+      name: 'C 语言程序设计',
+      description: '从语法基础到程序设计实践，建立清晰的编程思维。',
+      learning_progress: 26.15,
+    }]
+    await route.fulfill({ response, json: payload })
+  })
+
+  await page.goto('/learning')
+  const card = page.locator('.learning-course-card').first()
+  await expect(card).toBeVisible()
+  const metrics = await card.evaluate((element) => {
+    const mark = element.querySelector('.learning-card-mark')
+    const actions = [...element.querySelectorAll('.learning-card-actions > *')]
+    return {
+      cardHeight: element.getBoundingClientRect().height,
+      markHeight: mark.getBoundingClientRect().height,
+      actionHeights: actions.map((action) => action.getBoundingClientRect().height),
+    }
+  })
+  expect(metrics.cardHeight).toBeGreaterThanOrEqual(189)
+  expect(metrics.cardHeight).toBeLessThanOrEqual(240)
+  expect(metrics.markHeight).toBeLessThan(metrics.cardHeight - 30)
+  expect(metrics.actionHeights.every((height) => height >= 33.5)).toBe(true)
+  const desktopTabWidth = await page.locator('.center-tabs').evaluate((element) => element.getBoundingClientRect().width)
+  expect(desktopTabWidth).toBeLessThan(360)
+  await expectStandardControlSizes(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectNoHorizontalOverflow(page)
+  const mobileActionHeights = await card.locator('.learning-card-actions > *').evaluateAll(
+    (elements) => elements.map((element) => element.getBoundingClientRect().height),
+  )
+  expect(mobileActionHeights.every((height) => height >= 39.5)).toBe(true)
+})
+
+
 test('管理员可以进入系统后台，角色路由不会泄露', async ({ page }) => {
   await login(page, 'e2e_admin')
   await page.getByRole('link', { name: '系统后台', exact: true }).click()
@@ -280,6 +364,7 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
     page.locator('.notice-management').evaluate((element) => element.getBoundingClientRect().height),
   ])
   expect(Math.abs(adminColumnHeights[0] - adminColumnHeights[1])).toBeLessThanOrEqual(1)
+  await expectStandardControlSizes(page)
 
   await page.goto('/teacher/courses')
   await expect(page).toHaveURL('/')

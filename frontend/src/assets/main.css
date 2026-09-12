@@ -3639,3 +3639,153 @@ button:focus-visible {
   border-color: #28577f;
   background: #28577f;
 }
+
+/* Consistent control and type scale across the portal. */
+:root {
+  --control-height-sm: 32px;
+  --control-height-md: 36px;
+  --control-height-lg: 42px;
+}
+
+.el-button:not(.is-circle) {
+  min-height: var(--control-height-md);
+  padding: 7px 15px;
+  font-size: 13px;
+}
+
+.el-button.el-button--small:not(.is-circle),
+.el-button.is-link,
+.el-button.is-text {
+  min-height: var(--control-height-sm);
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.el-button.el-button--large:not(.is-circle) {
+  min-height: var(--control-height-lg);
+  padding: 9px 19px;
+  font-size: 14px;
+}
+
+.el-button.is-circle {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  padding: 0;
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-date-editor.el-input__wrapper {
+  min-height: 40px;
+  padding-right: 12px;
+  padding-left: 12px;
+}
+
+.el-input-number {
+  height: 40px;
+}
+
+.el-input-number .el-input__wrapper {
+  min-height: 38px;
+}
+
+.el-input__inner,
+.el-select__placeholder,
+.el-select__selected-item,
+.el-textarea__inner {
+  font-size: 14px;
+}
+
+.el-form-item__label,
+.el-radio__label,
+.el-checkbox__label {
+  font-size: 13px;
+}
+
+.el-radio-button__inner {
+  display: inline-flex;
+  min-height: 38px;
+  padding: 0 15px;
+  align-items: center;
+}
+
+.el-tag {
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.el-table {
+  font-size: 13px;
+}
+
+.management-surface .el-table th.el-table__cell {
+  font-size: 12px;
+}
+
+.management-surface .el-table td.el-table__cell {
+  font-size: 13px;
+}
+
+.el-dialog__footer .el-button {
+  min-width: 84px;
+}
+
+.collection-pagination.el-pagination.is-background .btn-next,
+.collection-pagination.el-pagination.is-background .btn-prev,
+.collection-pagination.el-pagination.is-background .el-pager li {
+  min-width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  font-size: 12px;
+}
+
+.action-link,
+.compact-action {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.header-action {
+  min-height: var(--control-height-md);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.course-category,
+.course-state,
+.course-status,
+.playing-status,
+.video-state,
+.filter-control > span,
+.course-detail-meta,
+.panel-heading.compact > span,
+.offline-maintenance-tip,
+.chapter-heading small,
+.video-list button strong,
+.chapter-empty,
+.surface-heading span,
+.surface-heading small,
+.table-scroll-hint,
+.file-picker span,
+.file-picker strong {
+  font-size: 12px;
+}
+
+.chapter-number,
+.chapter-heading > span,
+.video-list button span {
+  font-size: 11px;
+}
+
+@media (max-width: 620px) {
+  .el-button:not(.is-circle) {
+    min-height: 40px;
+  }
+
+  .el-button.is-link,
+  .el-button.is-text {
+    min-height: 34px;
+  }
+}
