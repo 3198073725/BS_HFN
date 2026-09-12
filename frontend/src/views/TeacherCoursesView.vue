@@ -21,6 +21,11 @@ const editingCourseStatus = ref(null)
 const editingChapterId = ref(null)
 const videoFile = ref(null)
 const videoInputKey = ref(0)
+const courseCoverFile = ref(null)
+const courseCoverPreview = ref('')
+const existingCourseCover = ref('')
+const removeExistingCover = ref(false)
+const courseCoverInputKey = ref(0)
 const uploading = ref(false)
 const savingCourse = ref(false)
 const savingChapter = ref(false)
@@ -61,8 +66,14 @@ async function load() {
 }
 
 function openCourse(course = null) {
+  releaseCourseCoverPreview()
   editingCourseId.value = course?.id || null
   editingCourseStatus.value = course?.status || null
+  existingCourseCover.value = course?.cover_url || ''
+  courseCoverPreview.value = existingCourseCover.value
+  courseCoverFile.value = null
+  removeExistingCover.value = false
+  courseCoverInputKey.value += 1
   Object.assign(courseForm, {
     name: course?.name || '',
     category_id: course?.category_id || null,
@@ -74,25 +85,102 @@ function openCourse(course = null) {
 }
 
 function resetCourseForm() {
+  releaseCourseCoverPreview()
   editingCourseId.value = null
   editingCourseStatus.value = null
+  courseCoverFile.value = null
+  courseCoverPreview.value = ''
+  existingCourseCover.value = ''
+  removeExistingCover.value = false
+  courseCoverInputKey.value += 1
   Object.assign(courseForm, { name: '', category_id: null, description: '', detail: '' })
   courseFormRef.value?.clearValidate()
+}
+
+function releaseCourseCoverPreview() {
+  if (courseCoverPreview.value?.startsWith('blob:')) {
+    URL.revokeObjectURL(courseCoverPreview.value)
+  }
+}
+
+function selectCourseCover(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    releaseCourseCoverPreview()
+    courseCoverFile.value = null
+    courseCoverPreview.value = existingCourseCover.value
+    removeExistingCover.value = false
+    ElMessage.warning('课程封面仅支持 JPG、PNG 或 WebP 格式')
+    courseCoverInputKey.value += 1
+    return
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    releaseCourseCoverPreview()
+    courseCoverFile.value = null
+    courseCoverPreview.value = existingCourseCover.value
+    removeExistingCover.value = false
+    ElMessage.warning('课程封面不能超过 5MB')
+    courseCoverInputKey.value += 1
+    return
+  }
+  releaseCourseCoverPreview()
+  courseCoverFile.value = file
+  courseCoverPreview.value = URL.createObjectURL(file)
+  removeExistingCover.value = false
+}
+
+function clearCourseCover() {
+  releaseCourseCoverPreview()
+  courseCoverFile.value = null
+  courseCoverPreview.value = ''
+  removeExistingCover.value = Boolean(existingCourseCover.value)
+  courseCoverInputKey.value += 1
 }
 
 async function saveCourse() {
   const valid = await courseFormRef.value?.validate().catch(() => false)
   if (!valid || savingCourse.value) return
 
+  const payload = {
+    name: courseForm.name,
+    category_id: courseForm.category_id,
+    description: courseForm.description,
+    detail: courseForm.detail,
+  }
+  const wasNewCourse = !editingCourseId.value
   savingCourse.value = true
   try {
+    let courseId = editingCourseId.value
     if (editingCourseId.value) {
-      await api.put(`/courses/${editingCourseId.value}`, courseForm)
-      ElMessage.success('课程信息已更新')
+      await api.put(`/courses/${editingCourseId.value}`, payload)
     } else {
-      await api.post('/courses', courseForm)
-      ElMessage.success('课程创建成功')
+      const response = await api.post('/courses', payload)
+      courseId = response.data.id
+      editingCourseId.value = courseId
+      editingCourseStatus.value = response.data.status
     }
+
+    try {
+      if (courseCoverFile.value) {
+        const coverData = new FormData()
+        coverData.append('cover', courseCoverFile.value)
+        await api.post(`/courses/${courseId}/cover`, coverData)
+      } else if (removeExistingCover.value) {
+        await api.delete(`/courses/${courseId}/cover`)
+      }
+    } catch (error) {
+      await load()
+      ElMessage.error(
+        wasNewCourse
+          ? `课程已创建，但封面保存失败：${error.message || '请重新选择图片后重试'}`
+          : error.message || '课程信息已保存，但封面更新失败',
+      )
+      return
+    }
+
+    ElMessage.success(wasNewCourse ? '课程创建成功' : '课程信息已更新')
     courseDialog.value = false
     await load()
   } catch (error) {
@@ -311,6 +399,7 @@ async function removeChapter(course, chapter) {
 onMounted(load)
 onBeforeUnmount(() => {
   disposed = true
+  releaseCourseCoverPreview()
 })
 </script>
 
@@ -374,7 +463,17 @@ onBeforeUnmount(() => {
           </template>
         </el-table-column>
         <el-table-column prop="name" label="课程" min-width="220">
-          <template #default="scope"><strong class="course-name-cell">{{ scope.row.name }}</strong></template>
+          <template #default="scope">
+            <div class="teacher-course-name">
+              <div
+                class="teacher-course-cover"
+                :class="{ 'has-image': scope.row.cover_url }"
+                :style="scope.row.cover_url ? { backgroundImage: `url(&quot;${scope.row.cover_url}&quot;)` } : null"
+                aria-hidden="true"
+              >{{ scope.row.cover_url ? '' : (scope.row.name?.slice(0, 1) || '课') }}</div>
+              <strong class="course-name-cell">{{ scope.row.name }}</strong>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column prop="category_name" label="分类" width="140" />
         <el-table-column label="状态" width="120">
@@ -426,6 +525,37 @@ onBeforeUnmount(() => {
           <el-select v-model="courseForm.category_id" placeholder="请选择课程分类" style="width: 100%">
             <el-option v-for="item in categories" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="课程封面">
+          <div class="course-cover-editor">
+            <div
+              class="course-cover-preview"
+              :class="{ 'has-image': courseCoverPreview }"
+              :style="courseCoverPreview ? { backgroundImage: `url(&quot;${courseCoverPreview}&quot;)` } : null"
+            >
+              <span v-if="!courseCoverPreview">{{ courseForm.name?.slice(0, 1) || '课' }}</span>
+            </div>
+            <div class="course-cover-controls">
+              <p>建议使用 16:9 横图，支持 JPG、PNG、WebP，文件不超过 5MB。</p>
+              <div>
+                <label class="file-select-button">
+                  {{ courseCoverPreview ? '更换图片' : '选择图片' }}
+                  <input
+                    :key="courseCoverInputKey"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    @change="selectCourseCover"
+                  />
+                </label>
+                <button
+                  v-if="courseCoverPreview"
+                  class="cover-remove-button"
+                  type="button"
+                  @click="clearCourseCover"
+                >移除封面</button>
+              </div>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="课程简介" prop="description">
           <el-input

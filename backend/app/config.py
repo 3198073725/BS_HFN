@@ -79,6 +79,9 @@ class BaseConfig:
     HOMEWORK_ATTACHMENT_MAX_LENGTH = int(
         os.getenv("HOMEWORK_ATTACHMENT_MAX_LENGTH", str(50 * 1024**2))
     )
+    COURSE_COVER_MAX_LENGTH = int(
+        os.getenv("COURSE_COVER_MAX_LENGTH", str(5 * 1024**2))
+    )
     VIDEO_PROCESSING_ASYNC = _env_bool("VIDEO_PROCESSING_ASYNC")
     JSON_AS_ASCII = False
 

@@ -7,7 +7,12 @@ from app.constants import CourseStatus, VideoStatus
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Chapter, Course, CourseCategory, Homework, Video
-from .file_service import clear_homework_files, remove_all_video_files
+from .file_service import (
+    clear_homework_files,
+    remove_all_video_files,
+    remove_media_file,
+    save_course_cover,
+)
 
 
 class CourseNotFound(ValueError):
@@ -115,10 +120,45 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
     homework_ids = db.session.scalars(
         db.select(Homework.id).where(Homework.course_id == course.id)
     ).all()
+    cover_file = course.cover
     db.session.delete(course)
     db.session.commit()
     _cleanup_deleted_video_files(video_files)
     _cleanup_deleted_homework_files(homework_ids)
+    _cleanup_course_cover(cover_file)
+
+
+def update_course_cover(course_id: int, teacher_id: int, file) -> dict:
+    course = _owned_course(course_id, teacher_id)
+    _ensure_editable(course)
+    media_root = Path(current_app.config["MEDIA_ROOT"])
+    new_path = save_course_cover(
+        file,
+        media_root / "course_covers",
+        int(current_app.config["COURSE_COVER_MAX_LENGTH"]),
+    )
+    relative_path = new_path.relative_to(media_root).as_posix()
+    old_path = course.cover
+    try:
+        course.cover = relative_path
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        remove_media_file(media_root, relative_path)
+        raise
+    if old_path and old_path != relative_path:
+        _cleanup_course_cover(old_path)
+    return serialize_course(_get_course(course.id))
+
+
+def delete_course_cover(course_id: int, teacher_id: int) -> dict:
+    course = _owned_course(course_id, teacher_id)
+    _ensure_editable(course)
+    old_path = course.cover
+    course.cover = None
+    db.session.commit()
+    _cleanup_course_cover(old_path)
+    return serialize_course(_get_course(course.id))
 
 
 def create_chapter(course_id: int, teacher_id: int, data: dict) -> dict:
@@ -174,6 +214,7 @@ def serialize_course(
         "category_name": course.category.name if course.category else None,
         "name": course.name,
         "cover": course.cover,
+        "cover_url": f"/media/{course.cover}" if course.cover else None,
         "description": course.description,
         "detail": course.detail,
         "status": course.status,
@@ -247,3 +288,10 @@ def _cleanup_deleted_homework_files(homework_ids) -> None:
             clear_homework_files(media_root, homework_id)
         except (OSError, ValueError):
             current_app.logger.exception("作业 %s 的附件清理失败", homework_id)
+
+
+def _cleanup_course_cover(relative_path: str | None) -> None:
+    try:
+        remove_media_file(Path(current_app.config["MEDIA_ROOT"]), relative_path)
+    except (OSError, ValueError):
+        current_app.logger.exception("课程封面 %s 清理失败", relative_path)

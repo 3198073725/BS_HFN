@@ -45,7 +45,9 @@ Authorization: Bearer <access_token>
 | GET | `/api/courses/mine` | 教师 | 我的课程 |
 | GET | `/api/courses/{id}` | 公开/所有者 | 课程详情 |
 | POST | `/api/courses` | 教师 | 创建课程 |
-| PUT | `/api/courses/{id}` | 课程教师 | 编辑草稿课程 |
+| PUT | `/api/courses/{id}` | 课程教师 | 编辑课程资料 |
+| POST | `/api/courses/{id}/cover` | 课程教师 | 上传或替换课程封面 |
+| DELETE | `/api/courses/{id}/cover` | 课程教师 | 移除课程封面 |
 | DELETE | `/api/courses/{id}` | 课程教师 | 删除草稿课程 |
 | POST | `/api/courses/{id}/publish` | 课程教师 | 发布课程 |
 | POST | `/api/courses/{id}/offline` | 课程教师 | 下线课程 |
@@ -53,7 +55,7 @@ Authorization: Bearer <access_token>
 | PUT | `/api/courses/{id}/chapters/{chapter_id}` | 课程教师 | 编辑章节 |
 | DELETE | `/api/courses/{id}/chapters/{chapter_id}` | 课程教师 | 删除章节 |
 
-课程创建字段：`name`、`category_id`，可选 `description`、`detail`。章节创建字段：`title`，可选 `description`、`sort_order`。
+课程创建字段：`name`、`category_id`，可选 `description`、`detail`。封面上传使用 `multipart/form-data` 的 `cover` 字段，支持 JPG、PNG、WebP，默认最大 5MB，可通过 `COURSE_COVER_MAX_LENGTH` 调整。课程响应中的 `cover_url` 可直接用于页面展示。章节创建字段：`title`，可选 `description`、`sort_order`。
 
 ## 视频
 

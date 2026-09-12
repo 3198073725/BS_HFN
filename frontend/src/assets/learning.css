@@ -3208,3 +3208,9 @@
     flex-direction: column;
   }
 }
+
+.learning-card-mark.has-image,
+.favorite-card .learning-card-mark.has-image {
+  background-position: center;
+  background-size: cover;
+}

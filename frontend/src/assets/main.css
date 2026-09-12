@@ -3789,3 +3789,150 @@ button:focus-visible {
     min-height: 34px;
   }
 }
+
+/* Course cover upload and consistent cover presentation */
+.course-cover.has-image,
+.course-card:nth-child(3n + 2) .course-cover.has-image,
+.course-card:nth-child(3n + 3) .course-cover.has-image {
+  background-position: center;
+  background-size: cover;
+}
+
+.course-cover.has-image::before {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(17, 31, 44, 0.06), rgba(17, 31, 44, 0.58));
+  box-shadow: none;
+}
+
+.course-detail-hero.has-cover {
+  background-position: center;
+  background-size: cover;
+}
+
+.course-detail-hero.has-cover::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(90deg, rgba(12, 28, 42, 0.9), rgba(12, 28, 42, 0.52));
+  content: "";
+}
+
+.teacher-course-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.teacher-course-cover {
+  display: grid;
+  width: 48px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 1px solid #cbd5de;
+  border-radius: 4px;
+  place-items: center;
+  background: #e8eef3 center / cover no-repeat;
+  color: #28577f;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.course-cover-editor {
+  display: grid;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #d3dbe3;
+  border-radius: 5px;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 16px;
+  background: #fafbfc;
+}
+
+.course-cover-preview {
+  display: grid;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid #c7d2dc;
+  border-radius: 4px;
+  place-items: center;
+  background: #e8eef3 center / cover no-repeat;
+  color: #28577f;
+  font-size: 32px;
+  font-weight: 800;
+}
+
+.course-cover-controls {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.course-cover-controls p {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.course-cover-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-select-button,
+.cover-remove-button {
+  display: inline-flex;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid #bdc9d3;
+  border-radius: 4px;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #264a69;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.file-select-button:hover,
+.cover-remove-button:hover {
+  border-color: #7890a4;
+  background: #f4f7f9;
+}
+
+.file-select-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.file-select-button:focus-within {
+  outline: 2px solid rgba(40, 87, 127, 0.25);
+  outline-offset: 2px;
+}
+
+@media (max-width: 620px) {
+  .course-cover-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .course-cover-preview {
+    width: min(100%, 240px);
+  }
+}

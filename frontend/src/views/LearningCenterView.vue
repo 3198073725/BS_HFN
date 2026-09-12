@@ -117,7 +117,11 @@ onMounted(load)
 
     <div v-if="activeTab === 'courses'" class="learning-course-grid">
       <article v-for="course in pagedCourses" :key="course.id" class="learning-course-card">
-        <div class="learning-card-mark">{{ course.name?.slice(0, 1) || '课' }}</div>
+        <div
+          class="learning-card-mark"
+          :class="{ 'has-image': course.cover_url }"
+          :style="course.cover_url ? { backgroundImage: `url(&quot;${course.cover_url}&quot;)` } : null"
+        >{{ course.cover_url ? '' : (course.name?.slice(0, 1) || '课') }}</div>
         <div class="learning-card-content">
           <div class="learning-card-meta">
             <span>{{ course.category_name || '通识课程' }}</span>
@@ -154,7 +158,11 @@ onMounted(load)
 
     <div v-else class="learning-course-grid">
       <article v-for="course in pagedFavorites" :key="course.id" class="learning-course-card favorite-card">
-        <div class="learning-card-mark">{{ course.name?.slice(0, 1) || '课' }}</div>
+        <div
+          class="learning-card-mark"
+          :class="{ 'has-image': course.cover_url }"
+          :style="course.cover_url ? { backgroundImage: `url(&quot;${course.cover_url}&quot;)` } : null"
+        >{{ course.cover_url ? '' : (course.name?.slice(0, 1) || '课') }}</div>
         <div class="learning-card-content">
           <div class="learning-card-meta">
             <span>{{ course.category_name || '通识课程' }}</span>

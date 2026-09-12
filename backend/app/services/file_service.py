@@ -6,6 +6,7 @@ from werkzeug.datastructures import FileStorage
 
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+ALLOWED_COURSE_COVER_EXTENSIONS = {".jpeg", ".jpg", ".png", ".webp"}
 ALLOWED_HOMEWORK_EXTENSIONS = {
     ".7z",
     ".doc",
@@ -75,6 +76,38 @@ def save_homework_attachment(
     return target
 
 
+def save_course_cover(file: FileStorage, target_dir: Path, maximum_bytes: int) -> Path:
+    original_name = Path(str(file.filename or "").replace("\\", "/")).name.strip()
+    suffix = Path(original_name).suffix.lower()
+    if not original_name or suffix not in ALLOWED_COURSE_COVER_EXTENSIONS:
+        raise ValueError("课程封面仅支持 JPG、PNG 或 WebP 格式")
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{uuid4().hex}{suffix}"
+    size = 0
+    try:
+        try:
+            file.stream.seek(0)
+        except (AttributeError, OSError):
+            pass
+        with target.open("xb") as output:
+            while chunk := file.stream.read(64 * 1024):
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise ValueError(f"课程封面不能超过{maximum_bytes // 1024 // 1024}MB")
+                output.write(chunk)
+        if size == 0:
+            raise ValueError("课程封面不能为空")
+        with target.open("rb") as saved_file:
+            header = saved_file.read(16)
+        if not _valid_image_signature(suffix, header):
+            raise ValueError("课程封面文件内容与图片格式不匹配")
+    except Exception:
+        remove_file(target)
+        raise
+    return target
+
+
 def remove_media_file(media_root: Path, relative_path: str | None) -> None:
     if not relative_path:
         return
@@ -107,6 +140,16 @@ def remove_all_video_files(media_root: Path, video_id: int, original_file: str |
 
 def clear_homework_files(media_root: Path, homework_id: int) -> None:
     _remove_tree_within(media_root / "homework" / str(homework_id), media_root)
+
+
+def _valid_image_signature(suffix: str, header: bytes) -> bool:
+    if suffix in {".jpg", ".jpeg"}:
+        return header.startswith(b"\xff\xd8\xff")
+    if suffix == ".png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n")
+    if suffix == ".webp":
+        return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    return False
 
 
 def _remove_tree_within(path: Path, allowed_root: Path) -> None:

@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 
 from werkzeug.security import generate_password_hash
@@ -219,6 +220,105 @@ def test_deleting_chapter_cleans_video_files(app, client):
     assert not processed.exists()
     assert not hls.exists()
     assert not cover.exists()
+
+
+def test_teacher_can_manage_validated_course_cover(app, client):
+    with app.app_context():
+        category = CourseCategory(name="课程封面分类")
+        teacher = create_user("cover_teacher", "Teach123!", UserRole.TEACHER.value, "TC101")
+        other = create_user("other_cover_teacher", "Teach123!", UserRole.TEACHER.value, "TC102")
+        db.session.add(category)
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="封面测试课程")
+        db.session.add(course)
+        db.session.commit()
+        course_id = course.id
+
+    teacher_token = login(client, "cover_teacher", "Teach123!")
+    other_token = login(client, "other_cover_teacher", "Teach123!")
+
+    denied = client.post(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(other_token),
+        data={"cover": (BytesIO(b"\x89PNG\r\n\x1a\nvalid"), "denied.png")},
+    )
+    assert denied.status_code == 403
+
+    disguised_file = client.post(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(teacher_token),
+        data={"cover": (BytesIO(b"not an image"), "fake.png")},
+    )
+    assert disguised_file.status_code == 400
+    assert "内容与图片格式不匹配" in disguised_file.get_json()["message"]
+
+    first_upload = client.post(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(teacher_token),
+        data={"cover": (BytesIO(b"\x89PNG\r\n\x1a\nfirst-cover"), "first.png")},
+    )
+    assert first_upload.status_code == 200
+    first_path = first_upload.get_json()["data"]["cover"]
+    assert first_upload.get_json()["data"]["cover_url"] == f"/media/{first_path}"
+    first_file = Path(app.config["MEDIA_ROOT"]) / first_path
+    assert first_file.is_file()
+
+    replacement = client.post(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(teacher_token),
+        data={"cover": (BytesIO(b"\xff\xd8\xffreplacement"), "replacement.jpg")},
+    )
+    assert replacement.status_code == 200
+    replacement_path = replacement.get_json()["data"]["cover"]
+    replacement_file = Path(app.config["MEDIA_ROOT"]) / replacement_path
+    assert replacement_file.is_file()
+    assert not first_file.exists()
+
+    removed = client.delete(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(teacher_token),
+    )
+    assert removed.status_code == 200
+    assert removed.get_json()["data"]["cover"] is None
+    assert removed.get_json()["data"]["cover_url"] is None
+    assert not replacement_file.exists()
+
+
+def test_course_cover_size_limit_and_course_delete_cleanup(app, client):
+    with app.app_context():
+        app.config["COURSE_COVER_MAX_LENGTH"] = 16
+        category = CourseCategory(name="封面清理分类")
+        teacher = create_user("cover_cleanup", "Teach123!", UserRole.TEACHER.value, "TC103")
+        db.session.add(category)
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="封面清理课程")
+        db.session.add(course)
+        db.session.commit()
+        course_id = course.id
+
+    teacher_token = login(client, "cover_cleanup", "Teach123!")
+    oversized = client.post(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(teacher_token),
+        data={"cover": (BytesIO(b"\x89PNG\r\n\x1a\n" + b"x" * 20), "large.png")},
+    )
+    assert oversized.status_code == 400
+    assert "课程封面不能超过" in oversized.get_json()["message"]
+
+    with app.app_context():
+        app.config["COURSE_COVER_MAX_LENGTH"] = 5 * 1024**2
+    uploaded = client.post(
+        f"/api/courses/{course_id}/cover",
+        headers=bearer(teacher_token),
+        data={"cover": (BytesIO(b"\x89PNG\r\n\x1a\ncleanup-cover"), "cleanup.png")},
+    )
+    cover_path = uploaded.get_json()["data"]["cover"]
+    cover_file = Path(app.config["MEDIA_ROOT"]) / cover_path
+    assert cover_file.is_file()
+
+    deleted = client.delete(f"/api/courses/{course_id}", headers=bearer(teacher_token))
+    assert deleted.status_code == 200
+    assert not cover_file.exists()
 
 
 def test_deleting_draft_course_cleans_homework_attachments(app, client):

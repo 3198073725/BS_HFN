@@ -308,7 +308,11 @@ onBeforeUnmount(() => {
     <template v-if="course">
       <RouterLink class="breadcrumb-link" to="/courses">← 返回课程中心</RouterLink>
 
-      <header class="course-detail-hero">
+      <header
+        class="course-detail-hero"
+        :class="{ 'has-cover': course.cover_url }"
+        :style="course.cover_url ? { backgroundImage: `url(&quot;${course.cover_url}&quot;)` } : null"
+      >
         <div>
           <div class="course-detail-meta">
             <span>{{ course.category_name || '通识课程' }}</span>
@@ -351,7 +355,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-        <div class="course-detail-mark" aria-hidden="true">{{ course.name?.slice(0, 1) || '课' }}</div>
+        <div v-if="!course.cover_url" class="course-detail-mark" aria-hidden="true">{{ course.name?.slice(0, 1) || '课' }}</div>
       </header>
 
       <div class="learning-layout">

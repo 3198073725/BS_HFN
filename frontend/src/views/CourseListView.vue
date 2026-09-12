@@ -72,9 +72,13 @@ onMounted(load)
         class="course-card"
         :class="`course-accent-${index % 3}`"
       >
-        <div class="course-cover">
+        <div
+          class="course-cover"
+          :class="{ 'has-image': course.cover_url }"
+          :style="course.cover_url ? { backgroundImage: `url(&quot;${course.cover_url}&quot;)` } : null"
+        >
           <span class="course-category">{{ course.category_name || '通识课程' }}</span>
-          <span class="course-monogram">{{ course.name?.slice(0, 1) || '课' }}</span>
+          <span v-if="!course.cover_url" class="course-monogram">{{ course.name?.slice(0, 1) || '课' }}</span>
           <span class="course-state"><i></i> 已发布</span>
         </div>
         <div class="course-card-body">

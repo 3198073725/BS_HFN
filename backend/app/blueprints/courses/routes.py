@@ -10,6 +10,7 @@ from app.services.course_service import (
     change_course_status,
     create_chapter,
     create_course,
+    delete_course_cover,
     delete_chapter,
     delete_draft_course,
     get_visible_course,
@@ -18,6 +19,7 @@ from app.services.course_service import (
     list_teacher_courses,
     update_chapter,
     update_course,
+    update_course_cover,
 )
 from app.utils import error, json_body, roles_required, success
 from . import courses_bp
@@ -94,6 +96,39 @@ def edit_course(course_id: int):
     except CourseStateError as exc:
         return error(str(exc), 409)
     return success(course, "课程更新成功")
+
+
+@courses_bp.post("/<int:course_id>/cover")
+@roles_required(UserRole.TEACHER)
+def upload_course_cover(course_id: int):
+    cover_file = request.files.get("cover")
+    if cover_file is None:
+        return error("请选择课程封面", 400)
+    try:
+        course = update_course_cover(course_id, int(get_jwt_identity()), cover_file)
+    except CourseNotFound as exc:
+        return error(str(exc), 404)
+    except CoursePermissionDenied as exc:
+        return error(str(exc), 403)
+    except CourseStateError as exc:
+        return error(str(exc), 409)
+    except ValueError as exc:
+        return error(str(exc), 400)
+    return success(course, "课程封面已更新")
+
+
+@courses_bp.delete("/<int:course_id>/cover")
+@roles_required(UserRole.TEACHER)
+def remove_course_cover(course_id: int):
+    try:
+        course = delete_course_cover(course_id, int(get_jwt_identity()))
+    except CourseNotFound as exc:
+        return error(str(exc), 404)
+    except CoursePermissionDenied as exc:
+        return error(str(exc), 403)
+    except CourseStateError as exc:
+        return error(str(exc), 409)
+    return success(course, "课程封面已移除")
 
 
 @courses_bp.post("/<int:course_id>/publish")

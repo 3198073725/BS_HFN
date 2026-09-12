@@ -474,6 +474,17 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
   await page.getByText('请选择课程分类', { exact: true }).click()
   await page.getByRole('option', { name: '端测分类' }).click()
   await page.getByPlaceholder('一句话介绍课程内容').fill('供浏览器自动化验证使用')
+  const courseDialog = page.getByRole('dialog', { name: '创建课程' })
+  await courseDialog.locator('input[type="file"][accept*="image"]')
+    .setInputFiles({
+      name: 'course-cover.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    })
+  await expect(courseDialog.locator('.course-cover-preview')).toHaveClass(/has-image/)
   await page.getByRole('button', { name: '保存课程', exact: true }).click()
   await expect(page.getByText('课程创建成功')).toBeVisible()
 
@@ -492,8 +503,15 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
   await expect(page).toHaveURL('/')
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '课程中心', exact: true }).click()
+  const publishedCourseCard = page.locator('.course-card').filter({ hasText: courseName })
+  await expect(publishedCourseCard.locator('.course-cover')).toHaveClass(/has-image/)
+  await expect(publishedCourseCard.locator('.course-cover')).toHaveCSS(
+    'background-image',
+    /course_covers/,
+  )
   await page.getByRole('link', { name: courseName, exact: true }).click()
   await expect(page.getByRole('heading', { name: courseName, exact: true })).toBeVisible()
+  await expect(page.locator('.course-detail-hero')).toHaveClass(/has-cover/)
   const learningColumnHeights = await Promise.all([
     page.locator('.learning-layout > .player-panel').evaluate((element) => element.getBoundingClientRect().height),
     page.locator('.learning-layout > .chapter-panel').evaluate((element) => element.getBoundingClientRect().height),
@@ -504,6 +522,8 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
 
   await page.getByRole('link', { name: '我的学习', exact: true }).click()
   await expect(page.getByText(courseName, { exact: true })).toBeVisible()
+  await expect(page.locator('.learning-course-card').filter({ hasText: courseName }).locator('.learning-card-mark'))
+    .toHaveClass(/has-image/)
 })
 
 
