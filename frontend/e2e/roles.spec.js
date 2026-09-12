@@ -118,10 +118,11 @@ test('其他标签页退出后当前受保护页面同步返回登录页', async
 })
 
 
-test('学生可以访问学习、作业、测验和数据页面', async ({ page }) => {
+test('学生可以访问学习、班级、作业、测验和数据页面', async ({ page }) => {
   await login(page, 'e2e_student')
   for (const item of [
     ['我的学习', '我的学习'],
+    ['我的班级', '我的班级'],
     ['课程作业', '课程作业'],
     ['在线测验', '在线测验'],
     ['数据概览', '学习数据'],
@@ -132,9 +133,10 @@ test('学生可以访问学习、作业、测验和数据页面', async ({ page 
 })
 
 
-test('教师可以访问教学、作业、测验、答疑和数据页面', async ({ page }) => {
+test('教师可以访问班级、教学、作业、测验、答疑和数据页面', async ({ page }) => {
   await login(page, 'e2e_teacher')
   for (const item of [
+    ['班级管理', '班级管理'],
     ['教学管理', '教学管理'],
     ['作业管理', '作业管理'],
     ['测验管理', '测验管理'],
@@ -144,6 +146,42 @@ test('教师可以访问教学、作业、测验、答疑和数据页面', async
     await page.getByRole('link', { name: item[0], exact: true }).click()
     await expect(page.getByRole('heading', { name: item[1], exact: true })).toBeVisible()
   }
+})
+
+
+test('教师维护班级名册后学生可以查看所属班级', async ({ page }) => {
+  const className = '端测软件工程一班'
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '班级管理', exact: true }).click()
+  await page.getByRole('button', { name: '＋ 创建班级', exact: true }).click()
+
+  let dialog = page.getByRole('dialog', { name: '创建班级' })
+  await dialog.getByPlaceholder('例如：软件工程 2026 级一班').fill(className)
+  await dialog.getByPlaceholder('填写年级、专业或教学安排等说明（可选）').fill('端到端班级名册验证')
+  await dialog.getByRole('button', { name: '创建班级', exact: true }).click()
+  await expect(page.getByText('班级创建成功')).toBeVisible()
+
+  const classroomCard = page.locator('.classroom-card').filter({ hasText: className })
+  await classroomCard.getByRole('button', { name: '编辑', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '编辑班级' })
+  await dialog.getByPlaceholder('填写年级、专业或教学安排等说明（可选）').fill('2026 秋季端到端班级')
+  await dialog.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(classroomCard.getByText('2026 秋季端到端班级', { exact: true })).toBeVisible()
+
+  await classroomCard.getByPlaceholder('学生用户名、学号或邮箱').fill('E2ES001')
+  await classroomCard.getByRole('button', { name: '添加学生', exact: true }).click()
+  await expect(page.getByText('学生已加入班级')).toBeVisible()
+  await expect(classroomCard.getByText('端测学生', { exact: true })).toBeVisible()
+  await expect(classroomCard.getByText('E2ES001', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await expect(page).toHaveURL('/')
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '我的班级', exact: true }).click()
+  const studentCard = page.locator('.classroom-card').filter({ hasText: className })
+  await expect(studentCard.getByText('端测教师', { exact: true })).toBeVisible()
+  await expect(studentCard.getByText('2026 秋季端到端班级', { exact: true })).toBeVisible()
+  await expect(studentCard.locator('.el-table')).toHaveCount(0)
 })
 
 
@@ -545,6 +583,7 @@ test('长课程文本在移动端卡片内换行且业务页面无横向溢出',
   for (const item of [
     ['课程中心', '发现适合你的课程'],
     ['我的学习', '我的学习'],
+    ['我的班级', '我的班级'],
     ['课程作业', '课程作业'],
     ['在线测验', '在线测验'],
     ['数据概览', '学习数据'],

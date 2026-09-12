@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 
 const DefaultLayout = () => import('../layouts/DefaultLayout.vue')
 const AdminDashboardView = () => import('../views/AdminDashboardView.vue')
+const ClassManagementView = () => import('../views/ClassManagementView.vue')
 const CourseDetailView = () => import('../views/CourseDetailView.vue')
 const CourseListView = () => import('../views/CourseListView.vue')
 const ExamCenterView = () => import('../views/ExamCenterView.vue')
@@ -36,6 +37,12 @@ const router = createRouter({
           name: 'learning',
           component: LearningCenterView,
           meta: { requiresAuth: true, roles: ['STUDENT'] },
+        },
+        {
+          path: 'classes',
+          name: 'classes',
+          component: ClassManagementView,
+          meta: { requiresAuth: true, roles: ['STUDENT', 'TEACHER'] },
         },
         {
           path: 'homeworks',

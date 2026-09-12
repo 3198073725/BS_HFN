@@ -2,6 +2,7 @@ from flask import Flask
 
 from .admin import admin_bp
 from .auth import auth_bp
+from .classes import classes_bp
 from .courses import courses_bp
 from .exams import exams_bp
 from .homework import homework_bp
@@ -18,6 +19,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(system_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(users_bp, url_prefix="/api/users")
+    app.register_blueprint(classes_bp, url_prefix="/api/classes")
     app.register_blueprint(courses_bp, url_prefix="/api/courses")
     app.register_blueprint(videos_bp, url_prefix="/api/videos")
     app.register_blueprint(learning_bp, url_prefix="/api/learning")

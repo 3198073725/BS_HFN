@@ -71,6 +71,13 @@ onMounted(revealActiveNavigation)
           </RouterLink>
           <RouterLink
             v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)"
+            to="/classes"
+            :class="{ active: route.name === 'classes' }"
+          >
+            {{ auth.user?.role === 'TEACHER' ? '班级管理' : '我的班级' }}
+          </RouterLink>
+          <RouterLink
+            v-if="['STUDENT', 'TEACHER'].includes(auth.user?.role)"
             to="/homeworks"
             :class="{ active: route.name === 'homeworks' }"
           >
