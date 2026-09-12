@@ -3936,3 +3936,481 @@ button:focus-visible {
     width: min(100%, 240px);
   }
 }
+
+/* Editorial campus polish: restrained depth without decorative dashboard effects. */
+:root {
+  --line: #d8e0e6;
+  --line-strong: #c4ced7;
+  --surface-soft: #f5f7f8;
+  --shadow-sm: 0 5px 18px rgba(32, 53, 68, 0.06);
+  --shadow-lg: 0 18px 46px rgba(32, 53, 68, 0.13);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --el-border-radius-base: 6px;
+}
+
+body {
+  background: #f0f3f5;
+}
+
+.app-header {
+  border-top: 3px solid #244f70;
+  border-bottom-color: #d2dbe2;
+  box-shadow: 0 2px 12px rgba(34, 54, 68, 0.05);
+}
+
+.header-inner {
+  min-height: 66px;
+}
+
+.brand-mark {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #1c435f;
+  border-radius: 7px;
+  background: #28577f;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.brand-mark::after {
+  position: absolute;
+  bottom: 5px;
+  left: 8px;
+  width: 20px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.5);
+  content: "";
+}
+
+.main-nav a {
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+
+.main-nav a:hover {
+  background: #f5f7f8;
+}
+
+.user-avatar,
+.header-login {
+  border-radius: 6px;
+}
+
+.app-main {
+  padding-top: 38px;
+}
+
+.page-heading {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom-color: #cfd8df;
+}
+
+.page-heading > div:first-child {
+  padding-left: 16px;
+  border-left: 3px solid #28577f;
+}
+
+.page-heading h1 {
+  font-size: clamp(28px, 3vw, 32px);
+  font-weight: 720;
+}
+
+.eyebrow {
+  color: #6b7f8f;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.el-button,
+.el-button.is-round,
+.el-button.is-circle,
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper,
+.el-date-editor.el-input__wrapper,
+.el-input-number,
+.el-card {
+  border-radius: 6px;
+}
+
+.el-button {
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+.el-button--primary:not(.is-link) {
+  border-color: #28577f;
+  background: #28577f;
+}
+
+.el-button--primary:not(.is-link):hover,
+.el-button--primary:not(.is-link):focus {
+  border-color: #1f496a;
+  background: #1f496a;
+}
+
+.el-dialog {
+  overflow: hidden;
+  border-color: #cad4dc;
+  border-radius: 11px;
+  box-shadow: var(--shadow-lg);
+}
+
+.el-dialog__header {
+  margin: 0;
+  padding: 20px 24px 17px;
+  border-bottom: 1px solid #e0e6ea;
+  background: #fbfcfc;
+}
+
+.el-dialog__title {
+  color: #243746;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.el-dialog__body {
+  padding: 22px 24px;
+}
+
+.el-dialog__footer {
+  padding: 15px 24px 18px;
+  border-top: 1px solid #e4e9ed;
+  background: #fafbfb;
+}
+
+.el-table {
+  --el-table-header-bg-color: #eef2f4;
+  --el-table-row-hover-bg-color: #f4f7f8;
+  --el-table-border-color: #e0e6ea;
+}
+
+.el-table th.el-table__cell {
+  background: #eef2f4;
+  color: #485d6d;
+}
+
+.surface-card,
+.management-surface,
+.player-panel,
+.chapter-list-panel,
+.chapter-panel,
+.course-card {
+  border-color: #d4dde4;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.management-surface {
+  overflow: hidden;
+  background: #fff;
+}
+
+.surface-heading,
+.panel-heading {
+  border-bottom: 1px solid #dde4e9;
+  background: #f7f9fa;
+}
+
+.course-card {
+  min-height: 345px;
+  border-color: #d1dae1;
+  background: #fff;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.course-card:hover {
+  border-color: #9eafbc;
+  box-shadow: 0 12px 28px rgba(35, 56, 70, 0.1);
+  transform: translateY(-2px);
+}
+
+.course-cover {
+  height: 124px;
+  border-bottom: 1px solid rgba(30, 63, 85, 0.12);
+  background: #dfe8ee;
+}
+
+.course-cover:not(.has-image)::before {
+  top: auto;
+  right: 20px;
+  bottom: 0;
+  width: 90px;
+  height: 90px;
+  border: 1px solid rgba(40, 87, 127, 0.12);
+  border-radius: 50% 50% 0 0;
+  box-shadow: 0 0 0 20px rgba(40, 87, 127, 0.035);
+}
+
+.course-category {
+  border-color: rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(24, 45, 60, 0.66);
+  color: #fff;
+  font-weight: 600;
+  backdrop-filter: blur(5px);
+}
+
+.course-cover:not(.has-image) .course-category {
+  border-color: #b9c9d4;
+  background: rgba(255, 255, 255, 0.62);
+  color: #315c7d;
+  backdrop-filter: none;
+}
+
+.course-cover:not(.has-image) .course-state {
+  color: #416581;
+}
+
+.course-cover:not(.has-image) .course-state i {
+  background: #4c7a70;
+  box-shadow: none;
+}
+
+.course-open {
+  transition: color 0.16s ease, padding-left 0.16s ease;
+}
+
+.course-open:hover {
+  padding-left: 3px;
+  color: #173f5e;
+}
+
+.course-detail-hero {
+  border-color: #193e59;
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(29, 62, 84, 0.16);
+}
+
+.course-detail-mark {
+  border-radius: 18px;
+}
+
+.portal-home {
+  gap: 24px;
+}
+
+.portal-welcome {
+  position: relative;
+  overflow: hidden;
+  padding: 42px 44px;
+  border-color: #ccd7df;
+  border-top: 0;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(34, 55, 70, 0.08);
+}
+
+.portal-welcome::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  background: #28577f;
+  content: "";
+}
+
+.portal-kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.portal-kicker::before {
+  width: 22px;
+  height: 1px;
+  background: #7f9ab0;
+  content: "";
+}
+
+.portal-welcome h1 {
+  color: #1b3040;
+  font-weight: 720;
+}
+
+.portal-service-card,
+.portal-notices,
+.portal-guide {
+  overflow: hidden;
+  border-color: #d1dae1;
+  border-radius: 9px;
+  box-shadow: 0 4px 16px rgba(34, 55, 70, 0.05);
+}
+
+.portal-service-card {
+  background: #f4f7f8;
+}
+
+.portal-card-heading,
+.portal-section-heading {
+  border-bottom-color: #d8e0e6;
+}
+
+.portal-shortcuts {
+  gap: 14px;
+}
+
+.portal-shortcuts > a {
+  min-height: 96px;
+  border-color: #d1dae1;
+  border-radius: 9px;
+  box-shadow: 0 3px 12px rgba(34, 55, 70, 0.035);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.portal-shortcuts > a:hover {
+  border-color: #9aabba;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(34, 55, 70, 0.08);
+  transform: translateY(-1px);
+}
+
+.portal-shortcuts > a > span {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+  border-color: #afc1ce;
+  border-radius: 7px;
+  background: #e7eef3;
+}
+
+.portal-guide li > span,
+.portal-button,
+.portal-button-primary {
+  border-radius: 6px;
+}
+
+.portal-notice-list article {
+  transition: background-color 0.15s ease;
+}
+
+.portal-notice-list article:hover {
+  background: #f6f8f9;
+}
+
+.account-page {
+  background: #edf1f3;
+}
+
+.account-shell {
+  border-color: #c6d1da;
+  border-radius: 12px;
+  box-shadow: 0 22px 60px rgba(31, 54, 70, 0.16);
+}
+
+.account-aside {
+  position: relative;
+  overflow: hidden;
+  background: #244f70;
+}
+
+.account-aside::after {
+  position: absolute;
+  right: -95px;
+  bottom: -110px;
+  width: 260px;
+  height: 260px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 50%;
+  box-shadow: 0 0 0 42px rgba(255, 255, 255, 0.025);
+  content: "";
+  pointer-events: none;
+}
+
+.account-aside > * {
+  position: relative;
+  z-index: 1;
+}
+
+.account-brand-mark,
+.account-security-note,
+.account-submit {
+  border-radius: 6px;
+}
+
+.course-cover-editor {
+  border-color: #cbd6de;
+  border-radius: 8px;
+  background: #f7f9fa;
+}
+
+.course-cover-preview,
+.teacher-course-cover,
+.file-select-button,
+.cover-remove-button {
+  border-radius: 6px;
+}
+
+* {
+  scrollbar-color: #a9b6c0 #edf1f3;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #edf1f3;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #edf1f3;
+  border-radius: 8px;
+  background: #a9b6c0;
+}
+
+@media (max-width: 800px) {
+  .app-main {
+    padding-top: 26px;
+  }
+
+  .page-heading > div:first-child {
+    padding-left: 13px;
+  }
+
+  .account-shell,
+  .account-register-shell {
+    border-radius: 8px;
+  }
+}
+
+@media (max-width: 620px) {
+  .app-header {
+    border-top-width: 2px;
+  }
+
+  .account-shell,
+  .account-register-shell {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .portal-welcome {
+    padding: 28px 24px;
+    border-radius: 9px;
+  }
+
+  .portal-welcome h1 {
+    font-size: 25px;
+  }
+
+  .portal-shortcuts > a {
+    min-height: 86px;
+  }
+
+  .el-dialog__header {
+    padding: 18px 18px 15px;
+  }
+
+  .el-dialog__body {
+    padding: 19px 18px;
+  }
+
+  .el-dialog__footer {
+    padding: 14px 18px 17px;
+  }
+}

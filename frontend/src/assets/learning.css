@@ -3214,3 +3214,194 @@
   background-position: center;
   background-size: cover;
 }
+
+/* Business pages share the same restrained editorial depth as the public portal. */
+.study-workspace,
+.study-composer,
+.study-item,
+.learning-summary article,
+.learning-course-card,
+.teacher-question-card,
+.homework-summary article,
+.homework-card,
+.exam-card,
+.exam-question-list,
+.question-create-panel,
+.statistics-grid article,
+.classroom-overview,
+.classroom-card,
+.classroom-list-panel {
+  border-color: #d3dde4;
+  border-radius: 10px;
+  box-shadow: 0 5px 18px rgba(32, 53, 68, 0.055);
+}
+
+.learning-summary article,
+.homework-summary article,
+.statistics-grid article {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+}
+
+.learning-summary article::before,
+.homework-summary article::before,
+.statistics-grid article::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: #a9bcc9;
+  content: "";
+}
+
+.learning-summary article:first-child::before,
+.homework-summary article:first-child::before,
+.statistics-grid article:first-child::before {
+  background: #476f8d;
+}
+
+.study-workspace {
+  border-color: #ced9e1;
+  box-shadow: 0 8px 24px rgba(32, 53, 68, 0.07);
+}
+
+.study-tabs,
+.notice-management-heading,
+.classroom-member-toolbar {
+  border-bottom-color: #dbe3e8;
+  background: #f7f9fa;
+}
+
+.study-tabs > button,
+.center-tabs > button {
+  border-radius: 6px;
+}
+
+.center-tabs {
+  border-color: #ccd7df;
+  border-radius: 9px;
+  box-shadow: 0 3px 12px rgba(32, 53, 68, 0.04);
+}
+
+.learning-course-card {
+  border-color: #ced9e1;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.learning-course-card:hover {
+  border-color: #a6b6c2;
+  box-shadow: 0 10px 24px rgba(32, 53, 68, 0.09);
+  transform: translateY(-1px);
+}
+
+.learning-card-mark,
+.favorite-card .learning-card-mark {
+  border-color: #b7c7d2;
+  border-radius: 8px;
+  background: #e4ebf0;
+}
+
+.learning-card-actions a,
+.learning-card-actions button,
+.hero-small-button,
+.progress-chip,
+.question-status,
+.homework-state,
+.graded-chip,
+.exam-state,
+.account-state,
+.notice-state,
+.classroom-student-state,
+.classroom-facts span {
+  border-radius: 6px;
+}
+
+.teacher-question-card,
+.homework-card,
+.exam-card {
+  border-color: #d1dbe2;
+  background: #fff;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.teacher-question-card:hover,
+.homework-card:hover,
+.exam-card:hover {
+  border-color: #aab9c4;
+  box-shadow: 0 8px 22px rgba(32, 53, 68, 0.075);
+}
+.exam-question-list,
+.question-create-panel {
+  box-shadow: none;
+}
+
+.classroom-workspace {
+  gap: 18px;
+}
+
+.classroom-list-panel {
+  border-color: #cdd8e0;
+  box-shadow: 0 7px 20px rgba(32, 53, 68, 0.06);
+}
+
+.classroom-list-heading {
+  border-bottom-color: #d6dfe5;
+  background: #f5f7f8;
+}
+
+.classroom-list > button {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.classroom-list > button:hover {
+  background: #f3f6f7;
+}
+
+.classroom-list > button.active {
+  box-shadow: inset 4px 0 #28577f;
+  background: #e8eff3;
+}
+
+.classroom-list > button > span,
+.classroom-mark,
+.student-classroom-note > span {
+  border-radius: 6px;
+}
+
+.classroom-card {
+  border-color: #cdd8e0;
+  box-shadow: 0 7px 20px rgba(32, 53, 68, 0.06);
+}
+
+.classroom-card-header {
+  border-bottom-color: #dce3e8;
+}
+
+.student-classroom-note,
+.submission-result,
+.exam-score-strip,
+.score-check,
+.answer-box,
+.grade-panel {
+  border-radius: 8px;
+}
+
+@media (max-width: 620px) {
+  .study-workspace,
+  .learning-course-card,
+  .teacher-question-card,
+  .homework-card,
+  .exam-card,
+  .classroom-card {
+    border-radius: 8px;
+  }
+
+  .learning-course-card:hover,
+  .teacher-question-card:hover,
+  .homework-card:hover,
+  .exam-card:hover {
+    transform: none;
+  }
+}
