@@ -55,6 +55,11 @@ body {
   color: var(--ink-950);
 }
 
+/* Transient toast messages contain no controls and should never block navigation. */
+.el-message {
+  pointer-events: none;
+}
+
 button,
 input,
 textarea,
@@ -1697,6 +1702,28 @@ button:focus-visible {
 
 .chapter-list {
   padding: 8px 28px;
+}
+
+.offline-maintenance-tip {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid #f3d9a6;
+  border-radius: 10px;
+  color: #805b17;
+  background: #fff8e8;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.live-maintenance-tip {
+  margin: 0 0 18px;
+  padding: 11px 13px;
+  border: 1px solid #b9d6ff;
+  border-radius: 10px;
+  color: #285a99;
+  background: #eef6ff;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .chapter-row {

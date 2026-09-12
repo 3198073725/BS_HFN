@@ -17,6 +17,7 @@ const videoDialog = ref(false)
 const selectedCourse = ref(null)
 const selectedChapter = ref(null)
 const editingCourseId = ref(null)
+const editingCourseStatus = ref(null)
 const editingChapterId = ref(null)
 const videoFile = ref(null)
 const videoInputKey = ref(0)
@@ -61,6 +62,7 @@ async function load() {
 
 function openCourse(course = null) {
   editingCourseId.value = course?.id || null
+  editingCourseStatus.value = course?.status || null
   Object.assign(courseForm, {
     name: course?.name || '',
     category_id: course?.category_id || null,
@@ -73,6 +75,7 @@ function openCourse(course = null) {
 
 function resetCourseForm() {
   editingCourseId.value = null
+  editingCourseStatus.value = null
   Object.assign(courseForm, { name: '', category_id: null, description: '', detail: '' })
   courseFormRef.value?.clearValidate()
 }
@@ -163,7 +166,7 @@ const videoRules = {
 const statusLabels = {
   DRAFT: '草稿',
   PUBLISHED: '已发布',
-  OFFLINE: '已下架',
+  OFFLINE: '已下线',
   PENDING: '等待处理',
   PROCESSING: '处理中',
   READY: '可播放',
@@ -172,6 +175,14 @@ const statusLabels = {
 
 function statusLabel(status) {
   return statusLabels[status] || status
+}
+
+function canMaintain(course) {
+  return ['DRAFT', 'PUBLISHED', 'OFFLINE'].includes(course.status)
+}
+
+function canDeleteChapter(course) {
+  return ['DRAFT', 'OFFLINE'].includes(course.status)
 }
 
 function selectVideoFile(event) {
@@ -264,7 +275,7 @@ async function offline(course) {
       type: 'warning',
     })
     await api.post(`/courses/${course.id}/offline`)
-    ElMessage.success('课程已下线，可随时重新发布')
+    ElMessage.success('课程已下线，现在可以编辑内容或重新发布')
     await load()
   } catch (error) {
     if (error !== 'cancel') ElMessage.error(error.message || '课程下线失败')
@@ -309,7 +320,7 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">TEACHER WORKSPACE</p>
         <h1>教学管理</h1>
-        <p>创建课程、组织章节并上传视频内容。</p>
+        <p>创建课程、组织章节并上传视频；已发布课程下线后可继续编辑。</p>
       </div>
       <el-button type="primary" size="large" @click="openCourse()">＋ 创建课程</el-button>
     </div>
@@ -327,6 +338,9 @@ onBeforeUnmount(() => {
         <el-table-column type="expand">
           <template #default="scope">
             <div class="chapter-list">
+              <p v-if="scope.row.status === 'OFFLINE'" class="offline-maintenance-tip">
+                课程已下线，可安全调整课程信息、章节和视频，完成后再重新发布。
+              </p>
               <div v-for="(chapter, index) in scope.row.chapters" :key="chapter.id" class="chapter-row">
                 <div class="chapter-summary">
                   <span class="chapter-number">{{ String(index + 1).padStart(2, '0') }}</span>
@@ -341,18 +355,18 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="chapter-actions">
                   <el-button
-                    v-if="scope.row.status === 'DRAFT'"
+                    v-if="canMaintain(scope.row)"
                     link
                     type="primary"
                     @click="openChapter(scope.row, chapter)"
                   >编辑</el-button>
                   <el-button
-                    v-if="scope.row.status === 'DRAFT'"
+                    v-if="canDeleteChapter(scope.row)"
                     link
                     type="danger"
                     @click="removeChapter(scope.row, chapter)"
                   >删除</el-button>
-                  <el-button :disabled="scope.row.status !== 'DRAFT'" @click="openVideo(chapter)">上传视频</el-button>
+                  <el-button :disabled="!canMaintain(scope.row)" @click="openVideo(chapter)">上传视频</el-button>
                 </div>
               </div>
               <el-empty v-if="!scope.row.chapters.length" description="暂无章节，先添加第一个章节吧" :image-size="64" />
@@ -373,8 +387,8 @@ onBeforeUnmount(() => {
         <el-table-column label="操作" min-width="310">
           <template #default="scope">
             <div class="course-row-actions">
-              <el-button v-if="scope.row.status === 'DRAFT'" link type="primary" @click="openCourse(scope.row)">编辑</el-button>
-              <el-button v-if="scope.row.status === 'DRAFT'" link @click="openChapter(scope.row)">添加章节</el-button>
+              <el-button v-if="canMaintain(scope.row)" link type="primary" @click="openCourse(scope.row)">编辑</el-button>
+              <el-button v-if="canMaintain(scope.row)" link @click="openChapter(scope.row)">添加章节</el-button>
               <el-button
                 v-if="['DRAFT', 'OFFLINE'].includes(scope.row.status)"
                 link
@@ -394,13 +408,16 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="courseDialog"
-      :title="editingCourseId ? '编辑课程草稿' : '创建课程'"
+      :title="editingCourseId ? '编辑课程' : '创建课程'"
       width="min(560px, 92vw)"
       :close-on-click-modal="!savingCourse"
       :close-on-press-escape="!savingCourse"
       :show-close="!savingCourse"
       @closed="resetCourseForm"
     >
+      <p v-if="editingCourseStatus === 'PUBLISHED'" class="live-maintenance-tip">
+        当前课程正在发布中，保存后的课程资料会立即对学生生效。
+      </p>
       <el-form ref="courseFormRef" :model="courseForm" :rules="courseRules" label-position="top">
         <el-form-item label="课程名称" prop="name">
           <el-input v-model.trim="courseForm.name" placeholder="例如：高等数学基础" />

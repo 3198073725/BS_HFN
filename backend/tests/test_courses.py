@@ -128,10 +128,49 @@ def test_course_chapter_publish_and_permissions(app, client):
     assert client.get(f"/api/videos/{failed_video_id}/status").status_code == 404
 
     assert client.post(f"/api/courses/{course_id}/publish", headers=bearer(teacher)).status_code == 409
+
+    published_update = client.put(
+        f"/api/courses/{course_id}",
+        headers=bearer(teacher),
+        json={"name": "Python 发布维护版"},
+    )
+    assert published_update.status_code == 200
+    assert published_update.get_json()["data"]["name"] == "Python 发布维护版"
+    published_chapter = client.post(
+        f"/api/courses/{course_id}/chapters",
+        headers=bearer(teacher),
+        json={"title": "发布中新增章节", "sort_order": 2},
+    )
+    assert published_chapter.status_code == 201
+    assert client.put(
+        f"/api/courses/{course_id}/chapters/{published_chapter.get_json()['data']['id']}",
+        headers=bearer(teacher),
+        json={"title": "发布中调整章节"},
+    ).status_code == 200
+    assert client.delete(
+        f"/api/courses/{course_id}/chapters/{published_chapter.get_json()['data']['id']}",
+        headers=bearer(teacher),
+    ).status_code == 409
+
     assert client.post(f"/api/courses/{course_id}/offline", headers=bearer(teacher)).status_code == 200
     assert client.post(f"/api/courses/{course_id}/offline", headers=bearer(teacher)).status_code == 409
     assert client.get("/api/courses").get_json()["data"] == []
-    assert client.post(f"/api/courses/{course_id}/publish", headers=bearer(teacher)).status_code == 200
+
+    offline_update = client.put(
+        f"/api/courses/{course_id}",
+        headers=bearer(teacher),
+        json={"name": "Python 下线维护版"},
+    )
+    assert offline_update.status_code == 200
+    assert offline_update.get_json()["data"]["name"] == "Python 下线维护版"
+    assert client.delete(
+        f"/api/courses/{course_id}/chapters/{published_chapter.get_json()['data']['id']}",
+        headers=bearer(teacher),
+    ).status_code == 200
+
+    republished = client.post(f"/api/courses/{course_id}/publish", headers=bearer(teacher))
+    assert republished.status_code == 200
+    assert republished.get_json()["data"]["name"] == "Python 下线维护版"
 
 
 def test_deleting_chapter_cleans_video_files(app, client):

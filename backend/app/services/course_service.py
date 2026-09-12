@@ -75,8 +75,7 @@ def create_course(teacher_id: int, data: dict) -> dict:
 
 def update_course(course_id: int, teacher_id: int, data: dict) -> dict:
     course = _owned_course(course_id, teacher_id)
-    if course.status != CourseStatus.DRAFT.value:
-        raise CourseStateError("只有草稿课程可以编辑")
+    _ensure_editable(course)
     if "category_id" in data:
         _ensure_active_category(data["category_id"])
     for field, value in data.items():
@@ -124,8 +123,7 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
 
 def create_chapter(course_id: int, teacher_id: int, data: dict) -> dict:
     course = _owned_course(course_id, teacher_id)
-    if course.status != CourseStatus.DRAFT.value:
-        raise CourseStateError("只有草稿课程可以新增章节")
+    _ensure_editable(course)
     chapter = Chapter(course_id=course.id, **data)
     db.session.add(chapter)
     db.session.commit()
@@ -134,8 +132,7 @@ def create_chapter(course_id: int, teacher_id: int, data: dict) -> dict:
 
 def update_chapter(course_id: int, chapter_id: int, teacher_id: int, data: dict) -> dict:
     course = _owned_course(course_id, teacher_id)
-    if course.status != CourseStatus.DRAFT.value:
-        raise CourseStateError("只有草稿课程可以编辑章节")
+    _ensure_editable(course)
     chapter = db.session.scalar(
         db.select(Chapter).where(Chapter.id == chapter_id, Chapter.course_id == course.id)
     )
@@ -149,8 +146,8 @@ def update_chapter(course_id: int, chapter_id: int, teacher_id: int, data: dict)
 
 def delete_chapter(course_id: int, chapter_id: int, teacher_id: int) -> None:
     course = _owned_course(course_id, teacher_id)
-    if course.status != CourseStatus.DRAFT.value:
-        raise CourseStateError("只有草稿课程可以删除章节")
+    if course.status not in (CourseStatus.DRAFT.value, CourseStatus.OFFLINE.value):
+        raise CourseStateError("已发布课程请先下线后再删除章节")
     chapter = db.session.scalar(
         db.select(Chapter).where(Chapter.id == chapter_id, Chapter.course_id == course.id)
     )
@@ -227,6 +224,11 @@ def _ensure_active_category(category_id: int) -> None:
     category = db.session.get(CourseCategory, category_id)
     if category is None or not category.status:
         raise CourseNotFound("课程分类不存在或已禁用")
+
+
+def _ensure_editable(course: Course) -> None:
+    if course.status not in {item.value for item in CourseStatus}:
+        raise CourseStateError("课程状态异常，暂时不能编辑")
 
 
 def _cleanup_deleted_video_files(video_files) -> None:

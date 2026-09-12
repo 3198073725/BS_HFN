@@ -9,7 +9,7 @@ from kombu.exceptions import OperationalError
 from werkzeug.datastructures import FileStorage
 from werkzeug.security import generate_password_hash
 
-from app.constants import UserRole
+from app.constants import CourseStatus, UserRole
 from app.extensions import db
 from app.models import Chapter, Course, CourseCategory, User, Video
 from app.services import generate_cover, generate_hls, probe_video, transcode_video
@@ -86,7 +86,12 @@ def test_teacher_upload_video_api(app, client, tmp_path):
         category = CourseCategory(name="视频课程")
         db.session.add_all([teacher, category])
         db.session.flush()
-        course = Course(teacher_id=teacher.id, category_id=category.id, name="视频测试")
+        course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="视频测试",
+            status=CourseStatus.PUBLISHED.value,
+        )
         db.session.add(course)
         db.session.flush()
         chapter = Chapter(course_id=course.id, title="第一章")

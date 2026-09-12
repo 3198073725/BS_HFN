@@ -37,8 +37,8 @@ def create_video(file, teacher_id: int, data: dict) -> Video:
         raise VideoNotFound("章节不存在")
     if chapter.course.teacher_id != teacher_id:
         raise VideoPermissionDenied("不能向其他教师的课程上传视频")
-    if chapter.course.status != CourseStatus.DRAFT.value:
-        raise ValueError("只有草稿课程可以上传视频")
+    if chapter.course.status not in {item.value for item in CourseStatus}:
+        raise ValueError("课程状态异常，暂时不能上传视频")
 
     media_root = Path(current_app.config["MEDIA_ROOT"])
     try:
