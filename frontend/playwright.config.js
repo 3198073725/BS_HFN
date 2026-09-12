@@ -7,6 +7,7 @@ const backendPort = 5100
 const frontendPort = 4173
 const configDirectory = dirname(fileURLToPath(import.meta.url))
 const backendDirectory = resolve(configDirectory, '../backend')
+const e2eMediaDirectory = resolve(backendDirectory, '.e2e-media')
 const pythonExecutable = resolve(configDirectory, '../.venv/Scripts/python.exe')
 
 
@@ -33,6 +34,7 @@ export default defineConfig({
       env: {
         ...process.env,
         E2E_BACKEND_PORT: String(backendPort),
+        MEDIA_ROOT: e2eMediaDirectory,
       },
       url: `http://127.0.0.1:${backendPort}/api/health`,
       reuseExistingServer: false,

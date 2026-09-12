@@ -12,6 +12,7 @@ dist/
 playwright-report/
 test-results/
 tools/ffmpeg/
+backend/.e2e-media/
 
 # Environment and local runtime data
 .env

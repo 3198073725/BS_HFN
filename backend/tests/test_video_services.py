@@ -260,6 +260,48 @@ def test_video_file_validation_preserves_chinese_name_and_rejects_empty(tmp_path
         )
 
 
+def test_video_upload_rejects_unsupported_file_as_bad_request(app, client):
+    with app.app_context():
+        teacher = User(
+            username="validation_teacher",
+            password_hash=generate_password_hash("Teach123!"),
+            real_name="校验教师",
+            teacher_no="TV002",
+            role=UserRole.TEACHER.value,
+        )
+        category = CourseCategory(name="上传校验课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="上传校验")
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="第一章")
+        db.session.add(chapter)
+        db.session.commit()
+        chapter_id = chapter.id
+
+    login = client.post(
+        "/api/auth/login",
+        json={"account": "validation_teacher", "password": "Teach123!"},
+    )
+    token = login.get_json()["data"]["access_token"]
+    uploaded = client.post(
+        "/api/videos/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={
+            "chapter_id": str(chapter_id),
+            "title": "错误格式",
+            "video_file": (io.BytesIO(b"not-video"), "lesson.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert uploaded.status_code == 400
+    assert uploaded.get_json()["message"] == "不支持的视频格式"
+    with app.app_context():
+        assert db.session.scalar(db.select(db.func.count(Video.id))) == 0
+
+
 def test_failed_processing_cleans_generated_files(app, monkeypatch):
     with app.app_context():
         teacher = User(

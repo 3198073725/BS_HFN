@@ -7,6 +7,7 @@ from app.services.auth_service import AuthenticationError, get_active_user
 from app.services.video_processing_service import (
     VideoNotFound,
     VideoPermissionDenied,
+    VideoFileValidationError,
     create_video,
     create_and_process_video,
     get_visible_video,
@@ -43,6 +44,8 @@ def upload_video():
         return error(str(exc), 404)
     except VideoPermissionDenied as exc:
         return error(str(exc), 403)
+    except VideoFileValidationError as exc:
+        return error(str(exc), 400)
     except ValueError as exc:
         return error(str(exc), 409)
     if current_app.config["VIDEO_PROCESSING_ASYNC"]:

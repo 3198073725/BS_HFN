@@ -1,7 +1,7 @@
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 from flask import send_from_directory
 from werkzeug.security import generate_password_hash
@@ -43,10 +43,42 @@ E2E_USERS = (
 
 def _create_hls_fixture(app) -> str:
     media_root = Path(app.config["MEDIA_ROOT"])
+    upload_fixture = media_root / "videos" / "original" / "e2e-upload.mp4"
     hls_directory = media_root / "videos" / "hls" / "e2e"
     if hls_directory.exists():
         shutil.rmtree(hls_directory)
+    upload_fixture.parent.mkdir(parents=True, exist_ok=True)
     hls_directory.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            app.config["FFMPEG_BIN"],
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=320x180:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=660:sample_rate=44100",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(upload_fixture),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
     playlist = hls_directory / "index.m3u8"
     segment_pattern = hls_directory / "segment_%03d.ts"
     subprocess.run(
@@ -137,19 +169,29 @@ def create_e2e_app():
             status=True,
         )
         db.session.add_all([video, membership])
+        long_course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="端测超长课程名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789连续字符边界验证",
+            description=(
+                "用于验证中文与连续英文混排时不会撑破卡片："
+                "https://example.invalid/"
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            ),
+            status=CourseStatus.PUBLISHED.value,
+            published_at=utc_now(),
+        )
+        upload_course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="端测视频上传草稿",
+            description="用于浏览器上传和转码验收。",
+            status=CourseStatus.DRAFT.value,
+        )
+        db.session.add_all([long_course, upload_course])
+        db.session.flush()
         db.session.add(
-            Course(
-                teacher_id=teacher.id,
-                category_id=category.id,
-                name="端测超长课程名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789连续字符边界验证",
-                description=(
-                    "用于验证中文与连续英文混排时不会撑破卡片："
-                    "https://example.invalid/"
-                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-                ),
-                status=CourseStatus.PUBLISHED.value,
-                published_at=utc_now(),
-            )
+            Chapter(course_id=upload_course.id, title="上传测试章节", sort_order=0)
         )
         db.session.commit()
     return app

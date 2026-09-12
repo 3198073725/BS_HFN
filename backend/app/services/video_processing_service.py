@@ -25,6 +25,10 @@ class VideoProcessingError(RuntimeError):
     pass
 
 
+class VideoFileValidationError(ValueError):
+    pass
+
+
 def create_video(file, teacher_id: int, data: dict) -> Video:
     chapter = db.session.scalar(
         db.select(Chapter).options(joinedload(Chapter.course)).where(Chapter.id == data["chapter_id"])
@@ -37,7 +41,13 @@ def create_video(file, teacher_id: int, data: dict) -> Video:
         raise ValueError("只有草稿课程可以上传视频")
 
     media_root = Path(current_app.config["MEDIA_ROOT"])
-    original_path, original_name = save_original_video(file, media_root / "videos" / "original")
+    try:
+        original_path, original_name = save_original_video(
+            file,
+            media_root / "videos" / "original",
+        )
+    except ValueError as exc:
+        raise VideoFileValidationError(str(exc)) from exc
     video = Video(
         chapter_id=chapter.id,
         title=data["title"],

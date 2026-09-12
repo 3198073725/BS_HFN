@@ -1,7 +1,14 @@
 import { expect, test } from '@playwright/test'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 
 const password = 'E2ePassword123!'
+const testDirectory = dirname(fileURLToPath(import.meta.url))
+const uploadFixture = resolve(
+  testDirectory,
+  '../../backend/.e2e-media/videos/original/e2e-upload.mp4',
+)
 
 
 async function login(page, account) {
@@ -258,6 +265,40 @@ test('项目内 FFmpeg 生成的 HLS 可以在 Chromium 中播放', async ({ pag
     () => video.evaluate((element) => element.currentTime),
     { timeout: 15000 },
   ).toBeGreaterThan(0.25)
+})
+
+
+test('教师上传视频时拒绝错误格式并完成真实 MP4 转码', async ({ page }) => {
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '教学管理', exact: true }).click()
+  const courseRow = page.getByRole('row').filter({ hasText: '端测视频上传草稿' })
+  await courseRow.locator('.el-table__expand-icon').click()
+  const chapterRow = page.locator('.chapter-row').filter({ hasText: '上传测试章节' })
+  await chapterRow.getByRole('button', { name: '上传视频', exact: true }).click()
+
+  const dialog = page.getByRole('dialog', { name: '上传视频' })
+  await dialog.getByPlaceholder('请输入视频标题').fill('浏览器上传视频')
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: '错误格式.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('not a video'),
+  })
+  const rejectedResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/videos/upload'),
+  )
+  await dialog.getByRole('button', { name: '上传并处理', exact: true }).click()
+  expect((await rejectedResponse).status()).toBe(400)
+  await expect(page.getByText('不支持的视频格式')).toBeVisible()
+
+  await dialog.locator('input[type="file"]').setInputFiles(uploadFixture)
+  const uploadedResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/videos/upload'),
+  )
+  await dialog.getByRole('button', { name: '上传并处理', exact: true }).click()
+  expect((await uploadedResponse).status()).toBe(201)
+  await expect(page.getByText('视频处理完成')).toBeVisible()
+  await courseRow.getByRole('button', { name: '展开当前行' }).click()
+  await expect(page.getByText('浏览器上传视频 · 可播放', { exact: true })).toBeVisible()
 })
 
 
