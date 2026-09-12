@@ -394,12 +394,26 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
   await login(page, 'e2e_admin')
   await page.getByRole('link', { name: '系统后台', exact: true }).click()
   await expect(page.getByRole('heading', { name: '系统后台', exact: true })).toBeVisible()
-  const adminColumnHeights = await Promise.all([
-    page.locator('.admin-users').evaluate((element) => element.getBoundingClientRect().height),
-    page.locator('.notice-management').evaluate((element) => element.getBoundingClientRect().height),
-  ])
-  expect(Math.abs(adminColumnHeights[0] - adminColumnHeights[1])).toBeLessThanOrEqual(1)
+  await expect(page.getByText('视频处理中心', { exact: true })).toBeVisible()
+  await expect(page.getByText('媒体工具可用', { exact: true })).toBeVisible()
+  const failedVideo = page.getByRole('row').filter({ hasText: '端测失败转码视频' })
+  await expect(failedVideo.getByText('端到端模拟：转码进程异常退出')).toBeVisible()
+  await failedVideo.getByRole('button', { name: '重新转码', exact: true }).click()
+  const retryDialog = page.getByRole('dialog', { name: '重新转码' })
+  await retryDialog.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(page.getByText('视频重新转码完成')).toBeVisible({ timeout: 20_000 })
+  await expect(failedVideo.getByText('可播放', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: /用户账号/ }).click()
+  await expect(page.getByText('用户账号管理', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /系统公告/ }).click()
+  await expect(page.getByText('系统公告', { exact: true }).last()).toBeVisible()
   await expectStandardControlSizes(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: /视频处理/ }).click()
+  await expectNoHorizontalOverflow(page)
+  await page.getByRole('button', { name: /课程与班级/ }).click()
+  await expectNoHorizontalOverflow(page)
 
   await page.goto('/teacher/courses')
   await expect(page).toHaveURL('/')
@@ -410,6 +424,7 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
 test('管理员切换账号角色后只提交当前角色编号', async ({ page }) => {
   await login(page, 'e2e_admin')
   await page.getByRole('link', { name: '系统后台', exact: true }).click()
+  await page.getByRole('button', { name: /用户账号/ }).click()
   await page.getByRole('button', { name: '＋ 创建用户', exact: true }).click()
 
   const dialog = page.getByRole('dialog', { name: '创建教师或学生账号' })

@@ -123,6 +123,9 @@ def _create_hls_fixture(app) -> str:
 def create_e2e_app():
     app = create_app("testing")
     hls_path = _create_hls_fixture(app)
+    media_root = Path(app.config["MEDIA_ROOT"])
+    failed_original = media_root / "videos" / "original" / "e2e-failed-retry.mp4"
+    shutil.copyfile(media_root / "videos" / "original" / "e2e-upload.mp4", failed_original)
 
     @app.get("/media/<path:filename>")
     def e2e_media_file(filename: str):
@@ -190,8 +193,25 @@ def create_e2e_app():
         )
         db.session.add_all([long_course, upload_course])
         db.session.flush()
+        upload_chapter = Chapter(
+            course_id=upload_course.id,
+            title="上传测试章节",
+            sort_order=0,
+        )
+        db.session.add(upload_chapter)
+        db.session.flush()
         db.session.add(
-            Chapter(course_id=upload_course.id, title="上传测试章节", sort_order=0)
+            Video(
+                chapter_id=upload_chapter.id,
+                title="端测失败转码视频",
+                original_name="e2e-failed-retry.mp4",
+                original_file="videos/original/e2e-failed-retry.mp4",
+                file_size=failed_original.stat().st_size,
+                status=VideoStatus.FAILED.value,
+                process_step="TRANSCODING",
+                error_message="端到端模拟：转码进程异常退出",
+                sort_order=1,
+            )
         )
         db.session.commit()
     return app

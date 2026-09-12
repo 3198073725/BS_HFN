@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+from unittest.mock import patch
 
+from kombu.exceptions import OperationalError
 from werkzeug.security import generate_password_hash
 
 from app.constants import CourseStatus, UserRole, VideoStatus
@@ -15,6 +17,8 @@ from app.models import (
     HomeworkSubmission,
     LearningRecord,
     Question,
+    TeachingClass,
+    TeachingClassStudent,
     User,
     Video,
 )
@@ -256,3 +260,139 @@ def test_role_overviews_and_teacher_course_statistics(app, client):
     assert admin_data["students"] == 1
     assert admin_data["teachers"] == 1
     assert admin_data["published_courses"] == 1
+
+
+def test_admin_can_manage_video_operations_courses_classes_and_categories(app, client):
+    context = create_context(app)
+    admin = login(client, context["admin"])
+    teacher = login(client, context["teacher"])
+
+    assert client.get("/api/admin/videos", headers=bearer(teacher)).status_code == 403
+
+    with app.app_context():
+        chapter = db.session.scalar(db.select(Chapter).where(Chapter.title == "统计章节"))
+        student = db.session.scalar(db.select(User).where(User.username == context["student"]))
+        original = app.config["MEDIA_ROOT"] / "videos" / "original" / "failed.mp4"
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(b"failed-video-source")
+        failed_video = Video(
+            chapter_id=chapter.id,
+            title="等待人工恢复的视频",
+            original_name="failed.mp4",
+            original_file="videos/original/failed.mp4",
+            file_size=original.stat().st_size,
+            status=VideoStatus.FAILED.value,
+            process_step="TRANSCODING",
+            error_message="转码进程异常退出",
+        )
+        classroom = TeachingClass(
+            teacher_id=context["teacher_id"],
+            name="管理员监管班级",
+            description="验证班级监管操作",
+        )
+        db.session.add_all([failed_video, classroom])
+        db.session.flush()
+        db.session.add(TeachingClassStudent(class_id=classroom.id, student_id=student.id))
+        db.session.commit()
+        failed_video_id = failed_video.id
+        classroom_id = classroom.id
+
+    videos = client.get(
+        "/api/admin/videos?status=FAILED&keyword=人工恢复",
+        headers=bearer(admin),
+    )
+    assert videos.status_code == 200
+    video_data = videos.get_json()["data"]
+    assert video_data["summary"]["total"] == 2
+    assert video_data["summary"]["FAILED"] == 1
+    assert video_data["items"][0]["retryable"] is True
+    assert video_data["items"][0]["original_exists"] is True
+    assert "ffmpeg" in video_data["runtime"]
+
+    app.config["VIDEO_PROCESSING_ASYNC"] = True
+    with patch("app.tasks.video_tasks.process_video.delay") as delay:
+        retried = client.post(
+            f"/api/admin/videos/{failed_video_id}/retry",
+            headers=bearer(admin),
+        )
+    assert retried.status_code == 202
+    assert retried.get_json()["data"]["status"] == VideoStatus.PENDING.value
+    assert retried.get_json()["data"]["process_step"] == "QUEUED"
+    delay.assert_called_once_with(failed_video_id)
+
+    assert client.post(
+        f"/api/admin/videos/{failed_video_id}/retry",
+        headers=bearer(admin),
+    ).status_code == 409
+
+    with app.app_context():
+        failed_video = db.session.get(Video, failed_video_id)
+        failed_video.status = VideoStatus.FAILED.value
+        db.session.commit()
+    with patch(
+        "app.tasks.video_tasks.process_video.delay",
+        side_effect=OperationalError("redis offline"),
+    ):
+        queue_failed = client.post(
+            f"/api/admin/videos/{failed_video_id}/retry",
+            headers=bearer(admin),
+        )
+    assert queue_failed.status_code == 503
+    assert queue_failed.get_json()["data"]["status"] == VideoStatus.FAILED.value
+    assert queue_failed.get_json()["data"]["process_step"] == "QUEUE"
+
+    removed = client.delete(
+        f"/api/admin/videos/{failed_video_id}",
+        headers=bearer(admin),
+    )
+    assert removed.status_code == 200
+    with app.app_context():
+        assert db.session.get(Video, failed_video_id) is None
+        assert not original.exists()
+
+    courses = client.get("/api/admin/courses", headers=bearer(admin))
+    assert courses.status_code == 200
+    course = courses.get_json()["data"][0]
+    assert course["ready_video_count"] == 1
+    assert course["student_count"] == 1
+    offline = client.put(
+        f"/api/admin/courses/{course['id']}/status",
+        headers=bearer(admin),
+        json={"status": "OFFLINE"},
+    )
+    assert offline.status_code == 200
+    assert offline.get_json()["data"]["status"] == CourseStatus.OFFLINE.value
+    published = client.put(
+        f"/api/admin/courses/{course['id']}/status",
+        headers=bearer(admin),
+        json={"status": "PUBLISHED"},
+    )
+    assert published.status_code == 200
+
+    classes = client.get("/api/admin/classes?keyword=监管", headers=bearer(admin))
+    assert classes.status_code == 200
+    assert classes.get_json()["data"][0]["member_count"] == 1
+    assert client.delete(
+        f"/api/admin/classes/{classroom_id}",
+        headers=bearer(admin),
+    ).status_code == 200
+
+    category = client.post(
+        "/api/admin/categories",
+        headers=bearer(admin),
+        json={"name": "管理员新分类", "description": "用于后台维护", "sort_order": 9},
+    )
+    assert category.status_code == 201
+    category_id = category.get_json()["data"]["id"]
+    assert client.put(
+        f"/api/admin/categories/{category_id}",
+        headers=bearer(admin),
+        json={"name": "管理员更新分类", "sort_order": 8},
+    ).status_code == 200
+    disabled = client.put(
+        f"/api/admin/categories/{category_id}/status",
+        headers=bearer(admin),
+        json={"status": False},
+    )
+    assert disabled.status_code == 200
+    assert disabled.get_json()["data"]["status"] is False

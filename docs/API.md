@@ -156,4 +156,22 @@ Authorization: Bearer <access_token>
 | GET | `/api/statistics` | 学生/教师/管理员 | 当前角色的实时聚合概览 |
 | GET | `/api/statistics/courses` | 教师 | 本人课程的学生、进度、作业和测验聚合 |
 
+### 管理员运维接口
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/admin/videos` | 管理员 | 转码任务、状态汇总和 FFmpeg/ffprobe 运行状态；支持 `status`、`keyword` |
+| POST | `/api/admin/videos/{id}/retry` | 管理员 | 重新处理失败任务，或恢复超过 30 分钟未更新的等待/处理任务 |
+| DELETE | `/api/admin/videos/{id}` | 管理员 | 清理失败任务、原始文件和派生文件 |
+| GET | `/api/admin/courses` | 管理员 | 跨教师查询课程、章节、视频和学生数量；支持 `status`、`keyword` |
+| PUT | `/api/admin/courses/{id}/status` | 管理员 | 强制下线课程或恢复发布 |
+| GET | `/api/admin/classes` | 管理员 | 跨教师查询班级与成员数量；支持 `keyword` |
+| DELETE | `/api/admin/classes/{id}` | 管理员 | 删除班级及成员关系，不删除师生账号 |
+| GET | `/api/admin/categories` | 管理员 | 查看启用和禁用的全部课程分类 |
+| POST | `/api/admin/categories` | 管理员 | 创建课程分类 |
+| PUT | `/api/admin/categories/{id}` | 管理员 | 修改课程分类资料和排序 |
+| PUT | `/api/admin/categories/{id}/status` | 管理员 | 启用或禁用课程分类 |
+
+视频任务只有在 `FAILED`，或 `PENDING/PROCESSING` 超过 30 分钟未更新时才能重新处理；重新处理前必须确认受控媒体目录内的原始文件仍存在。清理操作仅允许 `FAILED` 状态，接口会拒绝删除正常处理或可播放的视频。
+
 公告状态为 `DRAFT/PUBLISHED/OFFLINE`。统计结果实时读取业务表，不维护独立统计表。

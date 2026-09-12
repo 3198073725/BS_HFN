@@ -174,6 +174,14 @@ def _admin_overview() -> dict:
         "ready_videos": _count(
             db.select(func.count(Video.id)).where(Video.status == VideoStatus.READY.value)
         ),
+        "processing_videos": _count(
+            db.select(func.count(Video.id)).where(
+                Video.status.in_([VideoStatus.PENDING.value, VideoStatus.PROCESSING.value])
+            )
+        ),
+        "failed_videos": _count(
+            db.select(func.count(Video.id)).where(Video.status == VideoStatus.FAILED.value)
+        ),
         "learning_records": _count(db.select(func.count(LearningRecord.id))),
         "homework_submissions": _count(db.select(func.count(HomeworkSubmission.id))),
         "exam_records": _count(
