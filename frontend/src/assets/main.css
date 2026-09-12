@@ -3107,6 +3107,13 @@ button:focus-visible {
   overflow: hidden;
 }
 
+.portal-notice-list {
+  max-height: 430px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .portal-notice-list article {
   display: grid;
   padding: 17px 19px;
@@ -3151,6 +3158,30 @@ button:focus-visible {
   color: #7b8995;
   font-size: 13px;
   text-align: center;
+}
+
+@media (min-width: 901px) {
+  .learning-layout {
+    align-items: stretch;
+  }
+
+  .learning-layout > .player-panel,
+  .learning-layout > .chapter-panel {
+    height: 100%;
+  }
+
+  .learning-layout > .chapter-panel {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .learning-layout > .chapter-panel .chapter-stack {
+    min-height: 0;
+    flex: 1 1 auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
 }
 
 /* Account pages */

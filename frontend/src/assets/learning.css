@@ -2185,18 +2185,24 @@
 
 /* Scalable classroom master-detail workspace */
 .classroom-workspace {
+  --classroom-workspace-height: clamp(560px, 72vh, 680px);
   display: grid;
+  height: var(--classroom-workspace-height);
   grid-template-columns: 286px minmax(0, 1fr);
-  align-items: start;
+  align-items: stretch;
   gap: 16px;
 }
 
 .classroom-list-panel {
   position: sticky;
   top: 84px;
+  display: flex;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid #d8dfe6;
   border-radius: 6px;
+  flex-direction: column;
   background: #fff;
 }
 
@@ -2231,10 +2237,11 @@
 }
 
 .classroom-list {
-  max-height: min(520px, calc(100vh - 300px));
-  min-height: 150px;
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .classroom-list > button {
@@ -2308,11 +2315,18 @@
 }
 
 .classroom-workspace > .classroom-card {
+  height: 100%;
   min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .classroom-selection-empty {
-  min-height: 320px;
+  height: 100%;
+  min-height: 0;
 }
 
 .classroom-mobile-selector {
@@ -2333,6 +2347,40 @@
   top: 0;
 }
 
+/* Keep dense two-column workspaces balanced and scroll locally. */
+@media (min-width: 1051px) {
+  .admin-layout {
+    height: 600px;
+    align-items: stretch;
+  }
+
+  .admin-users,
+  .notice-management {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .notice-management {
+    max-height: none;
+  }
+}
+
+@media (min-width: 821px) {
+  .question-manager-layout {
+    height: clamp(400px, 58vh, 520px);
+    align-items: stretch;
+  }
+
+  .exam-question-list,
+  .question-create-panel {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
 @media (max-width: 960px) {
   .classroom-workspace {
     grid-template-columns: 240px minmax(0, 1fr);
@@ -2342,6 +2390,7 @@
 @media (max-width: 720px) {
   .classroom-workspace {
     display: block;
+    height: auto;
   }
 
   .classroom-list-panel {
@@ -2350,5 +2399,12 @@
 
   .classroom-mobile-selector {
     display: block;
+  }
+
+  .classroom-workspace > .classroom-card,
+  .classroom-selection-empty {
+    height: auto;
+    min-height: 320px;
+    overflow-y: visible;
   }
 }

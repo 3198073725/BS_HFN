@@ -244,6 +244,12 @@ test('大量班级使用主从选择且移动端不会纵向复制名册', async
   await page.goto('/classes')
   await expect(page.locator('.classroom-list > button')).toHaveCount(14)
   await expect(page.locator('.classroom-card')).toHaveCount(1)
+  const workspaceHeights = await Promise.all([
+    page.locator('.classroom-list-panel').evaluate((element) => element.getBoundingClientRect().height),
+    page.locator('.classroom-workspace > .classroom-card').evaluate((element) => element.getBoundingClientRect().height),
+  ])
+  expect(Math.abs(workspaceHeights[0] - workspaceHeights[1])).toBeLessThanOrEqual(1)
+  expect(workspaceHeights[0]).toBeGreaterThanOrEqual(559)
   const listSize = await page.locator('.classroom-list').evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
@@ -252,6 +258,10 @@ test('大量班级使用主从选择且移动端不会纵向复制名册', async
 
   await page.locator('.classroom-list > button').nth(8).click()
   await expect(page.getByRole('heading', { name: '端测软件工程 09 班', exact: true })).toBeVisible()
+  const heightAfterSelection = await page
+    .locator('.classroom-list-panel')
+    .evaluate((element) => element.getBoundingClientRect().height)
+  expect(heightAfterSelection).toBe(workspaceHeights[0])
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.classroom-list-panel')).toBeHidden()
@@ -265,6 +275,11 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
   await login(page, 'e2e_admin')
   await page.getByRole('link', { name: '系统后台', exact: true }).click()
   await expect(page.getByRole('heading', { name: '系统后台', exact: true })).toBeVisible()
+  const adminColumnHeights = await Promise.all([
+    page.locator('.admin-users').evaluate((element) => element.getBoundingClientRect().height),
+    page.locator('.notice-management').evaluate((element) => element.getBoundingClientRect().height),
+  ])
+  expect(Math.abs(adminColumnHeights[0] - adminColumnHeights[1])).toBeLessThanOrEqual(1)
 
   await page.goto('/teacher/courses')
   await expect(page).toHaveURL('/')
@@ -326,6 +341,11 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
   await page.getByRole('link', { name: '课程中心', exact: true }).click()
   await page.getByRole('link', { name: courseName, exact: true }).click()
   await expect(page.getByRole('heading', { name: courseName, exact: true })).toBeVisible()
+  const learningColumnHeights = await Promise.all([
+    page.locator('.learning-layout > .player-panel').evaluate((element) => element.getBoundingClientRect().height),
+    page.locator('.learning-layout > .chapter-panel').evaluate((element) => element.getBoundingClientRect().height),
+  ])
+  expect(Math.abs(learningColumnHeights[0] - learningColumnHeights[1])).toBeLessThanOrEqual(1)
   await page.getByRole('button', { name: /加入课程/ }).click()
   await expect(page.getByRole('button', { name: /已加入课程/ })).toBeVisible()
 
@@ -529,6 +549,11 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   await expect(page.getByText('测验草稿已创建，请继续添加试题')).toBeVisible()
 
   const questionDialog = page.getByRole('dialog', { name: `${examTitle} · 试题管理` })
+  const questionColumnHeights = await Promise.all([
+    questionDialog.locator('.exam-question-list').evaluate((element) => element.getBoundingClientRect().height),
+    questionDialog.locator('.question-create-panel').evaluate((element) => element.getBoundingClientRect().height),
+  ])
+  expect(Math.abs(questionColumnHeights[0] - questionColumnHeights[1])).toBeLessThanOrEqual(1)
   await questionDialog.getByPlaceholder('请输入题目内容').fill('HTTP 默认端口是多少？')
   await questionDialog.getByPlaceholder('选项 A').fill('80')
   await questionDialog.getByPlaceholder('选项 B').fill('443')
