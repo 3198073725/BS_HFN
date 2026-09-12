@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 
+const backendTarget = process.env.VITE_BACKEND_TARGET || 'http://127.0.0.1:5000'
+
+
 export default defineConfig({
   plugins: [vue()],
   build: {
@@ -29,11 +32,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:5000',
+        target: backendTarget,
         changeOrigin: true,
       },
       '/media': {
-        target: 'http://127.0.0.1:5000',
+        target: backendTarget,
         changeOrigin: true,
       },
     },

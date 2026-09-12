@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- 前端：Vue 3、Vite、Vue Router、Pinia、Axios、Element Plus、hls.js
+- 前端：Vue 3、Vite、Vue Router、Pinia、Axios、Element Plus、hls.js、Playwright
 - 后端：Python、Flask、Flask-SQLAlchemy、Flask-Migrate、Flask-JWT-Extended
 - 数据与任务：MySQL 8、Redis、Celery
 - 视频处理：FFmpeg、ffprobe、HLS
@@ -82,7 +82,10 @@ $env:RUN_FFMPEG_TEST='1'
 
 cd E:\BS_HFN\frontend
 npm run build
+npm run test:e2e
 ```
+
+`test:e2e` 会自动启动独立端口的前后端，并使用内存 SQLite 和专用临时账号执行测试，不会读取或修改开发用 MySQL 数据。
 
 异步模式下可执行一次会自动清理数据的真实链路验收：
 
