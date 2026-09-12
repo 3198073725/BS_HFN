@@ -6,7 +6,7 @@ from .homework import Homework, HomeworkSubmission
 from .learning import LearningRecord, VideoNote
 from .notice import Notice
 from .question import Answer, Question
-from .teaching_class import TeachingClass, TeachingClassStudent
+from .teaching_class import TeachingClass, TeachingClassCourse, TeachingClassStudent
 from .user import User
 from .video import Video
 
@@ -28,6 +28,7 @@ __all__ = [
     "Notice",
     "Question",
     "TeachingClass",
+    "TeachingClassCourse",
     "TeachingClassStudent",
     "User",
     "Video",

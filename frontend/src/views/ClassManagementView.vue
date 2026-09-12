@@ -16,7 +16,11 @@ const editingClassId = ref(null)
 const formRef = ref(null)
 const addingClassId = ref(null)
 const removingStudentKey = ref('')
+const teacherCourses = ref([])
+const assigningClassId = ref(null)
+const removingCourseKey = ref('')
 const accountInputs = reactive({})
+const courseSelections = reactive({})
 const selectedClassId = ref(null)
 const classKeyword = ref('')
 let requestSequence = 0
@@ -38,6 +42,10 @@ const rules = {
 
 const totalMembers = computed(() => classrooms.value.reduce(
   (total, classroom) => total + Number(classroom.member_count || 0),
+  0,
+))
+const totalCourseAssignments = computed(() => classrooms.value.reduce(
+  (total, classroom) => total + Number(classroom.course_count || 0),
   0,
 ))
 
@@ -79,9 +87,13 @@ async function loadClasses() {
   const requestId = ++requestSequence
   loading.value = true
   try {
-    const response = await api.get('/classes')
+    const [response, courseResponse] = await Promise.all([
+      api.get('/classes'),
+      isTeacher.value ? api.get('/classes/course-options') : Promise.resolve({ data: [] }),
+    ])
     if (requestId !== requestSequence) return
     classrooms.value = response.data
+    teacherCourses.value = courseResponse.data
     if (isTeacher.value && !classrooms.value.some((item) => item.id === selectedClassId.value)) {
       selectedClassId.value = classrooms.value[0]?.id || null
     }
@@ -92,6 +104,15 @@ async function loadClasses() {
   } finally {
     if (requestId === requestSequence) loading.value = false
   }
+}
+
+function availableCourses(classroom) {
+  const assignedIds = new Set((classroom.courses || []).map((course) => course.id))
+  return teacherCourses.value.filter((course) => !assignedIds.has(course.id))
+}
+
+function courseStatusLabel(status) {
+  return { DRAFT: '草稿', PUBLISHED: '已发布', OFFLINE: '已下线' }[status] || status
 }
 
 function replaceClassroom(classroom) {
@@ -219,6 +240,49 @@ async function removeStudent(classroom, student) {
   }
 }
 
+async function assignCourse(classroom) {
+  const courseId = Number(courseSelections[classroom.id])
+  if (!courseId) {
+    ElMessage.warning('请选择要关联的课程')
+    return
+  }
+  if (assigningClassId.value !== null) return
+  assigningClassId.value = classroom.id
+  try {
+    const response = await api.post(`/classes/${classroom.id}/courses`, { course_id: courseId })
+    replaceClassroom(response.data)
+    courseSelections[classroom.id] = null
+    ElMessage.success('课程已关联，班级学生已同步加入')
+  } catch (error) {
+    ElMessage.error(error.message || '关联课程失败')
+  } finally {
+    assigningClassId.value = null
+  }
+}
+
+async function removeCourseAssignment(classroom, course) {
+  try {
+    await ElMessageBox.confirm(
+      `解除“${course.name}”与“${classroom.name}”的关联吗？学生已有学习记录会保留。`,
+      '解除课程关联',
+      { confirmButtonText: '解除关联', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  const operationKey = `${classroom.id}:${course.id}`
+  removingCourseKey.value = operationKey
+  try {
+    const response = await api.delete(`/classes/${classroom.id}/courses/${course.id}`)
+    replaceClassroom(response.data)
+    ElMessage.success('班级课程关联已解除')
+  } catch (error) {
+    ElMessage.error(error.message || '解除课程关联失败')
+  } finally {
+    removingCourseKey.value = ''
+  }
+}
+
 onMounted(loadClasses)
 onBeforeUnmount(() => {
   requestSequence += 1
@@ -249,7 +313,12 @@ onBeforeUnmount(() => {
         <strong>{{ totalMembers }}</strong>
         <small>按班级成员关系统计</small>
       </article>
-      <p>学生可通过用户名、学号或邮箱加入。移出班级不会删除学生账号，也不会影响其已有课程学习记录。</p>
+      <article>
+        <span>已关联课程</span>
+        <strong>{{ totalCourseAssignments }}</strong>
+        <small>按班级课程关系统计</small>
+      </article>
+      <p>关联课程会将当前名册整班加入，后续新增学生也会自动同步；解除关联不会删除已有学习记录。</p>
     </div>
 
     <div v-if="classrooms.length" :class="isTeacher ? 'classroom-workspace' : 'classroom-grid'">
@@ -315,10 +384,66 @@ onBeforeUnmount(() => {
         <p class="classroom-description">{{ classroom.description || '暂未填写班级说明。' }}</p>
         <div class="classroom-facts">
           <span><strong>{{ classroom.member_count }}</strong> 名学生</span>
+          <span><strong>{{ classroom.course_count }}</strong> 门课程</span>
           <span v-if="!isTeacher">负责教师 · {{ classroom.teacher_name }}</span>
           <span v-if="!isTeacher && classroom.teacher_no">工号 · {{ classroom.teacher_no }}</span>
           <span>{{ isTeacher ? '创建' : '加入' }} · {{ formatDate(isTeacher ? classroom.created_at : classroom.joined_at) }}</span>
         </div>
+
+        <section class="classroom-course-panel" aria-label="班级课程">
+          <div class="classroom-course-heading">
+            <div>
+              <strong>班级课程</strong>
+              <small>{{ isTeacher ? '关联后将名册学生同步加入课程' : '由负责教师统一安排' }}</small>
+            </div>
+            <div v-if="isTeacher" class="classroom-course-picker">
+              <el-select
+                v-model="courseSelections[classroom.id]"
+                filterable
+                clearable
+                :disabled="!availableCourses(classroom).length"
+                :placeholder="availableCourses(classroom).length ? '选择我的课程' : '暂无可关联课程'"
+              >
+                <el-option
+                  v-for="course in availableCourses(classroom)"
+                  :key="course.id"
+                  :label="`${course.name}（${courseStatusLabel(course.status)}）`"
+                  :value="course.id"
+                />
+              </el-select>
+              <el-button
+                type="primary"
+                :loading="assigningClassId === classroom.id"
+                :disabled="!availableCourses(classroom).length"
+                @click="assignCourse(classroom)"
+              >关联课程</el-button>
+            </div>
+          </div>
+
+          <div v-if="classroom.courses?.length" class="classroom-course-list">
+            <article v-for="course in classroom.courses" :key="course.id">
+              <router-link :to="`/courses/${course.id}`">
+                <span class="classroom-course-cover" :style="course.cover_url ? { backgroundImage: `url(${course.cover_url})` } : {}">
+                  <b v-if="!course.cover_url">{{ course.name.slice(0, 1) }}</b>
+                </span>
+                <span>
+                  <strong>{{ course.name }}</strong>
+                  <small>{{ course.category_name || '未分类' }} · {{ courseStatusLabel(course.status) }}</small>
+                </span>
+              </router-link>
+              <el-button
+                v-if="isTeacher"
+                text
+                :loading="removingCourseKey === `${classroom.id}:${course.id}`"
+                @click="removeCourseAssignment(classroom, course)"
+              >解除</el-button>
+            </article>
+          </div>
+          <div v-else class="classroom-course-empty">
+            {{ isTeacher ? '当前班级还没有关联课程' : '负责教师暂未安排班级课程' }}
+            <router-link v-if="isTeacher && !teacherCourses.length" to="/teacher/courses">先创建课程</router-link>
+          </div>
+        </section>
 
         <template v-if="isTeacher">
           <div class="classroom-member-toolbar">

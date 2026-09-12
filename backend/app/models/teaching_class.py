@@ -46,3 +46,29 @@ class TeachingClassStudent(IdMixin, db.Model):
         backref=db.backref("student_links", cascade="all, delete-orphan"),
     )
     student = db.relationship("User", backref="teaching_class_links")
+
+
+class TeachingClassCourse(IdMixin, db.Model):
+    __tablename__ = "teaching_class_course"
+    __table_args__ = (
+        db.UniqueConstraint("class_id", "course_id", name="uk_teaching_class_course"),
+        db.Index("idx_teaching_class_course_course", "course_id"),
+    )
+
+    class_id = db.Column(
+        BIGINT_UNSIGNED,
+        db.ForeignKey("teaching_class.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    course_id = db.Column(
+        BIGINT_UNSIGNED,
+        db.ForeignKey("course.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    assigned_at = db.Column(db.DateTime, nullable=False, server_default=func.now())
+
+    classroom = db.relationship(
+        "TeachingClass",
+        backref=db.backref("course_links", cascade="all, delete-orphan"),
+    )
+    course = db.relationship("Course", backref="teaching_class_links")

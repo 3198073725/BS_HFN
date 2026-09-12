@@ -24,3 +24,13 @@ def validate_student_account(payload: dict) -> str:
     if not 1 <= len(account) <= 100:
         raise ValidationError("请输入不超过100位的学生账号、学号或邮箱")
     return account
+
+
+def validate_course_id(payload: dict) -> int:
+    try:
+        course_id = int(payload.get("course_id"))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("请选择要关联的课程") from exc
+    if course_id <= 0:
+        raise ValidationError("请选择要关联的课程")
+    return course_id

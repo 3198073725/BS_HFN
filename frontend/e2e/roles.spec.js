@@ -232,6 +232,12 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   await expect(page.getByText('班级创建成功')).toBeVisible()
 
   const classroomCard = page.locator('.classroom-card').filter({ hasText: className })
+  await classroomCard.locator('.classroom-course-picker .el-select').click()
+  await page.getByRole('option', { name: '端测基础课程（已发布）', exact: true }).click()
+  await classroomCard.getByRole('button', { name: '关联课程', exact: true }).click()
+  await expect(page.getByText('课程已关联，班级学生已同步加入')).toBeVisible()
+  await expect(classroomCard.getByText('端测基础课程', { exact: true })).toBeVisible()
+
   await classroomCard.getByRole('button', { name: '编辑', exact: true }).click()
   dialog = page.getByRole('dialog', { name: '编辑班级' })
   await dialog.getByPlaceholder('填写年级、专业或教学安排等说明（可选）').fill('2026 秋季端到端班级')
@@ -251,6 +257,7 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   const studentCard = page.locator('.classroom-card').filter({ hasText: className })
   await expect(studentCard.getByText('端测教师', { exact: true })).toBeVisible()
   await expect(studentCard.getByText('2026 秋季端到端班级', { exact: true })).toBeVisible()
+  await expect(studentCard.getByRole('link', { name: /端测基础课程/ })).toBeVisible()
   await expect(studentCard.locator('.el-table')).toHaveCount(0)
 })
 
@@ -272,6 +279,8 @@ test('大量班级使用主从选择且移动端不会纵向复制名册', async
       name: `端测软件工程 ${String(index + 1).padStart(2, '0')} 班`,
       description: `第 ${index + 1} 个教学班`,
       member_count: index * 3,
+      course_count: 0,
+      courses: [],
     }))
     await route.fulfill({ response, json: payload })
   })

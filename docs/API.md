@@ -36,6 +36,22 @@ Authorization: Bearer <access_token>
 
 注册核心字段：`username`、`password`、`real_name`，可选 `email`、`phone`、`student_no`。登录字段为 `account`、`password`。退出时可在 JSON 中附带 `access_token`、`refresh_token`，后端会校验归属后统一注销。
 
+## 班级与课程安排
+
+| 方法 | 路径 | 权限 | 用途 |
+| --- | --- | --- | --- |
+| GET | `/api/classes` | 教师/学生 | 教师查看自己的班级和完整名册；学生仅查看本人所在班级、教师与已发布班级课程 |
+| GET | `/api/classes/course-options` | 教师 | 获取本人课程的轻量选择列表 |
+| POST | `/api/classes` | 教师 | 创建班级 |
+| PUT | `/api/classes/{id}` | 班级教师 | 编辑班级资料 |
+| DELETE | `/api/classes/{id}` | 班级教师 | 删除班级及班级关系 |
+| POST | `/api/classes/{id}/students` | 班级教师 | 按用户名、学号或邮箱添加学生 |
+| DELETE | `/api/classes/{id}/students/{student_id}` | 班级教师 | 将学生移出班级 |
+| POST | `/api/classes/{id}/courses` | 班级教师 | 关联本人的课程并将当前名册整班加入 |
+| DELETE | `/api/classes/{id}/courses/{course_id}` | 班级教师 | 解除班级课程关联 |
+
+关联课程请求体为 `{"course_id": 1}`。关联时，已有学生会自动加入课程；之后新增到班级的学生也会同步加入该班级的全部关联课程。已有但已退出的课程关系会重新启用。解除课程关联、移出学生或删除班级只调整班级关系，不删除学生已有的课程关系、学习进度、作业或测验记录。教师可预先关联草稿或已下线课程，学生端只返回其中已发布的课程。
+
 ## 课程与章节
 
 | 方法 | 路径 | 权限 | 用途 |

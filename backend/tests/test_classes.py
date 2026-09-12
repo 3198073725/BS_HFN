@@ -1,8 +1,8 @@
 from werkzeug.security import generate_password_hash
 
-from app.constants import UserRole
+from app.constants import CourseStatus, UserRole
 from app.extensions import db
-from app.models import User
+from app.models import Course, CourseCategory, CourseStudent, User
 
 
 PASSWORD = "Password123!"
@@ -209,3 +209,154 @@ def test_classroom_input_and_student_status_validation(app, client):
     )
     assert disabled.status_code == 409
     assert disabled.get_json()["message"] == "该学生账号已被禁用"
+
+
+def test_classroom_course_assignment_enrolls_existing_and_future_students(app, client):
+    context = create_context(app)
+    with app.app_context():
+        category = CourseCategory(name="班级课程分类")
+        db.session.add(category)
+        db.session.flush()
+        course = Course(
+            teacher_id=context["teacher_id"],
+            category_id=category.id,
+            name="班级同步课程",
+            status=CourseStatus.PUBLISHED.value,
+        )
+        draft_course = Course(
+            teacher_id=context["teacher_id"],
+            category_id=category.id,
+            name="待发布班级课程",
+            status=CourseStatus.DRAFT.value,
+        )
+        other_course = Course(
+            teacher_id=db.session.scalar(
+                db.select(User.id).where(User.username == context["other_teacher"])
+            ),
+            category_id=category.id,
+            name="其他教师课程",
+            status=CourseStatus.PUBLISHED.value,
+        )
+        db.session.add_all([course, draft_course, other_course])
+        db.session.commit()
+        course_id = course.id
+        draft_course_id = draft_course.id
+        other_course_id = other_course.id
+
+    teacher = login(client, context["teacher"])
+    other_teacher = login(client, context["other_teacher"])
+    student = login(client, context["student"])
+
+    options = client.get("/api/classes/course-options", headers=bearer(teacher))
+    assert options.status_code == 200
+    assert {item["id"] for item in options.get_json()["data"]} == {
+        course_id,
+        draft_course_id,
+    }
+    assert client.get(
+        "/api/classes/course-options",
+        headers=bearer(student),
+    ).status_code == 403
+
+    created = client.post(
+        "/api/classes",
+        headers=bearer(teacher),
+        json={"name": "课程同步班"},
+    )
+    class_id = created.get_json()["data"]["id"]
+    assert client.post(
+        f"/api/classes/{class_id}/students",
+        headers=bearer(teacher),
+        json={"account": context["student"]},
+    ).status_code == 201
+
+    assigned = client.post(
+        f"/api/classes/{class_id}/courses",
+        headers=bearer(teacher),
+        json={"course_id": course_id},
+    )
+    assert assigned.status_code == 201
+    classroom = assigned.get_json()["data"]
+    assert classroom["course_count"] == 1
+    assert classroom["courses"][0]["name"] == "班级同步课程"
+    with app.app_context():
+        first_enrollment = db.session.scalar(
+            db.select(CourseStudent).where(
+                CourseStudent.course_id == course_id,
+                CourseStudent.student_id == context["student_id"],
+            )
+        )
+        assert first_enrollment is not None
+        assert first_enrollment.status is True
+
+    assert client.post(
+        f"/api/classes/{class_id}/courses",
+        headers=bearer(teacher),
+        json={"course_id": course_id},
+    ).status_code == 409
+    assert client.post(
+        f"/api/classes/{class_id}/courses",
+        headers=bearer(other_teacher),
+        json={"course_id": course_id},
+    ).status_code == 403
+    assert client.post(
+        f"/api/classes/{class_id}/courses",
+        headers=bearer(teacher),
+        json={"course_id": other_course_id},
+    ).status_code == 403
+    assert client.post(
+        f"/api/classes/{class_id}/courses",
+        headers=bearer(teacher),
+        json={"course_id": "invalid"},
+    ).status_code == 400
+
+    assert client.post(
+        f"/api/classes/{class_id}/courses",
+        headers=bearer(teacher),
+        json={"course_id": draft_course_id},
+    ).status_code == 201
+    added_future_student = client.post(
+        f"/api/classes/{class_id}/students",
+        headers=bearer(teacher),
+        json={"account": context["other_student"]},
+    )
+    assert added_future_student.status_code == 201
+    with app.app_context():
+        second_student_id = db.session.scalar(
+            db.select(User.id).where(User.username == context["other_student"])
+        )
+        synced_course_ids = set(
+            db.session.scalars(
+                db.select(CourseStudent.course_id).where(
+                    CourseStudent.student_id == second_student_id,
+                    CourseStudent.status.is_(True),
+                )
+            ).all()
+        )
+        assert synced_course_ids == {course_id, draft_course_id}
+
+    student_classroom = client.get(
+        "/api/classes",
+        headers=bearer(student),
+    ).get_json()["data"][0]
+    assert student_classroom["course_count"] == 1
+    assert [item["id"] for item in student_classroom["courses"]] == [course_id]
+
+    removed = client.delete(
+        f"/api/classes/{class_id}/courses/{course_id}",
+        headers=bearer(teacher),
+    )
+    assert removed.status_code == 200
+    assert removed.get_json()["data"]["course_count"] == 1
+    with app.app_context():
+        preserved_enrollment = db.session.scalar(
+            db.select(CourseStudent).where(
+                CourseStudent.course_id == course_id,
+                CourseStudent.student_id == context["student_id"],
+            )
+        )
+        assert preserved_enrollment.status is True
+    assert client.delete(
+        f"/api/classes/{class_id}/courses/{course_id}",
+        headers=bearer(teacher),
+    ).status_code == 404
