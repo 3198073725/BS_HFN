@@ -2324,6 +2324,140 @@
   scrollbar-gutter: stable;
 }
 
+.classroom-progress-panel {
+  margin: 0 24px 18px;
+  padding: 16px;
+  border: 1px solid #d9e1e7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.classroom-progress-heading {
+  display: flex;
+  min-height: 36px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.classroom-progress-heading strong,
+.classroom-progress-heading small {
+  display: block;
+}
+
+.classroom-progress-heading strong {
+  color: #263848;
+  font-size: 14px;
+}
+
+.classroom-progress-heading small {
+  margin-top: 4px;
+  color: #7b8995;
+  font-size: 11px;
+}
+
+.classroom-progress-overview {
+  display: grid;
+  margin-top: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.classroom-progress-overview article {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #e0e6eb;
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.classroom-progress-overview span,
+.classroom-progress-overview strong,
+.classroom-progress-overview small {
+  display: block;
+}
+
+.classroom-progress-overview span {
+  overflow: hidden;
+  color: #637584;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classroom-progress-overview strong {
+  margin-top: 5px;
+  color: #263848;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.classroom-progress-overview small {
+  margin-top: 4px;
+  color: #88949e;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.classroom-course-progress-list {
+  margin-top: 10px;
+  border-top: 1px solid #e1e6eb;
+}
+
+.classroom-course-progress-list > article {
+  display: grid;
+  min-width: 0;
+  padding: 10px 2px;
+  border-bottom: 1px solid #e8ecef;
+  grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(76px, 0.45fr));
+  align-items: center;
+  gap: 12px;
+}
+
+.classroom-course-progress-list > article:last-child {
+  border-bottom: 0;
+}
+
+.classroom-course-progress-list div,
+.classroom-course-progress-list span {
+  min-width: 0;
+}
+
+.classroom-course-progress-list strong,
+.classroom-course-progress-list small {
+  display: block;
+}
+
+.classroom-course-progress-list div > strong {
+  overflow: hidden;
+  color: #314454;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classroom-course-progress-list small {
+  margin-top: 3px;
+  color: #81909c;
+  font-size: 9px;
+}
+
+.classroom-course-progress-list span > strong {
+  margin-top: 3px;
+  color: #40596d;
+  font-size: 12px;
+}
+
+.classroom-progress-empty {
+  margin: 10px 0 0;
+  padding: 16px;
+  border: 1px dashed #d9e1e7;
+  border-radius: 6px;
+  color: #7c8994;
+  font-size: 11px;
+  text-align: center;
+}
+
 .classroom-course-panel {
   margin: 0 24px 18px;
   border: 1px solid #d9e1e7;
@@ -2496,6 +2630,10 @@
   .classroom-workspace {
     grid-template-columns: 240px minmax(0, 1fr);
   }
+
+  .classroom-progress-overview {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -2531,11 +2669,24 @@
   .classroom-course-list {
     grid-template-columns: 1fr;
   }
+
+  .classroom-course-progress-list > article {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .classroom-course-progress-list > article > div {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 520px) {
-  .classroom-course-panel {
+  .classroom-course-panel,
+  .classroom-progress-panel {
     margin: 0 14px 14px;
+  }
+
+  .classroom-progress-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .classroom-course-picker {

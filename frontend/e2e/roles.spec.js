@@ -236,7 +236,7 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   await page.getByRole('option', { name: '端测基础课程（已发布）', exact: true }).click()
   await classroomCard.getByRole('button', { name: '关联课程', exact: true }).click()
   await expect(page.getByText('课程已关联，班级学生已同步加入')).toBeVisible()
-  await expect(classroomCard.getByText('端测基础课程', { exact: true })).toBeVisible()
+  await expect(classroomCard.locator('.classroom-course-panel').getByText('端测基础课程', { exact: true })).toBeVisible()
 
   await classroomCard.getByRole('button', { name: '编辑', exact: true }).click()
   dialog = page.getByRole('dialog', { name: '编辑班级' })
@@ -249,6 +249,8 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
   await expect(page.getByText('学生已加入班级')).toBeVisible()
   await expect(classroomCard.getByText('端测学生', { exact: true })).toBeVisible()
   await expect(classroomCard.getByText('E2ES001', { exact: true })).toBeVisible()
+  await expect(classroomCard.locator('.classroom-progress-panel')).toContainText('教学进展')
+  await expect(classroomCard.locator('.classroom-course-progress-list')).toContainText('端测基础课程')
 
   await page.getByRole('button', { name: '退出', exact: true }).click()
   await expect(page).toHaveURL('/')
@@ -264,6 +266,32 @@ test('教师维护班级名册后学生可以查看所属班级', async ({ page 
 
 test('大量班级使用主从选择且移动端不会纵向复制名册', async ({ page }) => {
   await login(page, 'e2e_teacher')
+  await page.route('**/api/statistics/classes/*', async (route) => {
+    const classId = Number(new URL(route.request().url()).pathname.split('/').pop())
+    await route.fulfill({
+      json: {
+        code: 0,
+        message: 'success',
+        data: {
+          class_id: classId,
+          class_name: `端测班级 ${classId}`,
+          member_count: Math.max(0, (classId - 1000) * 3),
+          course_count: 0,
+          overview: {
+            average_progress: 0,
+            homework_submission_rate: 0,
+            average_homework_percent: 0,
+            exam_completion_rate: 0,
+            average_exam_percent: 0,
+            ready_video_count: 0,
+            homework_count: 0,
+            exam_count: 0,
+          },
+          courses: [],
+        },
+      },
+    })
+  })
   await page.route('**/api/classes', async (route) => {
     const response = await route.fetch()
     const payload = await response.json()

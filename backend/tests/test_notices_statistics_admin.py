@@ -18,6 +18,7 @@ from app.models import (
     LearningRecord,
     Question,
     TeachingClass,
+    TeachingClassCourse,
     TeachingClassStudent,
     User,
     Video,
@@ -145,12 +146,26 @@ def create_context(app):
                 duration_seconds=300,
             )
         )
+        classroom = TeachingClass(
+            teacher_id=teacher.id,
+            name="统计班级",
+            description="验证班级教学统计",
+        )
+        db.session.add(classroom)
+        db.session.flush()
+        db.session.add_all(
+            [
+                TeachingClassStudent(class_id=classroom.id, student_id=student.id),
+                TeachingClassCourse(class_id=classroom.id, course_id=course.id),
+            ]
+        )
         db.session.commit()
         return {
             "admin": admin.username,
             "teacher": teacher.username,
             "teacher_id": teacher.id,
             "student": student.username,
+            "class_id": classroom.id,
         }
 
 
@@ -253,6 +268,22 @@ def test_role_overviews_and_teacher_course_statistics(app, client):
     assert course_data[0]["average_homework_percent"] == 80.0
     assert course_data[0]["average_exam_percent"] == 90.0
 
+    class_response = client.get(
+        f"/api/statistics/classes/{context['class_id']}", headers=bearer(teacher)
+    )
+    assert class_response.status_code == 200
+    class_data = class_response.get_json()["data"]
+    assert class_data["member_count"] == 1
+    assert class_data["course_count"] == 1
+    assert class_data["overview"]["average_progress"] == 100.0
+    assert class_data["overview"]["homework_submission_rate"] == 100.0
+    assert class_data["overview"]["exam_completion_rate"] == 100.0
+    assert class_data["courses"][0]["average_homework_percent"] == 80.0
+    assert class_data["courses"][0]["average_exam_percent"] == 90.0
+    assert client.get(
+        f"/api/statistics/classes/{context['class_id']}", headers=bearer(student)
+    ).status_code == 403
+
     admin_data = client.get(
         "/api/statistics", headers=bearer(admin)
     ).get_json()["data"]
@@ -260,6 +291,17 @@ def test_role_overviews_and_teacher_course_statistics(app, client):
     assert admin_data["students"] == 1
     assert admin_data["teachers"] == 1
     assert admin_data["published_courses"] == 1
+
+    with app.app_context():
+        create_user("statistics_other_teacher", UserRole.TEACHER.value, "DT002")
+        db.session.commit()
+    other_teacher = login(client, "statistics_other_teacher")
+    assert client.get(
+        f"/api/statistics/classes/{context['class_id']}", headers=bearer(other_teacher)
+    ).status_code == 403
+    assert client.get(
+        "/api/statistics/classes/999999", headers=bearer(teacher)
+    ).status_code == 404
 
 
 def test_admin_can_manage_video_operations_courses_classes_and_categories(app, client):

@@ -179,6 +179,9 @@ Authorization: Bearer <access_token>
 | DELETE | `/api/notices/{id}` | 管理员 | 删除未发布公告 |
 | GET | `/api/statistics` | 学生/教师/管理员 | 当前角色的实时聚合概览 |
 | GET | `/api/statistics/courses` | 教师 | 本人课程的学生、进度、作业和测验聚合 |
+| GET | `/api/statistics/classes/{id}` | 班级教师 | 按当前班级名册聚合关联课程的视频、作业和测验进展 |
+
+班级统计以当前班级成员数为完成率分母，仅计算该班级已关联课程。视频进度按可播放视频计算；作业和测验总量只包含已发布或已关闭内容；作业平均分仅统计已批改提交，测验平均分仅统计已交卷记录。
 
 ### 管理员运维接口
 

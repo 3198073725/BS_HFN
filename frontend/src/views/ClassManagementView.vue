@@ -23,7 +23,10 @@ const accountInputs = reactive({})
 const courseSelections = reactive({})
 const selectedClassId = ref(null)
 const classKeyword = ref('')
+const classStatistics = ref(null)
+const statisticsLoading = ref(false)
 let requestSequence = 0
+let statisticsRequestSequence = 0
 
 const form = reactive({
   name: '',
@@ -74,6 +77,10 @@ watch(filteredClassrooms, (items) => {
   }
 })
 
+watch(selectedClassId, (classId) => {
+  void loadClassStatistics(classId)
+})
+
 function formatDate(value) {
   if (!value) return '—'
   return new Intl.DateTimeFormat('zh-CN', {
@@ -106,6 +113,27 @@ async function loadClasses() {
   }
 }
 
+async function loadClassStatistics(classId = selectedClassId.value) {
+  const requestId = ++statisticsRequestSequence
+  if (!isTeacher.value || !classId) {
+    classStatistics.value = null
+    statisticsLoading.value = false
+    return
+  }
+  statisticsLoading.value = true
+  try {
+    const response = await api.get(`/statistics/classes/${classId}`)
+    if (requestId === statisticsRequestSequence) classStatistics.value = response.data
+  } catch (error) {
+    if (requestId === statisticsRequestSequence) {
+      classStatistics.value = null
+      ElMessage.error(error.message || '班级教学统计加载失败')
+    }
+  } finally {
+    if (requestId === statisticsRequestSequence) statisticsLoading.value = false
+  }
+}
+
 function availableCourses(classroom) {
   const assignedIds = new Set((classroom.courses || []).map((course) => course.id))
   return teacherCourses.value.filter((course) => !assignedIds.has(course.id))
@@ -122,6 +150,7 @@ function replaceClassroom(classroom) {
   } else {
     classrooms.value.splice(index, 1, classroom)
   }
+  if (classroom.id === selectedClassId.value) void loadClassStatistics(classroom.id)
 }
 
 function openCreateDialog() {
@@ -286,6 +315,7 @@ async function removeCourseAssignment(classroom, course) {
 onMounted(loadClasses)
 onBeforeUnmount(() => {
   requestSequence += 1
+  statisticsRequestSequence += 1
 })
 </script>
 
@@ -389,6 +419,58 @@ onBeforeUnmount(() => {
           <span v-if="!isTeacher && classroom.teacher_no">工号 · {{ classroom.teacher_no }}</span>
           <span>{{ isTeacher ? '创建' : '加入' }} · {{ formatDate(isTeacher ? classroom.created_at : classroom.joined_at) }}</span>
         </div>
+
+        <section v-if="isTeacher" class="classroom-progress-panel" aria-label="班级教学进展" v-loading="statisticsLoading">
+          <div class="classroom-progress-heading">
+            <div>
+              <strong>教学进展</strong>
+              <small>按当前班级名册和已关联课程统计</small>
+            </div>
+            <el-button text :disabled="statisticsLoading" @click="loadClassStatistics(classroom.id)">刷新</el-button>
+          </div>
+          <template v-if="classStatistics">
+            <div class="classroom-progress-overview">
+              <article>
+                <span>平均视频进度</span>
+                <strong>{{ classStatistics.overview.average_progress }}%</strong>
+                <small>{{ classStatistics.overview.ready_video_count }} 个可播放视频</small>
+              </article>
+              <article>
+                <span>作业提交率</span>
+                <strong>{{ classStatistics.overview.homework_submission_rate }}%</strong>
+                <small>{{ classStatistics.overview.homework_count }} 项已发布作业</small>
+              </article>
+              <article>
+                <span>作业平均分</span>
+                <strong>{{ classStatistics.overview.average_homework_percent }}%</strong>
+                <small>仅统计已批改作业</small>
+              </article>
+              <article>
+                <span>测验完成率</span>
+                <strong>{{ classStatistics.overview.exam_completion_rate }}%</strong>
+                <small>{{ classStatistics.overview.exam_count }} 项已发布测验</small>
+              </article>
+              <article>
+                <span>测验平均分</span>
+                <strong>{{ classStatistics.overview.average_exam_percent }}%</strong>
+                <small>仅统计已交卷记录</small>
+              </article>
+            </div>
+            <div v-if="classStatistics.courses.length" class="classroom-course-progress-list">
+              <article v-for="course in classStatistics.courses" :key="course.course_id">
+                <div>
+                  <strong>{{ course.course_name }}</strong>
+                  <small>{{ courseStatusLabel(course.status) }} · {{ course.enrolled_count }}/{{ course.member_count }} 人已加入</small>
+                </div>
+                <span><small>视频进度</small><strong>{{ course.average_progress }}%</strong></span>
+                <span><small>作业提交</small><strong>{{ course.homework_submission_rate }}%</strong></span>
+                <span><small>测验完成</small><strong>{{ course.exam_completion_rate }}%</strong></span>
+              </article>
+            </div>
+            <p v-else class="classroom-progress-empty">关联课程后，这里会展示视频、作业和测验进展。</p>
+          </template>
+          <p v-else-if="!statisticsLoading" class="classroom-progress-empty">暂时无法读取班级教学进展。</p>
+        </section>
 
         <section class="classroom-course-panel" aria-label="班级课程">
           <div class="classroom-course-heading">

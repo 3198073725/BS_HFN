@@ -12,12 +12,19 @@ from app.models import (
     HomeworkSubmission,
     LearningRecord,
     Question,
+    TeachingClass,
+    TeachingClassCourse,
+    TeachingClassStudent,
     User,
     Video,
 )
 
 
 class StatisticsPermissionDenied(PermissionError):
+    pass
+
+
+class StatisticsNotFound(ValueError):
     pass
 
 
@@ -38,6 +45,64 @@ def get_teacher_course_statistics(teacher_id: int) -> list[dict]:
         .order_by(Course.created_at.desc(), Course.id.desc())
     ).all()
     return [_course_statistics(course) for course in courses]
+
+
+def get_teacher_class_statistics(class_id: int, teacher_id: int) -> dict:
+    classroom = db.session.get(TeachingClass, class_id)
+    if classroom is None:
+        raise StatisticsNotFound("班级不存在")
+    if classroom.teacher_id != teacher_id:
+        raise StatisticsPermissionDenied("不能查看其他教师班级的统计")
+
+    student_ids = db.select(TeachingClassStudent.student_id).where(
+        TeachingClassStudent.class_id == class_id
+    )
+    courses = db.session.scalars(
+        db.select(Course)
+        .join(TeachingClassCourse, TeachingClassCourse.course_id == Course.id)
+        .where(TeachingClassCourse.class_id == class_id)
+        .order_by(Course.created_at.desc(), Course.id.desc())
+    ).all()
+    member_count = _count(db.select(func.count()).select_from(student_ids.subquery()))
+    course_rows = [_class_course_statistics(course, student_ids, member_count) for course in courses]
+
+    ready_video_count = sum(item["ready_video_count"] for item in course_rows)
+    homework_count = sum(item["homework_count"] for item in course_rows)
+    homework_submissions = sum(item["homework_submission_count"] for item in course_rows)
+    exam_count = sum(item["exam_count"] for item in course_rows)
+    exam_submissions = sum(item["exam_submission_count"] for item in course_rows)
+    homework_denominator = member_count * homework_count
+    exam_denominator = member_count * exam_count
+
+    return {
+        "class_id": classroom.id,
+        "class_name": classroom.name,
+        "member_count": member_count,
+        "course_count": len(course_rows),
+        "overview": {
+            "average_progress": _weighted_average(
+                course_rows,
+                "average_progress",
+                lambda item: member_count * item["ready_video_count"],
+            ),
+            "homework_submission_rate": _percentage(homework_submissions, homework_denominator),
+            "average_homework_percent": _weighted_average(
+                course_rows,
+                "average_homework_percent",
+                lambda item: item["graded_homework_count"],
+            ),
+            "exam_completion_rate": _percentage(exam_submissions, exam_denominator),
+            "average_exam_percent": _weighted_average(
+                course_rows,
+                "average_exam_percent",
+                lambda item: item["exam_submission_count"],
+            ),
+            "ready_video_count": ready_video_count,
+            "homework_count": homework_count,
+            "exam_count": exam_count,
+        },
+        "courses": course_rows,
+    }
 
 
 def _student_overview(student_id: int) -> dict:
@@ -244,6 +309,111 @@ def _course_statistics(course: Course) -> dict:
         "exam_submission_count": int(exam[0] or 0),
         "average_exam_percent": _round(exam[1]),
     }
+
+
+def _class_course_statistics(course: Course, student_ids, member_count: int) -> dict:
+    ready_video_ids = (
+        db.select(Video.id)
+        .join(Chapter, Chapter.id == Video.chapter_id)
+        .where(Chapter.course_id == course.id, Video.status == VideoStatus.READY.value)
+    )
+    video_count = _count(db.select(func.count()).select_from(ready_video_ids.subquery()))
+    enrolled_count = _count(
+        db.select(func.count(CourseStudent.id)).where(
+            CourseStudent.course_id == course.id,
+            CourseStudent.student_id.in_(student_ids),
+            CourseStudent.status.is_(True),
+        )
+    )
+    progress_sum = db.session.scalar(
+        db.select(func.sum(LearningRecord.progress)).where(
+            LearningRecord.student_id.in_(student_ids),
+            LearningRecord.video_id.in_(ready_video_ids),
+        )
+    )
+
+    visible_homework_ids = db.select(Homework.id).where(
+        Homework.course_id == course.id,
+        Homework.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)),
+    )
+    homework_count = _count(
+        db.select(func.count()).select_from(visible_homework_ids.subquery())
+    )
+    homework = db.session.execute(
+        db.select(
+            func.count(HomeworkSubmission.id),
+            func.sum(db.case((HomeworkSubmission.status == "GRADED", 1), else_=0)),
+            func.avg(
+                db.case(
+                    (
+                        HomeworkSubmission.status == "GRADED",
+                        HomeworkSubmission.score * 100.0 / Homework.total_score,
+                    ),
+                    else_=None,
+                )
+            ),
+        )
+        .select_from(HomeworkSubmission)
+        .join(Homework, Homework.id == HomeworkSubmission.homework_id)
+        .where(
+            HomeworkSubmission.student_id.in_(student_ids),
+            HomeworkSubmission.homework_id.in_(visible_homework_ids),
+        )
+    ).one()
+
+    visible_exam_ids = db.select(Exam.id).where(
+        Exam.course_id == course.id,
+        Exam.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)),
+    )
+    exam_count = _count(db.select(func.count()).select_from(visible_exam_ids.subquery()))
+    exam = db.session.execute(
+        db.select(
+            func.count(ExamRecord.id),
+            func.avg(ExamRecord.score * 100.0 / Exam.total_score),
+        )
+        .select_from(ExamRecord)
+        .join(Exam, Exam.id == ExamRecord.exam_id)
+        .where(
+            ExamRecord.student_id.in_(student_ids),
+            ExamRecord.exam_id.in_(visible_exam_ids),
+            ExamRecord.status == "SUBMITTED",
+        )
+    ).one()
+
+    return {
+        "course_id": course.id,
+        "course_name": course.name,
+        "status": course.status,
+        "member_count": member_count,
+        "enrolled_count": enrolled_count,
+        "ready_video_count": video_count,
+        "average_progress": _round(float(progress_sum or 0) / (member_count * video_count))
+        if member_count and video_count
+        else 0.0,
+        "homework_count": homework_count,
+        "homework_submission_count": int(homework[0] or 0),
+        "homework_submission_rate": _percentage(
+            int(homework[0] or 0), member_count * homework_count
+        ),
+        "graded_homework_count": int(homework[1] or 0),
+        "average_homework_percent": _round(homework[2]),
+        "exam_count": exam_count,
+        "exam_submission_count": int(exam[0] or 0),
+        "exam_completion_rate": _percentage(int(exam[0] or 0), member_count * exam_count),
+        "average_exam_percent": _round(exam[1]),
+    }
+
+
+def _percentage(numerator: int, denominator: int) -> float:
+    return _round(numerator * 100.0 / denominator) if denominator else 0.0
+
+
+def _weighted_average(items: list[dict], field: str, weight) -> float:
+    denominator = sum(weight(item) for item in items)
+    if not denominator:
+        return 0.0
+    numerator = sum(float(item[field]) * weight(item) for item in items)
+    return _round(numerator / denominator)
 
 
 def _count(statement) -> int:
