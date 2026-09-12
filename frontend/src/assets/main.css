@@ -1926,7 +1926,7 @@ button:focus-visible {
   font-size: 14px;
 }
 
-.surface-heading span {
+.surface-heading > div > span {
   padding: 4px 8px;
   border-radius: 999px;
   background: var(--primary-soft);
@@ -3765,7 +3765,7 @@ button:focus-visible {
 .chapter-heading small,
 .video-list button strong,
 .chapter-empty,
-.surface-heading span,
+.surface-heading > div > span,
 .surface-heading small,
 .table-scroll-hint,
 .file-picker span,

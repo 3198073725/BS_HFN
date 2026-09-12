@@ -396,6 +396,24 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
   await expect(page.getByRole('heading', { name: '系统后台', exact: true })).toBeVisible()
   await expect(page.getByText('视频处理中心', { exact: true })).toBeVisible()
   await expect(page.getByText('媒体工具可用', { exact: true })).toBeVisible()
+  const adminColors = await page.locator(
+    '.video-summary-grid strong, .video-runtime-bar, .operation-state, .file-presence, .admin-video-center .el-button',
+  ).evaluateAll((elements) => elements.flatMap((element) => {
+    const style = getComputedStyle(element)
+    return [style.color, style.backgroundColor, style.borderColor]
+  }))
+  const isGrayScale = (color) => {
+    const channels = color.match(/[\d.]+/g)?.map(Number) || []
+    return channels.length < 3 || (channels[0] === channels[1] && channels[1] === channels[2])
+  }
+  expect(adminColors.every(isGrayScale)).toBe(true)
+  const summaryBackgrounds = await page.locator('.video-summary-grid strong').evaluateAll(
+    (elements) => elements.map((element) => getComputedStyle(element).backgroundColor),
+  )
+  expect(summaryBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)')).toBe(true)
+  const refreshLabel = page.getByRole('button', { name: '刷新', exact: true }).locator('span')
+  await expect(refreshLabel).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(refreshLabel).toHaveCSS('padding-left', '0px')
   const failedVideo = page.getByRole('row').filter({ hasText: '端测失败转码视频' })
   await expect(failedVideo.getByText('端到端模拟：转码进程异常退出')).toBeVisible()
   await failedVideo.getByRole('button', { name: '重新转码', exact: true }).click()

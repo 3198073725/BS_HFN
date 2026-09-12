@@ -36,6 +36,10 @@ let userSearchSequence = 0
 let videoSearchSequence = 0
 let videoPoller = null
 
+function confirmOptions(options = {}) {
+  return { customClass: 'admin-neutral-confirm', ...options }
+}
+
 const userRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
@@ -172,7 +176,7 @@ async function retryVideo(video) {
     await ElMessageBox.confirm(
       `确认重新处理“${video.title}”？系统会清理未完成的转码产物，并从原始文件重新开始。`,
       '重新转码',
-      { type: 'warning' },
+      confirmOptions(),
     )
     const response = await api.post(`/admin/videos/${video.id}/retry`, null, { timeout: 0 })
     ElMessage.success(response.message || '视频已重新加入转码流程')
@@ -187,7 +191,7 @@ async function removeVideo(video) {
     await ElMessageBox.confirm(
       `将永久删除“${video.title}”的失败任务、原始文件和残留产物，此操作不可恢复。`,
       '清理失败任务',
-      { type: 'error', confirmButtonText: '确认清理' },
+      confirmOptions({ confirmButtonText: '确认清理' }),
     )
     await api.delete(`/admin/videos/${video.id}`)
     ElMessage.success('失败任务及相关文件已清理')
@@ -229,7 +233,7 @@ async function toggleUser(user) {
     await ElMessageBox.confirm(
       nextStatus ? '确认启用该用户账号？' : '禁用后该用户将无法继续访问受保护功能，确认继续？',
       nextStatus ? '启用用户' : '禁用用户',
-      { type: nextStatus ? 'info' : 'warning' },
+      confirmOptions(),
     )
     const response = await api.put(`/admin/users/${user.id}/status`, { status: nextStatus })
     const index = users.value.findIndex((item) => item.id === user.id)
@@ -248,7 +252,7 @@ async function changeCourseStatus(course, status) {
         ? `下线“${course.name}”后学生将无法继续进入课程，确认继续？`
         : `确认恢复发布“${course.name}”？`,
       status === 'OFFLINE' ? '强制下线' : '恢复发布',
-      { type: status === 'OFFLINE' ? 'warning' : 'info' },
+      confirmOptions(),
     )
     await api.put(`/admin/courses/${course.id}/status`, { status })
     ElMessage.success(`课程已${status === 'OFFLINE' ? '下线' : '发布'}`)
@@ -263,7 +267,7 @@ async function removeClassroom(classroom) {
     await ElMessageBox.confirm(
       `删除“${classroom.name}”会同时解除 ${classroom.member_count} 条班级成员关系，但不会删除学生账号。`,
       '删除班级',
-      { type: 'error', confirmButtonText: '确认删除' },
+      confirmOptions({ confirmButtonText: '确认删除' }),
     )
     await api.delete(`/admin/classes/${classroom.id}`)
     ElMessage.success('班级及成员关系已删除')
@@ -310,7 +314,7 @@ async function toggleCategory(category) {
     await ElMessageBox.confirm(
       nextStatus ? `确认启用“${category.name}”？` : `禁用“${category.name}”后教师将不能用它创建或修改课程，已有课程不受影响。`,
       nextStatus ? '启用分类' : '禁用分类',
-      { type: nextStatus ? 'info' : 'warning' },
+      confirmOptions(),
     )
     await api.put(`/admin/categories/${category.id}/status`, { status: nextStatus })
     ElMessage.success(nextStatus ? '分类已启用' : '分类已禁用')
@@ -355,7 +359,7 @@ async function changeNoticeStatus(notice, status) {
 
 async function removeNotice(notice) {
   try {
-    await ElMessageBox.confirm('确认删除这份公告？', '删除公告', { type: 'warning' })
+    await ElMessageBox.confirm('确认删除这份公告？', '删除公告', confirmOptions())
     await api.delete(`/notices/${notice.id}`)
     notices.value = notices.value.filter((item) => item.id !== notice.id)
     ElMessage.success('公告已删除')
@@ -435,7 +439,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
     <div v-if="activeSection === 'videos'" class="management-surface admin-panel admin-video-center">
       <div class="surface-heading admin-panel-heading">
         <div><strong>视频处理中心</strong><span>查看每一步转码状态，恢复异常任务并清理失败文件</span></div>
-        <el-button :loading="refreshingVideos" @click="loadVideos()">刷新状态</el-button>
+        <el-button text class="admin-quiet-button" :loading="refreshingVideos" @click="loadVideos()">刷新</el-button>
       </div>
       <div class="video-runtime-bar">
         <div><span :class="['runtime-dot', runtimeHealthy ? 'healthy' : 'unhealthy']" /><strong>{{ runtimeHealthy ? '媒体工具可用' : '媒体工具异常' }}</strong></div>
@@ -446,7 +450,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
       </div>
       <div class="video-summary-grid">
         <article v-for="item in videoSummaryItems" :key="item.key">
-          <span>{{ item.label }}</span><strong :class="`state-${item.key}`">{{ item.value }}</strong>
+          <span>{{ item.label }}</span><strong :class="`summary-tone-${item.key}`">{{ item.value }}</strong>
         </article>
       </div>
       <div class="admin-filters video-filters">
@@ -454,7 +458,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <el-select v-model="videoFilters.status" placeholder="全部状态">
           <el-option label="全部状态" value="" /><el-option label="上传中" value="UPLOADING" /><el-option label="等待处理" value="PENDING" /><el-option label="处理中" value="PROCESSING" /><el-option label="可播放" value="READY" /><el-option label="失败" value="FAILED" />
         </el-select>
-        <el-button type="primary" @click="loadVideos()">查询任务</el-button>
+        <el-button @click="loadVideos()">查询任务</el-button>
       </div>
       <p class="table-scroll-hint">左右滑动表格可查看媒体参数、错误原因和操作</p>
       <el-table :data="videoOperations.items" max-height="530" empty-text="没有符合条件的视频任务">
@@ -471,18 +475,18 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <el-table-column label="原始文件" width="105"><template #default="scope"><span :class="['file-presence', scope.row.original_exists ? 'present' : 'missing']">{{ scope.row.original_exists ? '文件存在' : '文件丢失' }}</span></template></el-table-column>
         <el-table-column label="最后更新" width="130"><template #default="scope">{{ formatDate(scope.row.updated_at) }}</template></el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
-          <template #default="scope"><el-button v-if="scope.row.retryable" link type="primary" @click="retryVideo(scope.row)">重新转码</el-button><el-button v-if="scope.row.removable" link type="danger" @click="removeVideo(scope.row)">清理</el-button><span v-if="!scope.row.retryable && !scope.row.removable" class="no-action">无需处理</span></template>
+          <template #default="scope"><el-button v-if="scope.row.retryable" link @click="retryVideo(scope.row)">重新转码</el-button><el-button v-if="scope.row.removable" link @click="removeVideo(scope.row)">清理</el-button><span v-if="!scope.row.retryable && !scope.row.removable" class="no-action">无需处理</span></template>
         </el-table-column>
       </el-table>
     </div>
 
     <div v-else-if="activeSection === 'users'" class="management-surface admin-panel admin-users">
-      <div class="surface-heading admin-panel-heading"><div><strong>用户账号管理</strong><span>{{ users.length }} 条结果</span></div><el-button type="primary" @click="userDialog = true">＋ 创建用户</el-button></div>
+      <div class="surface-heading admin-panel-heading"><div><strong>用户账号管理</strong><span>{{ users.length }} 条结果</span></div><el-button @click="userDialog = true">＋ 创建用户</el-button></div>
       <div class="admin-filters">
         <el-input v-model="userFilters.keyword" clearable placeholder="搜索用户名、姓名、学号或工号" @keyup.enter="searchUsers" />
         <el-select v-model="userFilters.role" placeholder="全部角色"><el-option label="全部角色" value="" /><el-option label="学生" value="STUDENT" /><el-option label="教师" value="TEACHER" /><el-option label="管理员" value="ADMIN" /></el-select>
         <el-select v-model="userFilters.status" placeholder="全部状态"><el-option label="全部状态" value="" /><el-option label="正常" value="true" /><el-option label="已禁用" value="false" /></el-select>
-        <el-button type="primary" @click="searchUsers">查询用户</el-button>
+        <el-button @click="searchUsers">查询用户</el-button>
       </div>
       <p class="table-scroll-hint">左右滑动表格可查看账号状态和操作</p>
       <el-table :data="users" max-height="530">
@@ -491,7 +495,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <el-table-column label="学号 / 工号" min-width="150"><template #default="scope">{{ scope.row.student_no || scope.row.teacher_no || '—' }}</template></el-table-column>
         <el-table-column prop="email" label="邮箱" min-width="190"><template #default="scope">{{ scope.row.email || '—' }}</template></el-table-column>
         <el-table-column label="状态" width="90"><template #default="scope"><span :class="['account-state', scope.row.status ? 'active' : 'disabled']">{{ scope.row.status ? '正常' : '禁用' }}</span></template></el-table-column>
-        <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button v-if="scope.row.role !== 'ADMIN'" link :type="scope.row.status ? 'danger' : 'primary'" @click="toggleUser(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button v-if="scope.row.role !== 'ADMIN'" link @click="toggleUser(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
       </el-table>
     </div>
 
@@ -501,56 +505,56 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <div class="admin-filters resource-filters">
           <el-input v-model="courseFilters.keyword" clearable placeholder="搜索课程、教师或工号" @keyup.enter="loadCourses" />
           <el-select v-model="courseFilters.status" placeholder="全部状态"><el-option label="全部状态" value="" /><el-option label="草稿" value="DRAFT" /><el-option label="已发布" value="PUBLISHED" /><el-option label="已下线" value="OFFLINE" /></el-select>
-          <el-button type="primary" @click="loadCourses">查询课程</el-button>
+          <el-button @click="loadCourses">查询课程</el-button>
         </div>
         <el-table :data="courses" max-height="470" empty-text="没有符合条件的课程">
           <el-table-column label="课程" min-width="185"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.category_name }} · {{ scope.row.teacher_name }}</span></div></template></el-table-column>
           <el-table-column label="资源" width="125"><template #default="scope">{{ scope.row.chapter_count }} 章 · {{ scope.row.ready_video_count }}/{{ scope.row.video_count }} 视频</template></el-table-column>
           <el-table-column label="学生" width="75"><template #default="scope">{{ scope.row.student_count }}</template></el-table-column>
           <el-table-column label="状态" width="90"><template #default="scope"><span :class="['operation-state', `state-${scope.row.status.toLowerCase()}`]">{{ courseStatusLabel(scope.row.status) }}</span></template></el-table-column>
-          <el-table-column label="操作" width="105" fixed="right"><template #default="scope"><el-button v-if="scope.row.status === 'PUBLISHED'" link type="warning" @click="changeCourseStatus(scope.row, 'OFFLINE')">下线</el-button><el-button v-else link type="primary" @click="changeCourseStatus(scope.row, 'PUBLISHED')">发布</el-button></template></el-table-column>
+          <el-table-column label="操作" width="105" fixed="right"><template #default="scope"><el-button v-if="scope.row.status === 'PUBLISHED'" link @click="changeCourseStatus(scope.row, 'OFFLINE')">下线</el-button><el-button v-else link @click="changeCourseStatus(scope.row, 'PUBLISHED')">发布</el-button></template></el-table-column>
         </el-table>
       </div>
       <div class="management-surface admin-panel admin-classes">
         <div class="surface-heading admin-panel-heading"><div><strong>班级监管</strong><span>删除班级不会删除师生账号</span></div></div>
-        <div class="admin-filters class-filters"><el-input v-model="classKeyword" clearable placeholder="搜索班级、教师或工号" @keyup.enter="loadClasses" /><el-button type="primary" @click="loadClasses">查询班级</el-button></div>
+        <div class="admin-filters class-filters"><el-input v-model="classKeyword" clearable placeholder="搜索班级、教师或工号" @keyup.enter="loadClasses" /><el-button @click="loadClasses">查询班级</el-button></div>
         <el-table :data="classrooms" max-height="470" empty-text="没有符合条件的班级">
           <el-table-column label="班级" min-width="180"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.description || '暂无说明' }}</span></div></template></el-table-column>
           <el-table-column label="负责教师" min-width="125"><template #default="scope">{{ scope.row.teacher_name }}<br><small>{{ scope.row.teacher_no || '—' }}</small></template></el-table-column>
-          <el-table-column prop="member_count" label="学生" width="70" /><el-table-column label="操作" width="90" fixed="right"><template #default="scope"><el-button link type="danger" @click="removeClassroom(scope.row)">删除</el-button></template></el-table-column>
+          <el-table-column prop="member_count" label="学生" width="70" /><el-table-column label="操作" width="90" fixed="right"><template #default="scope"><el-button link @click="removeClassroom(scope.row)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
     </div>
 
     <div v-else-if="activeSection === 'categories'" class="management-surface admin-panel admin-categories">
-      <div class="surface-heading admin-panel-heading"><div><strong>课程分类管理</strong><span>控制教师创建课程时可选择的分类</span></div><el-button type="primary" @click="openCategory()">＋ 新建分类</el-button></div>
+      <div class="surface-heading admin-panel-heading"><div><strong>课程分类管理</strong><span>控制教师创建课程时可选择的分类</span></div><el-button @click="openCategory()">＋ 新建分类</el-button></div>
       <el-table :data="categories" max-height="530" empty-text="暂无课程分类">
         <el-table-column prop="sort_order" label="排序" width="85" /><el-table-column label="分类" min-width="180"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.description || '暂无说明' }}</span></div></template></el-table-column>
         <el-table-column prop="course_count" label="课程数" width="100" /><el-table-column label="状态" width="100"><template #default="scope"><span :class="['account-state', scope.row.status ? 'active' : 'disabled']">{{ scope.row.status ? '启用' : '禁用' }}</span></template></el-table-column>
         <el-table-column label="最后更新" width="150"><template #default="scope">{{ formatDate(scope.row.updated_at) }}</template></el-table-column>
-        <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button link @click="openCategory(scope.row)">编辑</el-button><el-button link :type="scope.row.status ? 'danger' : 'primary'" @click="toggleCategory(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button link @click="openCategory(scope.row)">编辑</el-button><el-button link @click="toggleCategory(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
       </el-table>
     </div>
 
     <div v-else class="notice-management admin-panel">
-      <div class="notice-management-heading"><div><strong>系统公告</strong><span>{{ notices.length }} 条公告，可编辑下线内容后再次发布</span></div><el-button type="primary" @click="openNotice()">＋ 新建公告</el-button></div>
+      <div class="notice-management-heading"><div><strong>系统公告</strong><span>{{ notices.length }} 条公告，可编辑下线内容后再次发布</span></div><el-button @click="openNotice()">＋ 新建公告</el-button></div>
       <div class="admin-notice-list">
-        <article v-for="notice in notices" :key="notice.id"><div><span :class="['notice-state', `state-${notice.status.toLowerCase()}`]">{{ noticeStatusLabel(notice.status) }}</span><small>{{ formatDate(notice.publish_time || notice.created_at) }}</small></div><h3>{{ notice.title }}</h3><p>{{ notice.content }}</p><footer><el-button v-if="notice.status !== 'PUBLISHED'" link @click="openNotice(notice)">编辑</el-button><el-button v-if="notice.status !== 'PUBLISHED'" link type="primary" @click="changeNoticeStatus(notice, 'PUBLISHED')">发布</el-button><el-button v-else link type="warning" @click="changeNoticeStatus(notice, 'OFFLINE')">下线</el-button><el-button v-if="notice.status !== 'PUBLISHED'" link type="danger" @click="removeNotice(notice)">删除</el-button></footer></article>
+        <article v-for="notice in notices" :key="notice.id"><div><span :class="['notice-state', `state-${notice.status.toLowerCase()}`]">{{ noticeStatusLabel(notice.status) }}</span><small>{{ formatDate(notice.publish_time || notice.created_at) }}</small></div><h3>{{ notice.title }}</h3><p>{{ notice.content }}</p><footer><el-button v-if="notice.status !== 'PUBLISHED'" link @click="openNotice(notice)">编辑</el-button><el-button v-if="notice.status !== 'PUBLISHED'" link @click="changeNoticeStatus(notice, 'PUBLISHED')">发布</el-button><el-button v-else link @click="changeNoticeStatus(notice, 'OFFLINE')">下线</el-button><el-button v-if="notice.status !== 'PUBLISHED'" link @click="removeNotice(notice)">删除</el-button></footer></article>
         <el-empty v-if="!notices.length" description="暂无公告" :image-size="60" />
       </div>
     </div>
 
-    <el-dialog v-model="userDialog" title="创建教师或学生账号" width="min(620px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetUserForm">
+    <el-dialog v-model="userDialog" class="admin-neutral-dialog" title="创建教师或学生账号" width="min(620px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetUserForm">
       <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-position="top"><el-form-item label="账号角色"><el-radio-group v-model="userForm.role"><el-radio-button value="STUDENT">学生</el-radio-button><el-radio-button value="TEACHER">教师</el-radio-button></el-radio-group></el-form-item><div class="admin-form-grid"><el-form-item label="用户名" prop="username"><el-input v-model.trim="userForm.username" placeholder="3–50 位字符" /></el-form-item><el-form-item label="真实姓名" prop="real_name"><el-input v-model.trim="userForm.real_name" placeholder="请输入姓名" /></el-form-item><el-form-item :label="userForm.role === 'STUDENT' ? '学号' : '工号'" :prop="userForm.role === 'STUDENT' ? 'student_no' : 'teacher_no'"><el-input v-if="userForm.role === 'STUDENT'" v-model.trim="userForm.student_no" placeholder="请输入学号" /><el-input v-else v-model.trim="userForm.teacher_no" placeholder="请输入工号" /></el-form-item><el-form-item label="初始密码" prop="password"><el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位" /></el-form-item><el-form-item label="邮箱" prop="email"><el-input v-model.trim="userForm.email" maxlength="100" placeholder="可选" /></el-form-item><el-form-item label="手机号" prop="phone"><el-input v-model.trim="userForm.phone" maxlength="11" placeholder="可选" /></el-form-item></div></el-form>
-      <template #footer><el-button :disabled="saving" @click="userDialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="createUser">创建账号</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="userDialog = false">取消</el-button><el-button :loading="saving" @click="createUser">创建账号</el-button></template>
     </el-dialog>
-    <el-dialog v-model="categoryDialog" :title="editingCategoryId ? '编辑课程分类' : '新建课程分类'" width="min(560px, 94vw)">
+    <el-dialog v-model="categoryDialog" class="admin-neutral-dialog" :title="editingCategoryId ? '编辑课程分类' : '新建课程分类'" width="min(560px, 94vw)">
       <el-form :model="categoryForm" label-position="top"><el-form-item label="分类名称" required><el-input v-model.trim="categoryForm.name" maxlength="50" show-word-limit placeholder="例如：计算机基础" /></el-form-item><el-form-item label="分类说明"><el-input v-model.trim="categoryForm.description" type="textarea" :rows="4" maxlength="255" show-word-limit placeholder="说明该分类包含的课程范围" /></el-form-item><el-form-item label="排序"><el-input-number v-model="categoryForm.sort_order" :min="0" :max="100000" /></el-form-item></el-form>
-      <template #footer><el-button :disabled="saving" @click="categoryDialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveCategory">保存分类</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="categoryDialog = false">取消</el-button><el-button :loading="saving" @click="saveCategory">保存分类</el-button></template>
     </el-dialog>
-    <el-dialog v-model="noticeDialog" :title="editingNoticeId ? '编辑公告' : '新建公告'" width="min(620px, 94vw)">
+    <el-dialog v-model="noticeDialog" class="admin-neutral-dialog" :title="editingNoticeId ? '编辑公告' : '新建公告'" width="min(620px, 94vw)">
       <el-form :model="noticeForm" label-position="top"><el-form-item label="公告标题" required><el-input v-model.trim="noticeForm.title" maxlength="200" show-word-limit placeholder="请输入公告标题" /></el-form-item><el-form-item label="公告内容" required><el-input v-model.trim="noticeForm.content" type="textarea" :rows="8" maxlength="50000" placeholder="请输入公告内容" /></el-form-item></el-form>
-      <template #footer><el-button :disabled="saving" @click="noticeDialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveNotice">保存公告</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="noticeDialog = false">取消</el-button><el-button :loading="saving" @click="saveNotice">保存公告</el-button></template>
     </el-dialog>
   </section>
 </template>

@@ -2704,7 +2704,7 @@
   margin-bottom: 16px;
   padding: 5px;
   overflow-x: auto;
-  border: 1px solid #d5dde5;
+  border: 1px solid #d6d6d6;
   border-radius: 5px;
   background: #fff;
   gap: 4px;
@@ -2722,7 +2722,7 @@
   justify-content: center;
   gap: 8px;
   background: transparent;
-  color: #526474;
+  color: #555;
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -2731,13 +2731,14 @@
 }
 
 .admin-section-tabs button:hover {
-  background: #f3f6f8;
-  color: #28577f;
+  background: #f4f4f4;
+  color: #222;
 }
 
 .admin-section-tabs button.active {
-  background: #28577f;
-  color: #fff;
+  box-shadow: inset 0 -2px #555;
+  background: #eee;
+  color: #222;
 }
 
 .admin-section-tabs button span {
@@ -2747,21 +2748,37 @@
   padding: 0 6px;
   border-radius: 11px;
   place-items: center;
-  background: #e8eef3;
-  color: #526474;
+  border: 1px solid #d4d4d4;
+  background: #fff;
+  color: #666;
   font-size: 11px;
 }
 
 .admin-section-tabs button.active span {
-  background: rgb(255 255 255 / 18%);
-  color: #fff;
+  border-color: #aaa;
+  background: #f8f8f8;
+  color: #333;
+}
+
+.admin-dashboard .admin-metrics article {
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.admin-dashboard .admin-metrics article > span,
+.admin-dashboard .admin-metrics small {
+  color: #777;
+}
+
+.admin-dashboard .admin-metrics strong {
+  color: #2f2f2f;
 }
 
 .admin-panel {
   min-width: 0;
   min-height: 620px;
   overflow: hidden;
-  border: 1px solid #d5dde5;
+  border: 1px solid #d6d6d6;
   border-radius: 5px;
   background: #fff;
   box-shadow: none;
@@ -2769,12 +2786,17 @@
 
 .admin-panel-heading {
   min-height: 68px;
+  background: #fafafa;
 }
 
 .admin-panel-heading > div,
 .admin-panel-heading > div > strong,
 .admin-panel-heading > div > span {
   min-width: 0;
+}
+
+.admin-panel-heading > div > strong {
+  color: #333;
 }
 
 .admin-panel-heading > div > strong,
@@ -2784,20 +2806,24 @@
 
 .admin-panel-heading > div > span {
   margin-top: 4px;
-  color: #778694;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #777;
   font-size: 12px;
+  font-weight: 400;
 }
 
 .video-runtime-bar {
   display: flex;
   min-height: 48px;
   padding: 10px 18px;
-  border-bottom: 1px solid #dce3e9;
+  border-bottom: 1px solid #ddd;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 18px;
-  background: #f7f9fa;
-  color: #5b6d7d;
+  background: #f7f7f7;
+  color: #666;
   font-size: 12px;
 }
 
@@ -2808,13 +2834,13 @@
 }
 
 .video-runtime-bar strong {
-  color: #2b3d4d;
+  color: #333;
   font-size: 13px;
 }
 
 .video-runtime-bar small {
   margin-left: auto;
-  color: #7b8995;
+  color: #777;
   font-size: 11px;
 }
 
@@ -2822,17 +2848,17 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #c44e4e;
+  background: #777;
 }
 
 .runtime-dot.healthy {
-  background: #398667;
+  background: #555;
 }
 
 .video-summary-grid {
   display: grid;
   padding: 16px 18px;
-  border-bottom: 1px solid #dce3e9;
+  border-bottom: 1px solid #ddd;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
@@ -2840,9 +2866,9 @@
 .video-summary-grid article {
   min-height: 67px;
   padding: 11px 14px;
-  border: 1px solid #dce3e9;
+  border: 1px solid #ddd;
   border-radius: 4px;
-  background: #fafbfc;
+  background: #fafafa;
 }
 
 .video-summary-grid span,
@@ -2851,28 +2877,33 @@
 }
 
 .video-summary-grid span {
-  color: #71818f;
+  color: #777;
   font-size: 12px;
 }
 
 .video-summary-grid strong {
   margin-top: 7px;
-  color: #273b4c;
+  color: #333;
   font-size: 20px;
   line-height: 1;
 }
 
-.video-summary-grid .state-failed {
-  color: #b84a4a;
+.video-summary-grid [class^="summary-tone-"] {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  color: #333;
 }
 
-.video-summary-grid .state-ready {
-  color: #33785e;
+.video-summary-grid .summary-tone-failed {
+  color: #444;
 }
 
-.video-summary-grid .state-processing,
-.video-summary-grid .state-pending {
-  color: #916b28;
+.video-summary-grid .summary-tone-ready,
+.video-summary-grid .summary-tone-processing,
+.video-summary-grid .summary-tone-pending {
+  color: #333;
 }
 
 .admin-filters.video-filters,
@@ -2899,7 +2930,7 @@
 .admin-primary-cell strong,
 .video-step-cell strong {
   overflow: hidden;
-  color: #2b3d4d;
+  color: #333;
   font-size: 13px;
   line-height: 1.45;
   text-overflow: ellipsis;
@@ -2910,7 +2941,7 @@
 .video-step-cell span {
   margin-top: 4px;
   overflow: hidden;
-  color: #7a8894;
+  color: #777;
   font-size: 11px;
   line-height: 1.45;
   text-overflow: ellipsis;
@@ -2918,7 +2949,8 @@
 }
 
 .video-step-cell .video-error {
-  color: #b04b4b;
+  color: #4a4a4a;
+  font-weight: 600;
 }
 
 .operation-state,
@@ -2928,8 +2960,9 @@
   padding: 3px 8px;
   border-radius: 3px;
   align-items: center;
-  background: #edf1f4;
-  color: #657482;
+  border: 1px solid #d0d0d0;
+  background: #f5f5f5;
+  color: #555;
   font-size: 12px;
   line-height: 1.3;
 }
@@ -2937,22 +2970,112 @@
 .operation-state.state-ready,
 .operation-state.state-published,
 .file-presence.present {
-  background: #e9f4ef;
-  color: #2f775a;
+  border-color: #ccc;
+  background: #f4f4f4;
+  color: #444;
 }
 
 .operation-state.state-pending,
 .operation-state.state-processing,
 .operation-state.state-uploading,
 .operation-state.state-draft {
-  background: #f6f0e4;
-  color: #866528;
+  border-color: #d0d0d0;
+  background: #f7f7f7;
+  color: #555;
 }
 
 .operation-state.state-failed,
 .file-presence.missing {
-  background: #faecec;
-  color: #ac4444;
+  border-color: #999;
+  border-style: dashed;
+  background: #fff;
+  color: #3d3d3d;
+}
+
+.admin-dashboard .account-state,
+.admin-dashboard .notice-state {
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  color: #444;
+}
+
+.admin-dashboard .account-state.disabled,
+.admin-dashboard .notice-state.state-offline,
+.admin-dashboard .notice-state.state-draft {
+  border-style: dashed;
+  background: #fff;
+  color: #666;
+}
+
+.admin-dashboard .el-button:not(.is-disabled) {
+  border-color: #ccc;
+  background: #fff;
+  color: #444;
+  box-shadow: none;
+}
+
+.admin-dashboard .el-button:not(.is-disabled):hover,
+.admin-dashboard .el-button:not(.is-disabled):focus {
+  border-color: #999;
+  background: #f4f4f4;
+  color: #222;
+}
+
+.admin-dashboard .el-button.is-link:not(.is-disabled),
+.admin-dashboard .el-button.is-text:not(.is-disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: #555;
+}
+
+.admin-dashboard .el-button.is-link:not(.is-disabled):hover,
+.admin-dashboard .el-button.is-text:not(.is-disabled):hover {
+  border-color: transparent;
+  background: #f1f1f1;
+  color: #222;
+}
+
+.admin-dashboard .admin-quiet-button {
+  min-width: auto;
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
+.admin-neutral-confirm .el-button,
+.admin-neutral-confirm .el-button--primary {
+  border-color: #ccc;
+  background: #fff;
+  color: #444;
+  box-shadow: none;
+}
+
+.admin-neutral-confirm .el-button:hover,
+.admin-neutral-confirm .el-button--primary:hover {
+  border-color: #999;
+  background: #f4f4f4;
+  color: #222;
+}
+
+.admin-neutral-dialog .el-button:not(.is-disabled) {
+  border-color: #ccc;
+  background: #fff;
+  color: #444;
+  box-shadow: none;
+}
+
+.admin-neutral-dialog .el-button:not(.is-disabled):hover,
+.admin-neutral-dialog .el-button:not(.is-disabled):focus {
+  border-color: #999;
+  background: #f4f4f4;
+  color: #222;
+}
+
+.admin-dashboard .management-surface .el-table {
+  --el-table-header-bg-color: #f5f5f5;
+  --el-table-row-hover-bg-color: #f7f7f7;
+  --el-table-border-color: #e2e2e2;
+  --el-table-text-color: #444;
+  --el-table-header-text-color: #666;
 }
 
 .no-action {
