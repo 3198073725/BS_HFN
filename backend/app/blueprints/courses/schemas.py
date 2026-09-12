@@ -19,6 +19,8 @@ def validate_course(payload: dict, partial: bool = False) -> dict:
             if value and len(value) > limit:
                 raise ValidationError(f"{field} 不能超过{limit}位")
             result[field] = value
+    if partial and not result:
+        raise ValidationError("没有可更新的课程内容")
     return result
 
 
@@ -35,14 +37,22 @@ def validate_chapter(payload: dict, partial: bool = False) -> dict:
             raise ValidationError("章节描述不能超过500位")
         result["description"] = description
     if "sort_order" in payload:
+        if isinstance(payload["sort_order"], bool):
+            raise ValidationError("章节排序必须是0到100000之间的整数")
         try:
             result["sort_order"] = int(payload["sort_order"])
         except (TypeError, ValueError) as exc:
-            raise ValidationError("章节排序必须是整数") from exc
+            raise ValidationError("章节排序必须是0到100000之间的整数") from exc
+        if not 0 <= result["sort_order"] <= 100000:
+            raise ValidationError("章节排序必须是0到100000之间的整数")
+    if partial and not result:
+        raise ValidationError("没有可更新的章节内容")
     return result
 
 
 def _positive_int(value, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValidationError(f"{label}参数不正确")
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:

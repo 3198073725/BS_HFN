@@ -1,4 +1,3 @@
-from flask import request
 from flask_jwt_extended import get_jwt_identity
 
 from app.constants import PublishStatus, UserRole
@@ -23,7 +22,7 @@ from app.services.exam_service import (
     update_exam,
     update_question,
 )
-from app.utils import error, roles_required, success
+from app.utils import error, json_body, roles_required, success
 from . import exams_bp
 from .schemas import ValidationError, validate_answers, validate_exam, validate_question
 
@@ -44,7 +43,7 @@ def teacher_exams():
 @roles_required(UserRole.TEACHER)
 def add_exam():
     try:
-        data = validate_exam(request.get_json(silent=True) or {})
+        data = validate_exam(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(create_exam(_user_id(), data), "测验创建成功", 201))
@@ -60,7 +59,7 @@ def exam_detail(exam_id: int):
 @roles_required(UserRole.TEACHER)
 def edit_exam(exam_id: int):
     try:
-        data = validate_exam(request.get_json(silent=True) or {}, partial=True)
+        data = validate_exam(json_body(), partial=True)
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(update_exam(exam_id, _user_id(), data), "测验更新成功"))
@@ -76,7 +75,7 @@ def remove_exam(exam_id: int):
 @roles_required(UserRole.TEACHER)
 def add_exam_question(exam_id: int):
     try:
-        data = validate_question(request.get_json(silent=True) or {})
+        data = validate_question(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(add_question(exam_id, _user_id(), data), "试题添加成功", 201))
@@ -86,7 +85,7 @@ def add_exam_question(exam_id: int):
 @roles_required(UserRole.TEACHER)
 def edit_exam_question(question_id: int):
     try:
-        data = validate_question(request.get_json(silent=True) or {})
+        data = validate_question(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(update_question(question_id, _user_id(), data), "试题更新成功"))
@@ -130,7 +129,7 @@ def begin_exam(exam_id: int):
 @roles_required(UserRole.STUDENT)
 def finish_exam(exam_id: int):
     try:
-        answers = validate_answers(request.get_json(silent=True) or {})
+        answers = validate_answers(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(submit_exam(exam_id, _user_id(), answers), "测验提交成功"))

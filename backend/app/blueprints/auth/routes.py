@@ -1,4 +1,3 @@
-from flask import request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from app.services.auth_service import (
@@ -15,7 +14,7 @@ from app.services.token_service import (
     decode_owned_token,
     revoke_token,
 )
-from app.utils import error, success
+from app.utils import error, json_body, success
 from . import auth_bp
 from .schemas import ValidationError, validate_login, validate_registration
 
@@ -23,7 +22,7 @@ from .schemas import ValidationError, validate_login, validate_registration
 @auth_bp.post("/register")
 def register():
     try:
-        data = validate_registration(request.get_json(silent=True) or {})
+        data = validate_registration(json_body())
         user = create_student(data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -35,7 +34,7 @@ def register():
 @auth_bp.post("/login")
 def login():
     try:
-        account, password = validate_login(request.get_json(silent=True) or {})
+        account, password = validate_login(json_body())
         user = authenticate(account, password)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -64,7 +63,7 @@ def logout():
     subject = get_jwt_identity()
     try:
         payloads = [current_payload]
-        body = request.get_json(silent=True) or {}
+        body = json_body()
         for field in ("access_token", "refresh_token"):
             encoded = body.get(field)
             if encoded:

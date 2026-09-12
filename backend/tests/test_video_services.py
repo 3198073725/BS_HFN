@@ -179,6 +179,19 @@ def test_async_upload_commits_before_enqueuing(app, client, monkeypatch):
     )
     assert rejected.status_code == 400
 
+    oversized_sort = client.post(
+        "/api/videos/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={
+            "chapter_id": str(chapter_id),
+            "title": "超大排序",
+            "sort_order": "100001",
+            "video_file": (io.BytesIO(b"video"), "lesson.mp4"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert oversized_sort.status_code == 400
+
     uploaded = client.post(
         "/api/videos/upload",
         headers={"Authorization": f"Bearer {token}"},

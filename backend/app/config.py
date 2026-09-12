@@ -73,6 +73,9 @@ class BaseConfig:
     FFMPEG_BIN = _command_path("FFMPEG_BIN", "ffmpeg")
     FFPROBE_BIN = _command_path("FFPROBE_BIN", "ffprobe")
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(2 * 1024**3)))
+    MAX_JSON_CONTENT_LENGTH = int(
+        os.getenv("MAX_JSON_CONTENT_LENGTH", str(1024**2))
+    )
     HOMEWORK_ATTACHMENT_MAX_LENGTH = int(
         os.getenv("HOMEWORK_ATTACHMENT_MAX_LENGTH", str(50 * 1024**2))
     )

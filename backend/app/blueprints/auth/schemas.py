@@ -26,8 +26,12 @@ def validate_registration(payload: dict) -> dict:
         raise ValidationError("真实姓名不能为空且不能超过50位")
     if email and not EMAIL_PATTERN.fullmatch(email):
         raise ValidationError("邮箱格式不正确")
+    if email and len(email) > 100:
+        raise ValidationError("邮箱不能超过100位")
     if phone and not PHONE_PATTERN.fullmatch(phone):
         raise ValidationError("手机号格式不正确")
+    if student_no and len(student_no) > 50:
+        raise ValidationError("学号不能超过50位")
 
     return {
         "username": username,
@@ -44,6 +48,10 @@ def validate_login(payload: dict) -> tuple[str, str]:
     password = str(payload.get("password", ""))
     if not account or not password:
         raise ValidationError("账号和密码不能为空")
+    if len(account) > 100:
+        raise ValidationError("账号不能超过100位")
+    if len(password) > 72:
+        raise ValidationError("密码不能超过72位")
     return account, password
 
 
@@ -53,6 +61,8 @@ def validate_managed_user(payload: dict) -> dict:
     if role not in {"TEACHER", "STUDENT"}:
         raise ValidationError("管理员只能创建教师或学生账号")
     teacher_no = _optional_text(payload, "teacher_no")
+    if teacher_no and len(teacher_no) > 50:
+        raise ValidationError("工号不能超过50位")
     if role == "TEACHER" and not teacher_no:
         raise ValidationError("教师账号必须提供 teacher_no")
     if role == "STUDENT" and not data["student_no"]:

@@ -8,6 +8,8 @@ class ValidationError(ValueError):
 
 
 def validate_question(payload: dict) -> dict:
+    if isinstance(payload.get("video_id"), bool):
+        raise ValidationError("视频参数不正确")
     try:
         video_id = int(payload.get("video_id"))
     except (TypeError, ValueError) as exc:

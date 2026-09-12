@@ -16,7 +16,7 @@ from app.services.question_service import (
     list_questions,
     update_answer,
 )
-from app.utils import error, roles_required, success
+from app.utils import error, json_body, roles_required, success
 from . import questions_bp
 from .schemas import ValidationError, validate_answer, validate_filters, validate_question
 
@@ -38,7 +38,7 @@ def question_list():
 @roles_required(UserRole.STUDENT)
 def add_question():
     try:
-        data = validate_question(request.get_json(silent=True) or {})
+        data = validate_question(json_body())
         question = create_question(_user_id(), data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -63,7 +63,7 @@ def question_detail(question_id: int):
 @roles_required(UserRole.TEACHER)
 def add_answer(question_id: int):
     try:
-        content = validate_answer(request.get_json(silent=True) or {})
+        content = validate_answer(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(
@@ -75,7 +75,7 @@ def add_answer(question_id: int):
 @roles_required(UserRole.TEACHER)
 def edit_answer(question_id: int):
     try:
-        content = validate_answer(request.get_json(silent=True) or {})
+        content = validate_answer(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(update_answer(question_id, _user_id(), content), "回答更新成功"))

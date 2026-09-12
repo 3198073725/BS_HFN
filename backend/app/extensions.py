@@ -56,7 +56,7 @@ def init_jwt_callbacks(app: Flask) -> None:
 
     @jwt.invalid_token_loader
     def invalid_token(message):
-        return {"code": 422, "message": message, "data": None}, 422
+        return {"code": 401, "message": message, "data": None}, 401
 
     @jwt.expired_token_loader
     def expired_token(_header, _payload):

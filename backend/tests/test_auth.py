@@ -18,6 +18,70 @@ def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+def test_non_object_json_body_returns_bad_request(client):
+    for body in ([{"account": "student01"}], "value", 42, True):
+        response = client.post("/api/auth/login", json=body)
+        assert response.status_code == 400
+        assert response.get_json()["message"] == "请求体必须是 JSON 对象"
+
+
+def test_malformed_json_body_returns_json_bad_request(client):
+    response = client.post(
+        "/api/auth/login",
+        data='{"account":',
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    assert response.get_json()["message"] == "请求体不是有效的 JSON"
+
+
+def test_login_rejects_oversized_credentials_before_password_check(client):
+    account = client.post(
+        "/api/auth/login",
+        json={"account": "a" * 101, "password": "password"},
+    )
+    password = client.post(
+        "/api/auth/login",
+        json={"account": "student", "password": "p" * 73},
+    )
+
+    assert account.status_code == 400
+    assert account.get_json()["message"] == "账号不能超过100位"
+    assert password.status_code == 400
+    assert password.get_json()["message"] == "密码不能超过72位"
+
+
+def test_invalid_access_token_is_an_authentication_failure(client):
+    response = client.get(
+        "/api/users/me",
+        headers={"Authorization": "Bearer invalid-token"},
+    )
+    assert response.status_code == 401
+
+
+def test_registration_rejects_identifiers_longer_than_database_columns(client):
+    too_long_student_no = {
+        **STUDENT,
+        "username": "student_long_number",
+        "student_no": "S" * 51,
+    }
+    student_response = client.post("/api/auth/register", json=too_long_student_no)
+    assert student_response.status_code == 400
+    assert student_response.get_json()["message"] == "学号不能超过50位"
+
+    too_long_email = {
+        **STUDENT,
+        "username": "student_long_email",
+        "student_no": "S20260002",
+        "email": f"{'a' * 96}@example.com",
+    }
+    email_response = client.post("/api/auth/register", json=too_long_email)
+    assert email_response.status_code == 400
+    assert email_response.get_json()["message"] == "邮箱不能超过100位"
+
+
 def test_register_login_refresh_me_and_logout(client):
     registered = client.post("/api/auth/register", json=STUDENT)
     assert registered.status_code == 201

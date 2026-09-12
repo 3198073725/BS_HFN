@@ -1,4 +1,3 @@
-from flask import request
 from flask_jwt_extended import get_jwt_identity
 
 from app.constants import UserRole
@@ -12,7 +11,7 @@ from app.services.notice_service import (
     list_published_notices,
     update_notice,
 )
-from app.utils import error, roles_required, success
+from app.utils import error, json_body, roles_required, success
 from . import notices_bp
 from .schemas import ValidationError, validate_notice, validate_status
 
@@ -32,7 +31,7 @@ def managed_notices():
 @roles_required(UserRole.ADMIN)
 def add_notice():
     try:
-        data = validate_notice(request.get_json(silent=True) or {})
+        data = validate_notice(json_body())
         notice = create_notice(int(get_jwt_identity()), data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -43,7 +42,7 @@ def add_notice():
 @roles_required(UserRole.ADMIN)
 def edit_notice(notice_id: int):
     try:
-        data = validate_notice(request.get_json(silent=True) or {}, partial=True)
+        data = validate_notice(json_body(), partial=True)
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(update_notice(notice_id, data), "公告更新成功"))
@@ -53,7 +52,7 @@ def edit_notice(notice_id: int):
 @roles_required(UserRole.ADMIN)
 def set_notice_status(notice_id: int):
     try:
-        status = validate_status(request.get_json(silent=True) or {})
+        status = validate_status(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(change_notice_status(notice_id, status), "公告状态更新成功"))

@@ -21,7 +21,7 @@ from app.services.homework_service import (
     submit_homework,
     update_homework,
 )
-from app.utils import error, roles_required, success
+from app.utils import error, json_body, roles_required, success
 from . import homework_bp
 from .schemas import ValidationError, validate_grade, validate_homework, validate_submission
 
@@ -42,7 +42,7 @@ def teacher_homeworks():
 @roles_required(UserRole.TEACHER)
 def add_homework():
     try:
-        data = validate_homework(request.get_json(silent=True) or {})
+        data = validate_homework(json_body())
         homework = create_homework(_user_id(), data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -67,7 +67,7 @@ def homework_detail(homework_id: int):
 @roles_required(UserRole.TEACHER)
 def edit_homework(homework_id: int):
     try:
-        data = validate_homework(request.get_json(silent=True) or {}, partial=True)
+        data = validate_homework(json_body(), partial=True)
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(
@@ -124,7 +124,7 @@ def close_homework(homework_id: int):
 @roles_required(UserRole.STUDENT)
 def save_submission(homework_id: int):
     try:
-        content = validate_submission(request.get_json(silent=True) or {})
+        content = validate_submission(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(
@@ -159,7 +159,7 @@ def homework_submissions(homework_id: int):
 @roles_required(UserRole.TEACHER)
 def grade_homework(submission_id: int):
     try:
-        score, comment = validate_grade(request.get_json(silent=True) or {})
+        score, comment = validate_grade(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(

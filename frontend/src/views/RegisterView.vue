@@ -33,11 +33,16 @@ const rules = {
     { required: true, message: '请设置登录密码', trigger: 'blur' },
     { min: 8, max: 72, message: '密码长度需为 8–72 位', trigger: 'blur' },
   ],
-  email: [{ type: 'email', message: '请输入正确的邮箱地址', trigger: 'blur' }],
+  student_no: [{ max: 50, message: '学号不能超过 50 位', trigger: 'blur' }],
+  email: [
+    { type: 'email', message: '请输入正确的邮箱地址', trigger: 'blur' },
+    { max: 100, message: '邮箱不能超过 100 位', trigger: 'blur' },
+  ],
   phone: [{ pattern: /^1[3-9]\d{9}$/, message: '请输入正确的 11 位手机号', trigger: 'blur' }],
 }
 const auth = useAuthStore()
 const router = useRouter()
+
 
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
@@ -103,6 +108,7 @@ async function submit() {
                   v-model.trim="form.username"
                   size="large"
                   autocomplete="username"
+                  maxlength="50"
                   placeholder="3–50 位中文、字母或数字"
                   clearable
                 />
@@ -112,18 +118,26 @@ async function submit() {
                   v-model.trim="form.real_name"
                   size="large"
                   autocomplete="name"
+                  maxlength="50"
                   placeholder="请输入真实姓名"
                   clearable
                 />
               </el-form-item>
               <el-form-item label="学号（选填）" prop="student_no">
-                <el-input v-model.trim="form.student_no" size="large" placeholder="请输入学号" clearable />
+                <el-input
+                  v-model.trim="form.student_no"
+                  size="large"
+                  maxlength="50"
+                  placeholder="请输入学号"
+                  clearable
+                />
               </el-form-item>
               <el-form-item label="邮箱（选填）" prop="email">
                 <el-input
                   v-model.trim="form.email"
                   size="large"
                   autocomplete="email"
+                  maxlength="100"
                   placeholder="name@example.com"
                   clearable
                 />
@@ -146,6 +160,7 @@ async function submit() {
                   type="password"
                   show-password
                   autocomplete="new-password"
+                  maxlength="72"
                   placeholder="请设置 8–72 位密码"
                 />
               </el-form-item>

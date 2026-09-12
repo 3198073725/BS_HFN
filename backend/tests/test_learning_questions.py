@@ -169,6 +169,18 @@ def test_question_and_teacher_answer_permissions(app, client):
         f"/api/learning/courses/{context['course_id']}/join",
         headers=bearer(student),
     )
+    invalid_video = client.post(
+        "/api/questions",
+        headers=bearer(student),
+        json={
+            "video_id": True,
+            "video_time": 1,
+            "title": "错误视频参数",
+            "content": "布尔值不能作为视频编号。",
+        },
+    )
+    assert invalid_video.status_code == 400
+
     question = client.post(
         "/api/questions",
         headers=bearer(student),

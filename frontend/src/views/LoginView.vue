@@ -10,8 +10,14 @@ const formRef = ref(null)
 const submitting = ref(false)
 const form = reactive({ account: '', password: '' })
 const rules = {
-  account: [{ required: true, message: '请输入用户名、邮箱、学号或工号', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入登录密码', trigger: 'blur' }],
+  account: [
+    { required: true, message: '请输入用户名、邮箱、学号或工号', trigger: 'blur' },
+    { max: 100, message: '账号不能超过 100 位', trigger: 'blur' },
+  ],
+  password: [
+    { required: true, message: '请输入登录密码', trigger: 'blur' },
+    { max: 72, message: '密码不能超过 72 位', trigger: 'blur' },
+  ],
 }
 const auth = useAuthStore()
 const route = useRoute()
@@ -84,6 +90,7 @@ async function submit() {
                 autocomplete="username"
                 autofocus
                 clearable
+                maxlength="100"
                 placeholder="用户名、邮箱、学号或工号"
               />
             </el-form-item>
@@ -94,6 +101,7 @@ async function submit() {
                 type="password"
                 show-password
                 autocomplete="current-password"
+                maxlength="72"
                 placeholder="请输入登录密码"
               />
             </el-form-item>

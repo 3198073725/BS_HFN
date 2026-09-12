@@ -34,7 +34,9 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import 'element-plus/dist/index.css'
 
 import App from './App.vue'
+import { SESSION_EXPIRED_EVENT } from './api/client'
 import router from './router'
+import { useAuthStore } from './stores/auth'
 import './assets/main.css'
 import './assets/learning.css'
 
@@ -72,6 +74,25 @@ const components = [
 
 components.forEach((component) => app.component(component.name, component))
 app.use(ElLoading)
-app.use(createPinia())
+const pinia = createPinia()
+app.use(pinia)
 app.use(router)
+function clearExpiredSession() {
+  useAuthStore(pinia).clearSession()
+  const current = router.currentRoute.value
+  if (current.meta.requiresAuth && current.name !== 'login') {
+    void router.replace({ name: 'login', query: { redirect: current.fullPath } })
+  }
+}
+
+window.addEventListener(SESSION_EXPIRED_EVENT, clearExpiredSession)
+window.addEventListener('storage', (event) => {
+  if (
+    (event.key === null || ['access_token', 'refresh_token'].includes(event.key))
+    && !localStorage.getItem('access_token')
+    && !localStorage.getItem('refresh_token')
+  ) {
+    clearExpiredSession()
+  }
+})
 app.mount('#app')

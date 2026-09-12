@@ -45,6 +45,13 @@ def test_course_chapter_publish_and_permissions(app, client):
     other_teacher = login(client, "teacher02", "Teach123!")
     student = login(client, "student01", "Study123!")
 
+    invalid_category = client.post(
+        "/api/courses",
+        headers=bearer(teacher),
+        json={"name": "错误分类", "category_id": True},
+    )
+    assert invalid_category.status_code == 400
+
     forbidden = client.post(
         "/api/courses",
         headers=bearer(student),
@@ -59,6 +66,20 @@ def test_course_chapter_publish_and_permissions(app, client):
     )
     assert created.status_code == 201
     course_id = created.get_json()["data"]["id"]
+
+    empty_update = client.put(
+        f"/api/courses/{course_id}",
+        headers=bearer(teacher),
+        json={},
+    )
+    assert empty_update.status_code == 400
+
+    invalid_chapter = client.post(
+        f"/api/courses/{course_id}/chapters",
+        headers=bearer(teacher),
+        json={"title": "错误排序章节", "sort_order": -1},
+    )
+    assert invalid_chapter.status_code == 400
 
     assert client.get("/api/courses").get_json()["data"] == []
 

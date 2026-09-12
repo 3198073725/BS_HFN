@@ -19,7 +19,7 @@ from app.services.course_service import (
     update_chapter,
     update_course,
 )
-from app.utils import error, roles_required, success
+from app.utils import error, json_body, roles_required, success
 from . import courses_bp
 from .schemas import ValidationError, validate_chapter, validate_course
 
@@ -35,6 +35,8 @@ def published_courses():
     try:
         category_id = int(raw_category) if raw_category else None
     except ValueError:
+        return error("课程分类参数不正确", 400)
+    if category_id is not None and category_id <= 0:
         return error("课程分类参数不正确", 400)
     return success(list_published_courses(category_id))
 
@@ -68,7 +70,7 @@ def course_detail(course_id: int):
 @roles_required(UserRole.TEACHER)
 def add_course():
     try:
-        data = validate_course(request.get_json(silent=True) or {})
+        data = validate_course(json_body())
         course = create_course(int(get_jwt_identity()), data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -81,7 +83,7 @@ def add_course():
 @roles_required(UserRole.TEACHER)
 def edit_course(course_id: int):
     try:
-        data = validate_course(request.get_json(silent=True) or {}, partial=True)
+        data = validate_course(json_body(), partial=True)
         course = update_course(course_id, int(get_jwt_identity()), data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -124,7 +126,7 @@ def remove_course(course_id: int):
 @roles_required(UserRole.TEACHER)
 def add_chapter(course_id: int):
     try:
-        data = validate_chapter(request.get_json(silent=True) or {})
+        data = validate_chapter(json_body())
         chapter = create_chapter(course_id, int(get_jwt_identity()), data)
     except ValidationError as exc:
         return error(str(exc), 400)
@@ -141,7 +143,7 @@ def add_chapter(course_id: int):
 @roles_required(UserRole.TEACHER)
 def edit_chapter(course_id: int, chapter_id: int):
     try:
-        data = validate_chapter(request.get_json(silent=True) or {}, partial=True)
+        data = validate_chapter(json_body(), partial=True)
         chapter = update_chapter(course_id, chapter_id, int(get_jwt_identity()), data)
     except ValidationError as exc:
         return error(str(exc), 400)

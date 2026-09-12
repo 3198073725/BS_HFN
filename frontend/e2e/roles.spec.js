@@ -44,6 +44,61 @@ test('登录表单提示完整，受保护页面登录后回到原路径', async
 })
 
 
+test('刷新令牌失效后清除本地会话并返回登录页', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.route('**/api/learning/courses', (route) => route.fulfill({
+    status: 401,
+    contentType: 'application/json',
+    body: JSON.stringify({ code: 401, message: 'Token 已过期', data: null }),
+  }))
+  await page.route('**/api/auth/refresh', (route) => route.fulfill({
+    status: 401,
+    contentType: 'application/json',
+    body: JSON.stringify({ code: 401, message: 'Token 已失效', data: null }),
+  }))
+
+  await page.getByRole('link', { name: '我的学习', exact: true }).click()
+  await expect(page).toHaveURL(/\/login\?redirect=\/learning$/)
+  await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
+  const storedTokens = await page.evaluate(() => ({
+    access: localStorage.getItem('access_token'),
+    refresh: localStorage.getItem('refresh_token'),
+  }))
+  expect(storedTokens).toEqual({ access: null, refresh: null })
+})
+
+
+test('访问令牌损坏时使用刷新令牌恢复请求', async ({ page }) => {
+  await login(page, 'e2e_student')
+  await page.evaluate(() => localStorage.setItem('access_token', 'invalid-token'))
+
+  await page.getByRole('link', { name: '我的学习', exact: true }).click()
+  await expect(page).toHaveURL('/learning')
+  await expect(page.getByRole('heading', { name: '我的学习', exact: true })).toBeVisible()
+  const refreshedAccessToken = await page.evaluate(() => localStorage.getItem('access_token'))
+  expect(refreshedAccessToken).not.toBe('invalid-token')
+  expect(refreshedAccessToken).toBeTruthy()
+})
+
+
+test('其他标签页退出后当前受保护页面同步返回登录页', async ({ page, context }) => {
+  await login(page, 'e2e_student')
+  await page.getByRole('link', { name: '我的学习', exact: true }).click()
+  await expect(page).toHaveURL('/learning')
+
+  const otherPage = await context.newPage()
+  await otherPage.goto('/')
+  await otherPage.evaluate(() => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+  })
+
+  await expect(page).toHaveURL(/\/login\?redirect=\/learning$/)
+  await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
+  await otherPage.close()
+})
+
+
 test('学生可以访问学习、作业、测验和数据页面', async ({ page }) => {
   await login(page, 'e2e_student')
   for (const item of [

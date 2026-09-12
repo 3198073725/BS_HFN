@@ -1,4 +1,3 @@
-from flask import request
 from flask_jwt_extended import get_jwt_identity
 
 from app.constants import UserRole
@@ -20,7 +19,7 @@ from app.services.learning_service import (
     update_note,
     update_progress,
 )
-from app.utils import error, roles_required, success
+from app.utils import error, json_body, roles_required, success
 from . import learning_bp
 from .schemas import ValidationError, validate_note, validate_progress
 
@@ -85,7 +84,7 @@ def video_progress(video_id: int):
 @roles_required(UserRole.STUDENT)
 def save_video_progress(video_id: int):
     try:
-        data = validate_progress(request.get_json(silent=True) or {})
+        data = validate_progress(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(
@@ -106,7 +105,7 @@ def video_notes(video_id: int):
 @roles_required(UserRole.STUDENT)
 def add_video_note(video_id: int):
     try:
-        data = validate_note(request.get_json(silent=True) or {})
+        data = validate_note(json_body())
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(
@@ -122,7 +121,7 @@ def add_video_note(video_id: int):
 @roles_required(UserRole.STUDENT)
 def edit_video_note(note_id: int):
     try:
-        data = validate_note(request.get_json(silent=True) or {}, partial=True)
+        data = validate_note(json_body(), partial=True)
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(update_note(_student_id(), note_id, data), "笔记更新成功"))

@@ -2,7 +2,7 @@
 
 开发地址：`http://127.0.0.1:5000`
 
-除文件上传外，请求体使用 JSON。受保护接口通过请求头传递：
+除文件上传外，请求体使用 JSON 对象，默认最大 1 MB；损坏或非对象 JSON 会返回 400。受保护接口通过请求头传递：
 
 ```text
 Authorization: Bearer <access_token>

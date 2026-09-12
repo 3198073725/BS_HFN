@@ -8,9 +8,12 @@ const api = axios.create({
 })
 const refreshClient = axios.create({ baseURL, timeout: 15000 })
 let refreshPromise = null
+let sessionExpiryNotified = false
+export const SESSION_EXPIRED_EVENT = 'bs-hfn:session-expired'
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
+  if (token) sessionExpiryNotified = false
   if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -20,6 +23,10 @@ api.interceptors.request.use((config) => {
 function clearStoredSession() {
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
+  if (!sessionExpiryNotified) {
+    sessionExpiryNotified = true
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
 }
 
 async function refreshAccessToken() {
@@ -41,25 +48,28 @@ api.interceptors.response.use(
     const isAuthEndpoint = ['/auth/login', '/auth/register', '/auth/refresh'].some((path) =>
       String(original?.url || '').includes(path),
     )
-    if (
+    const shouldHandleUnauthorized = (
       error.response?.status === 401
       && original
-      && !original._retry
       && !original.skipAuthRefresh
       && !isAuthEndpoint
-      && localStorage.getItem('refresh_token')
-    ) {
-      original._retry = true
-      try {
-        refreshPromise ||= refreshAccessToken().finally(() => {
-          refreshPromise = null
-        })
-        const accessToken = await refreshPromise
-        original.headers.Authorization = `Bearer ${accessToken}`
-        return api(original)
-      } catch {
-        clearStoredSession()
+    )
+    if (shouldHandleUnauthorized) {
+      const refreshToken = localStorage.getItem('refresh_token')
+      if (!original._retry && refreshToken) {
+        original._retry = true
+        try {
+          refreshPromise ||= refreshAccessToken().finally(() => {
+            refreshPromise = null
+          })
+          const accessToken = await refreshPromise
+          original.headers.Authorization = `Bearer ${accessToken}`
+          return api(original)
+        } catch {
+          // The shared cleanup below keeps storage and reactive state consistent.
+        }
       }
+      clearStoredSession()
     }
     if (!error.response) {
       const message = error.code === 'ECONNABORTED'
