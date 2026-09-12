@@ -308,6 +308,7 @@ test('大量班级使用主从选择且移动端不会纵向复制名册', async
 
 test('我的学习使用统一的卡片与操作控件尺寸', async ({ page }) => {
   await login(page, 'e2e_student')
+  let includeFavorite = false
   await page.route('**/api/learning/courses', async (route) => {
     const response = await route.fetch()
     const payload = await response.json()
@@ -325,6 +326,17 @@ test('我的学习使用统一的卡片与操作控件尺寸', async ({ page }) 
     }]
     await route.fulfill({ response, json: payload })
   })
+  await page.route('**/api/learning/favorites', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json()
+    payload.data = includeFavorite ? [{
+      id: 3001,
+      name: 'C 语言程序设计',
+      description: '从语法基础到程序设计实践，建立清晰的编程思维。',
+      category_name: '计算机',
+    }] : []
+    await route.fulfill({ response, json: payload })
+  })
 
   await page.goto('/learning')
   const card = page.locator('.learning-course-card').first()
@@ -333,18 +345,41 @@ test('我的学习使用统一的卡片与操作控件尺寸', async ({ page }) 
     const mark = element.querySelector('.learning-card-mark')
     const actions = [...element.querySelectorAll('.learning-card-actions > *')]
     return {
+      cardWidth: element.getBoundingClientRect().width,
       cardHeight: element.getBoundingClientRect().height,
       markHeight: mark.getBoundingClientRect().height,
       actionHeights: actions.map((action) => action.getBoundingClientRect().height),
     }
   })
-  expect(metrics.cardHeight).toBeGreaterThanOrEqual(189)
-  expect(metrics.cardHeight).toBeLessThanOrEqual(240)
+  expect(metrics.cardHeight).toBeGreaterThanOrEqual(209)
+  expect(metrics.cardHeight).toBeLessThanOrEqual(211)
   expect(metrics.markHeight).toBeLessThan(metrics.cardHeight - 30)
   expect(metrics.actionHeights.every((height) => height >= 33.5)).toBe(true)
   const desktopTabWidth = await page.locator('.center-tabs').evaluate((element) => element.getBoundingClientRect().width)
   expect(desktopTabWidth).toBeLessThan(360)
   await expectStandardControlSizes(page)
+
+  await page.getByRole('button', { name: /我的收藏/ }).click()
+  const emptyState = page.locator('.learning-empty')
+  await expect(emptyState).toBeVisible()
+  const emptyMetrics = await emptyState.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    height: element.getBoundingClientRect().height,
+  }))
+  expect(Math.abs(emptyMetrics.width - metrics.cardWidth)).toBeLessThanOrEqual(1)
+  expect(Math.abs(emptyMetrics.height - metrics.cardHeight)).toBeLessThanOrEqual(1)
+
+  includeFavorite = true
+  await page.reload()
+  await page.getByRole('button', { name: /我的收藏/ }).click()
+  const favoriteCard = page.locator('.favorite-card').first()
+  await expect(favoriteCard).toBeVisible()
+  const favoriteMetrics = await favoriteCard.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    height: element.getBoundingClientRect().height,
+  }))
+  expect(Math.abs(favoriteMetrics.width - metrics.cardWidth)).toBeLessThanOrEqual(1)
+  expect(Math.abs(favoriteMetrics.height - metrics.cardHeight)).toBeLessThanOrEqual(1)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expectNoHorizontalOverflow(page)

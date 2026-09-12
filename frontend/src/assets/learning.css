@@ -2478,15 +2478,33 @@
 }
 
 .learning-course-grid {
+  --learning-card-slot-height: 210px;
   min-height: 0;
   align-items: start;
 }
 
 .learning-course-card {
-  min-height: 190px;
+  height: var(--learning-card-slot-height);
+  min-height: var(--learning-card-slot-height);
   padding: 20px;
   grid-template-columns: 92px minmax(0, 1fr);
   gap: 20px;
+}
+
+.learning-empty {
+  height: var(--learning-card-slot-height);
+  min-height: var(--learning-card-slot-height);
+  padding: 20px;
+  grid-column: auto;
+  align-self: start;
+}
+
+.learning-empty .el-empty__image {
+  width: 74px;
+}
+
+.learning-empty .el-empty__description {
+  margin-top: 12px;
 }
 
 .learning-card-mark,
@@ -2646,10 +2664,16 @@
   }
 
   .learning-course-card {
-    min-height: 0;
+    height: 240px;
+    min-height: 240px;
     padding: 16px;
     grid-template-columns: 68px minmax(0, 1fr);
     gap: 14px;
+  }
+
+  .learning-empty {
+    height: 240px;
+    min-height: 240px;
   }
 
   .learning-card-mark,
