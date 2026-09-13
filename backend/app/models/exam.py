@@ -26,6 +26,7 @@ class Exam(IdMixin, TimestampMixin, db.Model):
     description = db.Column(db.Text)
     attachment = db.Column(db.String(500))
     attachment_name = db.Column(db.String(255))
+    exam_type = db.Column(db.String(20), nullable=False, default="ONLINE", server_default="ONLINE")
     total_score = db.Column(db.Numeric(6, 2), nullable=False, default=100, server_default="100")
     status = db.Column(db.String(20), nullable=False, default="DRAFT", server_default="DRAFT")
     start_time = db.Column(db.DateTime)
@@ -90,6 +91,11 @@ class ExamRecord(IdMixin, db.Model):
     started_at = db.Column(db.DateTime)
     submit_time = db.Column(db.DateTime)
     duration_seconds = db.Column(db.Integer)
+    content = db.Column(db.Text)
+    attachment = db.Column(db.String(500))
+    attachment_name = db.Column(db.String(255))
+    teacher_comment = db.Column(db.Text)
+    graded_time = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, server_default=func.now())
 
     exam = db.relationship(

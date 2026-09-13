@@ -1,4 +1,5 @@
 from flask import request, send_file
+from decimal import Decimal, InvalidOperation
 from flask_jwt_extended import get_jwt_identity
 
 from app.constants import PublishStatus, UserRole
@@ -13,6 +14,9 @@ from app.services.exam_service import (
     attach_exam_file,
     get_exam_attachment,
     remove_exam_attachment,
+    save_paper_submission,
+    grade_paper_submission,
+    get_paper_submission_attachment,
     change_exam_status,
     create_exam,
     delete_draft_exam,
@@ -182,6 +186,39 @@ def save_answers(exam_id: int):
 @roles_required(UserRole.TEACHER)
 def exam_records(exam_id: int):
     return _handle(lambda: success(list_exam_records(exam_id, _user_id())))
+
+
+@exams_bp.route("/<int:exam_id>/submission", methods=["PUT", "POST"])
+@roles_required(UserRole.STUDENT)
+def paper_submission(exam_id: int):
+    payload = json_body() if request.is_json else request.form
+    return _handle(lambda: success(save_paper_submission(
+        exam_id, _user_id(), str(payload.get("content") or ""), request.files.get("attachment"),
+        finalize=request.method == "POST"), "答卷已保存"))
+
+
+@exams_bp.put("/records/<int:record_id>/grade")
+@roles_required(UserRole.TEACHER)
+def grade_paper(record_id: int):
+    payload = json_body()
+    try:
+        score = Decimal(str(payload.get("score")))
+    except (InvalidOperation, ValueError):
+        return error("请输入有效分数", 400)
+    return _handle(lambda: success(grade_paper_submission(record_id, _user_id(), score,
+                                                         str(payload.get("teacher_comment") or "")), "批改结果已保存"))
+
+
+@exams_bp.get("/records/<int:record_id>/attachment")
+@roles_required(UserRole.STUDENT, UserRole.TEACHER)
+def paper_attachment(record_id: int):
+    def respond():
+        path, name = get_paper_submission_attachment(record_id, _user_id(), _current_role())
+        response = send_file(path, download_name=name, as_attachment=request.args.get("download") == "1")
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+    return _handle(respond)
 
 
 @exams_bp.get("/records/<int:record_id>")

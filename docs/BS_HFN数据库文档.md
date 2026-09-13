@@ -952,6 +952,7 @@ NOT_SUBMITTED
 | description | TEXT | 说明 |
 | attachment | VARCHAR(500) | 测验附件相对路径，可空，仅鉴权接口提供 |
 | attachment_name | VARCHAR(255) | 测验附件原文件名，可空 |
+| exam_type | VARCHAR(20) | ONLINE在线自动评分 / ATTACHMENT附件试卷教师批改，默认ONLINE |
 | total_score | DECIMAL(6,2) | 总分 |
 | status | VARCHAR(20) | 状态 |
 | start_time | DATETIME | 开始 |
@@ -1049,6 +1050,11 @@ FALSE
 | started_at | DATETIME | 开始时间 |
 | submit_time | DATETIME | 提交时间 |
 | duration_seconds | INT | 实际用时 |
+| content | TEXT | 附件试卷的文字答案，可空 |
+| attachment | VARCHAR(500) | 学生答卷附件路径，可空 |
+| attachment_name | VARCHAR(255) | 学生答卷原文件名，可空 |
+| teacher_comment | TEXT | 教师评语，可空 |
+| graded_time | DATETIME | 教师批改时间，可空 |
 | created_at | DATETIME | 创建 |
 
 第一版规定：
@@ -1070,6 +1076,7 @@ exam_id + student_id
 ```text
 DOING
 SUBMITTED
+GRADED
 ```
 
 学生点击：
@@ -1779,6 +1786,7 @@ CREATE TABLE exam (
     description TEXT NULL,
     attachment VARCHAR(500) NULL,
     attachment_name VARCHAR(255) NULL,
+    exam_type VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
 
     total_score DECIMAL(6,2)
         NOT NULL DEFAULT 100,
@@ -1902,6 +1910,11 @@ CREATE TABLE exam_record (
     submit_time DATETIME NULL,
 
     duration_seconds INT NULL,
+    content TEXT NULL,
+    attachment VARCHAR(500) NULL,
+    attachment_name VARCHAR(255) NULL,
+    teacher_comment TEXT NULL,
+    graded_time DATETIME NULL,
 
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

@@ -4,7 +4,6 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 import TeachingAttachmentPreview from '../components/TeachingAttachmentPreview.vue'
-import '../assets/teaching-dialogs.css'
 import { useAuthStore } from '../stores/auth'
 
 
@@ -28,6 +27,12 @@ const removeAttachment = ref(false)
 const attachmentPreview = ref(null)
 const editingQuestionId = ref(null)
 const records = ref([])
+const paperContent = ref('')
+const paperAttachment = ref(null)
+const draftSaving = ref(false)
+const gradingRecord = ref(null)
+const gradeForm = reactive({ score: 0, teacher_comment: '' })
+const recordFinished = computed(() => selectedRecord.value && selectedRecord.value.status !== 'DOING')
 const answers = reactive({})
 const remainingSeconds = ref(null)
 const answerSaveState = ref('')
@@ -35,6 +40,7 @@ const examFormRef = ref(null)
 const currentPage = ref(1)
 const pageSize = 6
 const examForm = reactive({
+  exam_type: 'ONLINE',
   course_id: null,
   title: '',
   description: '',
@@ -101,6 +107,7 @@ function openExamForm(exam = null) {
   existingAttachment.value = exam?.attachment ? exam : null
   removeAttachment.value = false
   Object.assign(examForm, {
+    exam_type: exam?.exam_type || 'ONLINE',
     course_id: exam?.course_id || null,
     title: exam?.title || '',
     description: exam?.description || '',
@@ -113,7 +120,7 @@ function openExamForm(exam = null) {
   createDialog.value = true
 }
 
-async function saveExam() {
+async function saveExam(publishPaper = false) {
   if (saving.value) return
   if (!pendingExam.value) {
     const valid = await examFormRef.value?.validate().catch(() => false)
@@ -121,6 +128,10 @@ async function saveExam() {
   }
   if (examForm.start_time && examForm.end_time && examForm.start_time >= examForm.end_time) {
     ElMessage.warning('结束时间必须晚于开始时间')
+    return
+  }
+  if (examForm.exam_type === 'ATTACHMENT' && !examAttachment.value && (!existingAttachment.value || removeAttachment.value)) {
+    ElMessage.warning('附件试卷需要上传试卷文件')
     return
   }
   saving.value = true
@@ -149,7 +160,12 @@ async function saveExam() {
     }
     const savedExam = pendingExam.value
     createDialog.value = false
-    if (editing) {
+    if (savedExam.exam_type === 'ATTACHMENT') {
+      exams.value = [savedExam, ...exams.value.filter((item) => item.id !== savedExam.id)]
+      currentPage.value = 1
+      ElMessage.success('附件试卷草稿已保存，无需录入在线题目')
+      if (publishPaper === true) await changeStatus(savedExam, 'publish')
+    } else if (editing) {
       const index = exams.value.findIndex((item) => item.id === savedExam.id)
       if (index >= 0) exams.value[index] = savedExam
       ElMessage.success('测验草稿已更新')
@@ -274,9 +290,11 @@ async function openExam(exam) {
     const response = await api.get(`/exams/${exam.id}`)
     selectedExam.value = response.data
     selectedRecord.value = response.data.record
+    paperContent.value = response.data.record?.content || ''
+    paperAttachment.value = null
     Object.keys(answers).forEach((key) => delete answers[key])
     restoreDraftAnswers(selectedRecord.value)
-    if (selectedRecord.value?.status === 'SUBMITTED') {
+    if (recordFinished.value) {
       takeDialog.value = true
       return
     }
@@ -287,8 +305,9 @@ async function openExam(exam) {
     const started = await api.post(`/exams/${exam.id}/start`)
     selectedRecord.value = started.data
     selectedExam.value.record = started.data
+    exams.value = exams.value.map((item) => item.id === selectedExam.value.id ? { ...item, record: started.data } : item)
     restoreDraftAnswers(started.data)
-    if (started.data.status === 'SUBMITTED') {
+    if (started.data.status !== 'DOING') {
       takeDialog.value = true
       await load()
       return
@@ -301,6 +320,11 @@ async function openExam(exam) {
 }
 
 async function submitExam() {
+  if (saving.value || draftSaving.value || recordFinished.value) return
+  if (selectedExam.value?.exam_type === 'ATTACHMENT' && !paperContent.value.trim() && !paperAttachment.value && !selectedRecord.value?.attachment) {
+    ElMessage.warning('请输入答案或上传答卷附件')
+    return
+  }
   try {
     await ElMessageBox.confirm('提交后不能再次修改答案，确认交卷？', '提交测验', { type: 'warning' })
     saving.value = true
@@ -308,11 +332,13 @@ async function submitExam() {
       question_id: question.id,
       answer: answers[question.id] || '',
     }))
-    const response = await api.post(`/exams/${selectedExam.value.id}/submit`, { answers: payload })
+    const response = selectedExam.value.exam_type === 'ATTACHMENT'
+      ? await api.post(`/exams/${selectedExam.value.id}/submission`, paperPayload(), { timeout: 60000 })
+      : await api.post(`/exams/${selectedExam.value.id}/submit`, { answers: payload })
     selectedRecord.value = response.data
     selectedExam.value.record = response.data
     stopCountdown()
-    ElMessage.success(`交卷成功，得分 ${response.data.score}`)
+    ElMessage.success(response.data.exam_type === 'ATTACHMENT' ? '答卷已提交，等待教师批改；提交后不可修改' : `交卷成功，得分 ${response.data.score}`)
     await load()
   } catch (error) {
     if (error !== 'cancel') ElMessage.error(error.message || '测验提交失败')
@@ -333,7 +359,11 @@ function scheduleAnswerSave() {
 }
 
 async function saveDraftAnswers() {
-  if (selectedRecord.value?.status !== 'DOING' || !selectedExam.value || remainingSeconds.value === 0) return false
+  if (draftSaving.value || selectedRecord.value?.status !== 'DOING' || !selectedExam.value || remainingSeconds.value === 0) return false
+  draftSaving.value = true
+  const recordId = selectedRecord.value.id
+  const uploadedFile = paperAttachment.value
+  const savedContent = paperContent.value
   if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
   answerSaveTimer = null
   const payload = Object.entries(answers).map(([questionId, answer]) => ({
@@ -341,14 +371,25 @@ async function saveDraftAnswers() {
   }))
   answerSaveState.value = '保存中…'
   try {
-    const response = await api.put(`/exams/${selectedExam.value.id}/answers`, { answers: payload })
+    const response = selectedExam.value.exam_type === 'ATTACHMENT'
+      ? await api.put(`/exams/${selectedExam.value.id}/submission`, paperPayload(), { timeout: 60000 })
+      : await api.put(`/exams/${selectedExam.value.id}/answers`, { answers: payload })
+    if (selectedRecord.value?.id !== recordId || selectedRecord.value.status !== 'DOING') return false
     selectedRecord.value = { ...selectedRecord.value, ...response.data }
+    selectedExam.value.record = selectedRecord.value
+    exams.value = exams.value.map((item) => item.id === selectedExam.value.id ? { ...item, record: selectedRecord.value } : item)
+    if (uploadedFile === paperAttachment.value) paperAttachment.value = null
     answerSaveState.value = '已自动保存'
     return true
   } catch (error) {
+    if (selectedRecord.value?.id !== recordId || selectedRecord.value.status !== 'DOING') return false
     answerSaveState.value = '保存失败'
     ElMessage.error(error.message || '答案自动保存失败')
     return false
+  } finally {
+    draftSaving.value = false
+    if (selectedExam.value?.exam_type === 'ATTACHMENT' && selectedRecord.value?.id === recordId && selectedRecord.value?.status === 'DOING'
+      && savedContent !== paperContent.value && remainingSeconds.value !== 0) scheduleAnswerSave()
   }
 }
 
@@ -362,11 +403,13 @@ async function autoSubmitExam() {
       question_id: question.id,
       answer: answers[question.id] || '',
     }))
-    const response = await api.post(`/exams/${selectedExam.value.id}/submit`, { answers: payload })
+    const response = selectedExam.value.exam_type === 'ATTACHMENT'
+      ? await api.post(`/exams/${selectedExam.value.id}/submission`, { content: paperContent.value })
+      : await api.post(`/exams/${selectedExam.value.id}/submit`, { answers: payload })
     selectedRecord.value = response.data
     selectedExam.value.record = response.data
     answerSaveState.value = '已自动交卷'
-    ElMessage.warning(`作答时间结束，系统已自动交卷，得分 ${response.data.score}`)
+    ElMessage.warning(response.data.exam_type === 'ATTACHMENT' ? '作答时间结束，已按保存的答卷自动交卷，等待教师批改' : `作答时间结束，系统已自动交卷，得分 ${response.data.score}`)
     await load()
   } catch (error) {
     ElMessage.error(error.message || '自动交卷失败，请重新打开测验确认状态')
@@ -377,6 +420,7 @@ async function autoSubmitExam() {
 
 async function openRecords(exam) {
   selectedExam.value = exam
+  gradingRecord.value = null
   try {
     const response = await api.get(`/exams/${exam.id}/records`)
     records.value = response.data
@@ -434,6 +478,7 @@ function resetExamForm() {
   existingAttachment.value = null
   removeAttachment.value = false
   Object.assign(examForm, {
+    exam_type: 'ONLINE',
     course_id: null,
     title: '',
     description: '',
@@ -459,6 +504,50 @@ function selectExamAttachment(event) {
 function previewAttachment(exam) {
   const suffix = String(exam.attachment || '').split('.').pop()
   attachmentPreview.value?.open(`/exams/${exam.id}/attachment`, exam.attachment_name || `${exam.title} · 测验附件.${suffix}`)
+}
+
+function paperPayload() {
+  const data = new FormData()
+  data.append('content', paperContent.value)
+  if (paperAttachment.value) data.append('attachment', paperAttachment.value)
+  return data
+}
+
+function selectPaperAttachment(event) {
+  const file = event.target.files?.[0]
+  if (file && (file.size === 0 || file.size > 50 * 1024 * 1024)) {
+    ElMessage.warning('请选择非空且不超过 50MB 的答卷附件')
+    event.target.value = ''
+    return
+  }
+  paperAttachment.value = file || null
+  scheduleAnswerSave()
+}
+
+function previewPaperAnswer(record) {
+  attachmentPreview.value?.open(`/exams/records/${record.id}/attachment`, record.attachment_name || '答卷附件')
+}
+
+function openPaperGrade(record) {
+  gradingRecord.value = record
+  gradeForm.score = record.score ?? 0
+  gradeForm.teacher_comment = record.teacher_comment || ''
+}
+
+async function savePaperGrade() {
+  if (!gradingRecord.value || saving.value) return
+  saving.value = true
+  try {
+    const response = await api.put(`/exams/records/${gradingRecord.value.id}/grade`, gradeForm)
+    records.value = records.value.map((record) => record.id === response.data.id ? response.data : record)
+    gradingRecord.value = null
+    ElMessage.success('批改结果已保存，学生答卷已锁定')
+    await load()
+  } catch (error) {
+    ElMessage.error(error.message || '批改失败')
+  } finally {
+    saving.value = false
+  }
 }
 
 function resetQuestionForm() {
@@ -543,7 +632,7 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">在线测验</p>
         <h1>{{ isTeacher ? '测验管理' : '在线测验' }}</h1>
-        <p>{{ isTeacher ? '编排客观题、发布测验并查看学生成绩。' : '完成课程测验，提交后即时查看自动评分结果。' }}</p>
+        <p>{{ isTeacher ? '发布在线题目或附件试卷，查看答卷并批改成绩。' : '在线作答或提交附件答卷，查看测验结果。' }}</p>
       </div>
       <el-button v-if="isTeacher" type="primary" size="large" @click="openExamForm()">
         ＋ 创建测验
@@ -559,7 +648,8 @@ onBeforeUnmount(() => {
         <h2>{{ exam.title }}</h2>
         <p>{{ exam.description || '教师暂未填写测验说明。' }}</p>
         <div class="exam-facts">
-          <span><strong>{{ exam.questions.length }}</strong> 题</span>
+          <span v-if="exam.exam_type === 'ATTACHMENT'">附件试卷 · 教师批改</span>
+          <span v-else><strong>{{ exam.questions.length }}</strong> 题</span>
           <span><strong>{{ exam.total_score }}</strong> 分</span>
           <span><strong>{{ exam.time_limit_minutes || '—' }}</strong> 分钟</span>
         </div>
@@ -568,17 +658,18 @@ onBeforeUnmount(() => {
           <i>→</i>
           <span>{{ formatDate(exam.end_time) }}</span>
         </div>
-        <div v-if="!isTeacher && exam.record?.status === 'SUBMITTED'" class="exam-score-strip">
-          <span>已完成 · {{ exam.record.correct_count }} 题正确</span>
-          <strong>{{ exam.record.score }} / {{ exam.total_score }}</strong>
+        <div v-if="!isTeacher && exam.record && exam.record.status !== 'DOING'" class="exam-score-strip">
+          <span>{{ exam.exam_type === 'ATTACHMENT' ? exam.record.status === 'GRADED' ? '已批改 · 答卷已锁定' : '已交卷 · 待教师批改' : `已完成 · ${exam.record.correct_count} 题正确` }}</span>
+          <strong>{{ exam.record.score === null ? '待批改' : `${exam.record.score} / ${exam.total_score}` }}</strong>
         </div>
         <div class="exam-actions">
           <el-button v-if="exam.attachment" @click="previewAttachment(exam)">测验附件</el-button>
           <template v-if="isTeacher">
             <el-button v-if="exam.status === 'DRAFT'" plain @click="openExamForm(exam)">编辑信息</el-button>
-            <el-button v-if="exam.status === 'DRAFT'" type="primary" @click="openQuestionManager(exam)">
+            <el-button v-if="exam.status === 'DRAFT' && exam.exam_type !== 'ATTACHMENT'" type="primary" @click="openQuestionManager(exam)">
               试题管理
             </el-button>
+            <el-button v-if="exam.status === 'DRAFT' && exam.exam_type === 'ATTACHMENT'" type="primary" @click="changeStatus(exam, 'publish')">发布试卷</el-button>
             <el-button v-if="exam.status === 'DRAFT'" type="danger" plain @click="deleteExam(exam)">
               删除草稿
             </el-button>
@@ -586,7 +677,7 @@ onBeforeUnmount(() => {
               关闭
             </el-button>
             <el-button v-if="exam.status !== 'DRAFT'" @click="openRecords(exam)">
-              成绩（{{ exam.submitted_count }}）
+              {{ exam.exam_type === 'ATTACHMENT' ? '答卷与批改' : '成绩' }}（{{ exam.submitted_count }}）
             </el-button>
           </template>
           <el-button
@@ -595,7 +686,7 @@ onBeforeUnmount(() => {
             :disabled="!exam.record && exam.availability !== 'AVAILABLE'"
             @click="openExam(exam)"
           >
-            {{ exam.record?.status === 'SUBMITTED' ? '查看结果' : exam.record ? '继续作答' : '开始测验' }}
+            {{ exam.record && exam.record.status !== 'DOING' ? '查看结果' : exam.record ? '继续作答' : '开始测验' }}
           </el-button>
           <span v-if="!isTeacher && !exam.record">{{ availabilityLabel(exam.availability) }}</span>
         </div>
@@ -628,6 +719,12 @@ onBeforeUnmount(() => {
     >
       <p v-if="pendingExam" class="dialog-tip">草稿已保存，请重试附件处理，不会重复创建测验。</p>
       <el-form ref="examFormRef" :model="examForm" :rules="examRules" :disabled="Boolean(pendingExam)" label-position="top">
+        <el-form-item label="测验方式">
+          <el-radio-group v-model="examForm.exam_type">
+            <el-radio value="ONLINE">在线试题（自动评分）</el-radio>
+            <el-radio value="ATTACHMENT">附件试卷（教师批改）</el-radio>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="所属课程" prop="course_id">
           <el-select v-model="examForm.course_id" placeholder="请选择课程" style="width: 100%">
             <el-option v-for="course in courses" :key="course.id" :label="course.name" :value="course.id" />
@@ -657,7 +754,7 @@ onBeforeUnmount(() => {
         </div>
       </el-form>
       <div class="teaching-attachment-field">
-        <p>测验附件（可选）</p>
+        <p>{{ examForm.exam_type === 'ATTACHMENT' ? '试卷附件（必选）' : '测验附件（可选）' }}</p>
         <div v-if="existingAttachment && !removeAttachment" class="attachment-existing">
           <el-button @click="previewAttachment(existingAttachment)">查看现有附件</el-button>
           <el-button :disabled="saving" @click="removeAttachment = true; examAttachment = null">移除附件</el-button>
@@ -669,11 +766,13 @@ onBeforeUnmount(() => {
           <strong>{{ examAttachment?.name || '最大 50MB' }}</strong>
         </label>
         <small>支持 PDF、Office 文档、文本、图片和压缩包；PDF、文本及图片可在线预览。发布后附件不可更改。</small>
+        <small v-if="examForm.exam_type === 'ATTACHMENT'">上传文件即为完整试卷，无需录入在线题目；学生提交文字或答卷附件后由教师批改。</small>
       </div>
       <template #footer>
         <el-button :disabled="saving" @click="createDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveExam">
-          {{ pendingExam ? '重试附件处理' : editingExamId ? '保存修改' : '保存并添加试题' }}
+        <el-button v-if="examForm.exam_type === 'ATTACHMENT'" :disabled="saving" @click="saveExam(false)">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" @click="saveExam(examForm.exam_type === 'ATTACHMENT')">
+          {{ pendingExam ? '重试附件处理' : examForm.exam_type === 'ATTACHMENT' ? '保存并发布' : editingExamId ? '保存修改' : '保存并添加试题' }}
         </el-button>
       </template>
     </el-dialog>
@@ -760,11 +859,20 @@ onBeforeUnmount(() => {
       v-model="takeDialog"
       :title="selectedExam?.title"
       width="min(860px, 96vw)"
-      :close-on-click-modal="selectedRecord?.status === 'SUBMITTED'"
+      :close-on-click-modal="Boolean(recordFinished)"
+      :close-on-press-escape="!saving && !draftSaving"
+      :show-close="!saving && !draftSaving"
       @closed="handleTakeClosed"
     >
       <el-button v-if="selectedExam?.attachment" @click="previewAttachment(selectedExam)">查看测验附件</el-button>
-      <div v-if="selectedRecord?.status === 'SUBMITTED'" class="exam-result">
+      <div v-if="recordFinished && selectedExam?.exam_type === 'ATTACHMENT'" class="exam-result">
+        <h3>{{ selectedRecord.status === 'GRADED' ? '教师已批改' : '已交卷，等待教师批改' }}</h3>
+        <p>提交后答卷已锁定，不可修改。得分：{{ selectedRecord.score ?? '待批改' }} / {{ selectedRecord.total_score }}</p>
+        <p class="paper-answer-content">{{ selectedRecord.content || '已通过附件提交答卷' }}</p>
+        <p v-if="selectedRecord.teacher_comment">教师评语：{{ selectedRecord.teacher_comment }}</p>
+        <el-button v-if="selectedRecord.attachment" @click="previewPaperAnswer(selectedRecord)">查看我的答卷附件</el-button>
+      </div>
+      <div v-else-if="recordFinished" class="exam-result">
         <div class="result-score">
           <span>本次得分</span>
           <strong>{{ selectedRecord.score }}</strong>
@@ -781,11 +889,21 @@ onBeforeUnmount(() => {
       </div>
       <div v-else-if="selectedExam" class="exam-paper">
         <div class="exam-paper-bar">
-          <span>共 {{ selectedExam.questions.length }} 题 · 满分 {{ selectedExam.total_score }}</span>
+          <span>{{ selectedExam.exam_type === 'ATTACHMENT' ? '附件试卷 · 教师批改' : `共 ${selectedExam.questions.length} 题` }} · 满分 {{ selectedExam.total_score }}</span>
           <strong v-if="remainingSeconds !== null" :class="{ urgent: remainingSeconds < 300 }">
             剩余 {{ formatDuration(remainingSeconds) }}
           </strong>
           <small v-if="answerSaveState" class="answer-save-state">{{ answerSaveState }}</small>
+        </div>
+        <div v-if="selectedExam.exam_type === 'ATTACHMENT'" class="teaching-attachment-field">
+          <p>请查看教师试卷，填写答案或上传完成的答卷。</p>
+          <el-input v-model="paperContent" type="textarea" :rows="10" maxlength="10000" show-word-limit placeholder="按题号填写答案，或上传答卷附件" @input="scheduleAnswerSave" />
+          <el-button v-if="selectedRecord.attachment" @click="previewPaperAnswer(selectedRecord)">查看已保存答卷附件</el-button>
+          <label class="file-picker compact-file-picker">
+            <input type="file" :disabled="saving || draftSaving" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.jpg,.jpeg,.png" @change="selectPaperAttachment" />
+            <span>选择答卷附件</span><strong>{{ paperAttachment?.name || selectedRecord.attachment_name || '最大 50MB' }}</strong>
+          </label>
+          <small>文字与附件自动保存；暂时离开后可继续，正式交卷后不可修改。</small>
         </div>
         <article v-for="(question, index) in selectedExam.questions" :key="question.id" class="paper-question">
           <h3><span>{{ index + 1 }}</span>{{ question.content }} <small>{{ question.score }} 分</small></h3>
@@ -801,12 +919,12 @@ onBeforeUnmount(() => {
         </article>
       </div>
       <template #footer>
-        <el-button @click="takeDialog = false">{{ selectedRecord?.status === 'SUBMITTED' ? '关闭' : '暂时离开' }}</el-button>
+        <el-button :disabled="saving || draftSaving" @click="takeDialog = false">{{ recordFinished ? '关闭' : '暂时离开' }}</el-button>
         <el-button
-          v-if="selectedRecord?.status !== 'SUBMITTED'"
+          v-if="!recordFinished"
           type="primary"
           :loading="saving"
-          :disabled="remainingSeconds === 0"
+          :disabled="draftSaving || remainingSeconds === 0"
           @click="submitExam"
         >
           提交测验
@@ -818,12 +936,12 @@ onBeforeUnmount(() => {
       <el-table :data="records" max-height="440">
         <el-table-column prop="student_name" label="学生" min-width="130" />
         <el-table-column label="状态" width="100">
-          <template #default="scope">{{ scope.row.status === 'SUBMITTED' ? '已交卷' : '作答中' }}</template>
+          <template #default="scope">{{ scope.row.status === 'GRADED' ? '已批改' : scope.row.status === 'SUBMITTED' ? '已交卷' : '作答中' }}</template>
         </el-table-column>
         <el-table-column label="成绩" width="120">
-          <template #default="scope">{{ scope.row.status === 'SUBMITTED' ? `${scope.row.score} / ${scope.row.total_score}` : '—' }}</template>
+          <template #default="scope">{{ scope.row.score === null ? '待批改' : scope.row.status !== 'DOING' ? `${scope.row.score} / ${scope.row.total_score}` : '—' }}</template>
         </el-table-column>
-        <el-table-column label="正确/错误" width="120">
+        <el-table-column v-if="selectedExam?.exam_type !== 'ATTACHMENT'" label="正确/错误" width="120">
           <template #default="scope">{{ scope.row.correct_count }} / {{ scope.row.wrong_count }}</template>
         </el-table-column>
         <el-table-column label="用时" width="100">
@@ -832,8 +950,23 @@ onBeforeUnmount(() => {
         <el-table-column label="提交时间" width="150">
           <template #default="scope">{{ formatDate(scope.row.submit_time) }}</template>
         </el-table-column>
+        <el-table-column v-if="selectedExam?.exam_type === 'ATTACHMENT'" label="操作" width="170">
+          <template #default="scope">
+            <el-button v-if="scope.row.attachment" link @click="previewPaperAnswer(scope.row)">答卷附件</el-button>
+            <el-button v-if="scope.row.status !== 'DOING'" link type="primary" @click="openPaperGrade(scope.row)">批改</el-button>
+          </template>
+        </el-table-column>
         <template #empty><el-empty description="还没有学生开始测验" :image-size="64" /></template>
       </el-table>
+      <div v-if="gradingRecord" class="grade-panel">
+        <div><strong>正在批改：{{ gradingRecord.student_name }}</strong><span>满分 {{ selectedExam.total_score }}</span></div>
+        <p class="paper-answer-content">{{ gradingRecord.content || '学生通过附件提交答卷' }}</p>
+        <div class="grade-form-row">
+          <el-input-number v-model="gradeForm.score" :min="0" :max="selectedExam.total_score" :precision="2" />
+          <el-input v-model="gradeForm.teacher_comment" maxlength="10000" placeholder="填写教师评语（可选）" />
+          <el-button type="primary" :loading="saving" @click="savePaperGrade">保存批改</el-button>
+        </div>
+      </div>
     </el-dialog>
     <TeachingAttachmentPreview ref="attachmentPreview" />
   </section>

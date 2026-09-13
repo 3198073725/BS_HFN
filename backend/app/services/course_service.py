@@ -9,6 +9,7 @@ from app.extensions import db
 from app.models import Chapter, Course, CourseCategory, Exam, Homework, Video
 from .file_service import (
     clear_homework_files,
+    clear_exam_files,
     remove_all_video_files,
     remove_media_file,
     save_course_cover,
@@ -123,6 +124,7 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
     exam_attachments = db.session.scalars(
         db.select(Exam.attachment).where(Exam.course_id == course.id, Exam.attachment.is_not(None))
     ).all()
+    exam_ids = db.session.scalars(db.select(Exam.id).where(Exam.course_id == course.id)).all()
     cover_file = course.cover
     db.session.delete(course)
     db.session.commit()
@@ -133,6 +135,11 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
             remove_media_file(Path(current_app.config["MEDIA_ROOT"]), attachment)
         except (OSError, ValueError):
             current_app.logger.exception("测验附件清理失败")
+    for exam_id in exam_ids:
+        try:
+            clear_exam_files(Path(current_app.config["MEDIA_ROOT"]), exam_id)
+        except (OSError, ValueError):
+            current_app.logger.exception("测验答卷目录清理失败")
     _cleanup_course_cover(cover_file)
 
 

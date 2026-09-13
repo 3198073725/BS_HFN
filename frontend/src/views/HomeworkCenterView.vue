@@ -168,6 +168,10 @@ async function deleteHomework(homework) {
 }
 
 function openSubmission(homework) {
+  if (homework.submission?.status === 'GRADED') {
+    ElMessage.warning('作业已批改，不能再修改内容或附件')
+    return
+  }
   selectedHomework.value = homework
   submissionForm.content = homework.submission?.content || ''
   submissionAttachment.value = null
@@ -176,6 +180,7 @@ function openSubmission(homework) {
 }
 
 async function submitHomework() {
+  if (saving.value || selectedHomework.value?.submission?.status === 'GRADED') return
   const content = submissionForm.content.trim()
   if (!content && !submissionAttachment.value) {
     ElMessage.warning('请输入作业内容或选择附件')
@@ -481,10 +486,10 @@ onBeforeUnmount(clearPreview)
           <el-button
             v-else
             type="primary"
-            :disabled="homework.status !== 'PUBLISHED' || deadlineTone(homework) === 'overdue'"
+            :disabled="homework.submission?.status === 'GRADED' || homework.status !== 'PUBLISHED' || deadlineTone(homework) === 'overdue'"
             @click="openSubmission(homework)"
           >
-            {{ homework.submission ? '修改提交' : '提交作业' }}
+            {{ homework.submission?.status === 'GRADED' ? '已批改 · 不可修改' : homework.submission ? '修改提交' : '提交作业' }}
           </el-button>
         </div>
       </article>

@@ -11,8 +11,8 @@ from app.constants import CourseStatus, PublishStatus, UserRole
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Course, CourseStudent, Exam, ExamAnswer, ExamQuestion, ExamRecord
-from app.services.notification_service import queue_course_notifications
-from app.services.file_service import remove_media_file, save_homework_attachment
+from app.services.notification_service import queue_course_notifications, queue_notification
+from app.services.file_service import clear_exam_files, remove_media_file, save_homework_attachment
 
 
 class ExamNotFound(ValueError):
@@ -102,6 +102,8 @@ def create_exam(teacher_id: int, data: dict) -> dict:
 def update_exam(exam_id: int, teacher_id: int, data: dict) -> dict:
     exam = _teacher_exam(exam_id, teacher_id)
     _require_draft(exam)
+    if data.get("exam_type", exam.exam_type) == "ATTACHMENT" and exam.questions:
+        raise ExamConflict("请先删除在线试题，再切换为附件试卷")
     if "course_id" in data:
         course = _teacher_course(data["course_id"], teacher_id)
         if course.status == CourseStatus.OFFLINE.value:
@@ -120,11 +122,17 @@ def delete_draft_exam(exam_id: int, teacher_id: int) -> None:
     db.session.delete(exam)
     db.session.commit()
     _remove_exam_attachment(attachment)
+    try:
+        clear_exam_files(Path(current_app.config["MEDIA_ROOT"]), exam_id)
+    except (OSError, ValueError):
+        current_app.logger.exception("测验附件目录清理失败")
 
 
 def add_question(exam_id: int, teacher_id: int, data: dict) -> dict:
     exam = _teacher_exam(exam_id, teacher_id)
     _require_draft(exam)
+    if exam.exam_type == "ATTACHMENT":
+        raise ExamConflict("附件试卷无需添加在线试题")
     question = ExamQuestion(exam_id=exam.id, **data)
     db.session.add(question)
     db.session.commit()
@@ -160,13 +168,16 @@ def change_exam_status(exam_id: int, teacher_id: int, status: PublishStatus) -> 
         _validate_time_window(exam)
         if exam.end_time and exam.end_time <= _now():
             raise ExamConflict("结束时间已过，不能发布测验")
-        if not exam.questions:
-            raise ExamConflict("请至少添加一道试题")
-        question_total = sum((item.score for item in exam.questions), Decimal("0"))
-        if question_total != exam.total_score:
-            raise ExamConflict(
-                f"试题分值合计为{float(question_total):g}，应与测验总分{float(exam.total_score):g}一致"
-            )
+        if exam.exam_type == "ATTACHMENT":
+            get_exam_attachment(exam.id, teacher_id, UserRole.TEACHER.value)
+        else:
+            if not exam.questions:
+                raise ExamConflict("请至少添加一道试题，或选择附件试卷并上传试卷")
+            question_total = sum((item.score for item in exam.questions), Decimal("0"))
+            if question_total != exam.total_score:
+                raise ExamConflict(
+                    f"试题分值合计为{float(question_total):g}，应与测验总分{float(exam.total_score):g}一致"
+                )
         exam.published_at = _now()
         queue_course_notifications(
             exam.course_id,
@@ -239,7 +250,7 @@ def start_exam(exam_id: int, student_id: int) -> dict:
     _ensure_student_access(exam, student_id)
     existing = _student_record(exam.id, student_id)
     if existing is not None:
-        if existing.status == "SUBMITTED":
+        if existing.status in {"SUBMITTED", "GRADED"}:
             raise ExamConflict("该测验已经正式提交，不能重复作答")
         if _record_expired(existing):
             _finalize_record(existing, _saved_answers(existing), submitted_at=_record_deadline(existing))
@@ -265,6 +276,8 @@ def start_exam(exam_id: int, student_id: int) -> dict:
 
 def save_exam_answers(exam_id: int, student_id: int, submitted_answers: dict[int, str]) -> dict:
     exam = _get_exam(exam_id)
+    if exam.exam_type == "ATTACHMENT":
+        raise ExamConflict("附件试卷请使用答卷提交入口")
     _ensure_student_access(exam, student_id)
     if exam.status != PublishStatus.PUBLISHED.value:
         raise ExamConflict("测验已关闭，不能保存答案")
@@ -283,6 +296,8 @@ def save_exam_answers(exam_id: int, student_id: int, submitted_answers: dict[int
 
 def submit_exam(exam_id: int, student_id: int, submitted_answers: dict[int, str]) -> dict:
     exam = _get_exam(exam_id)
+    if exam.exam_type == "ATTACHMENT":
+        raise ExamConflict("附件试卷请使用答卷提交入口")
     _ensure_student_access(exam, student_id)
     record = _student_record(exam.id, student_id, for_update=True)
     if record is None:
@@ -309,6 +324,90 @@ def submit_exam(exam_id: int, student_id: int, submitted_answers: dict[int, str]
         db.session.rollback()
         raise ExamConflict("测验已经提交或提交发生冲突") from exc
     return serialize_record(_get_record(record.id), include_answers=True)
+
+
+def save_paper_submission(exam_id: int, student_id: int, content: str, file=None, *, finalize=False) -> dict:
+    exam = _get_exam(exam_id)
+    _ensure_student_access(exam, student_id)
+    if exam.exam_type != "ATTACHMENT":
+        raise ExamConflict("在线测验请使用在线答题入口")
+    record = _student_record(exam_id, student_id, for_update=True)
+    if record is None:
+        raise ExamConflict("请先开始测验")
+    if record.status != "DOING":
+        raise ExamConflict("答卷已提交或批改，不能再修改")
+    if _record_expired(record):
+        _finalize_record(record, {}, submitted_at=_record_deadline(record))
+        db.session.commit()
+        if finalize:
+            return serialize_record(record, include_answers=False)
+        raise ExamConflict("作答时间已结束，已按保存的答卷自动交卷")
+    _ensure_can_take(exam, student_id)
+    content = content.strip()
+    if len(content) > 10000:
+        raise ExamAttachmentError("答卷内容不能超过10000位")
+    if finalize and not content and file is None and not record.attachment:
+        raise ExamAttachmentError("请输入答案或上传答卷附件")
+    target = None
+    previous = record.attachment
+    if file is not None:
+        root = Path(current_app.config["MEDIA_ROOT"])
+        try:
+            target = save_homework_attachment(file, root / "exams" / str(exam.id) / "submissions" / str(student_id),
+                                              current_app.config["EXAM_ATTACHMENT_MAX_LENGTH"])
+        except ValueError as exc:
+            raise ExamAttachmentError(str(exc)) from exc
+        record.attachment = target.relative_to(root).as_posix()
+        record.attachment_name = Path(str(file.filename).replace("\\", "/")).name.strip()
+    record.content = content or None
+    if finalize:
+        _finalize_record(record, {})
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        if target:
+            target.unlink(missing_ok=True)
+        raise
+    if target:
+        _remove_exam_attachment(previous)
+    return serialize_record(record, include_answers=False)
+
+
+def grade_paper_submission(record_id: int, teacher_id: int, score: Decimal, comment: str) -> dict:
+    record = db.session.scalar(_record_query().where(ExamRecord.id == record_id)
+                               .with_for_update().execution_options(populate_existing=True))
+    if record is None:
+        raise ExamNotFound("答卷不存在")
+    if record.exam.teacher_id != teacher_id:
+        raise ExamPermissionDenied("不能批改其他教师的测验")
+    if record.exam.exam_type != "ATTACHMENT" or record.status not in {"SUBMITTED", "GRADED"}:
+        raise ExamConflict("只能批改已提交的附件试卷")
+    if not score.is_finite() or score < 0 or score > record.exam.total_score:
+        raise ExamAttachmentError("得分必须在零分与测验满分之间")
+    if len(comment) > 10000:
+        raise ExamAttachmentError("评语不能超过10000位")
+    record.score = score.quantize(Decimal("0.01"))
+    record.teacher_comment = comment.strip() or None
+    record.graded_time = _now()
+    record.status = "GRADED"
+    queue_notification(record.student_id, f"测验已批改：{record.exam.title}",
+                       f"得分 {float(record.score):g}/{float(record.exam.total_score):g}。", category="EXAM",
+                       sender_id=teacher_id, link="/exams")
+    db.session.commit()
+    return serialize_record(record, include_answers=False)
+
+
+def get_paper_submission_attachment(record_id: int, user_id: int, role: str) -> tuple[Path, str]:
+    record = _get_record(record_id)
+    if not ((role == UserRole.TEACHER.value and record.exam.teacher_id == user_id)
+            or (role == UserRole.STUDENT.value and record.student_id == user_id)):
+        raise ExamPermissionDenied("无权查看该答卷附件")
+    root = Path(current_app.config["MEDIA_ROOT"]).resolve()
+    target = (root / (record.attachment or "")).resolve()
+    if not record.attachment or target == root or not target.is_relative_to(root) or not target.is_file():
+        raise ExamNotFound("答卷附件不存在")
+    return target, record.attachment_name or target.name
 
 
 def _validate_submitted_questions(exam: Exam, submitted_answers: dict[int, str]) -> None:
@@ -348,6 +447,12 @@ def _finalize_record(
     *,
     submitted_at=None,
 ) -> None:
+    if record.exam.exam_type == "ATTACHMENT":
+        now = submitted_at or _now()
+        record.status = "SUBMITTED"
+        record.submit_time = now
+        record.duration_seconds = max(0, int((now - record.started_at).total_seconds()))
+        return
     _validate_submitted_questions(record.exam, submitted_answers)
     by_question = _store_answers(record, submitted_answers, grade=True)
 
@@ -413,6 +518,7 @@ def serialize_exam(
         "description": exam.description,
         "attachment": exam.attachment,
         "attachment_name": exam.attachment_name,
+        "exam_type": exam.exam_type,
         "total_score": float(exam.total_score),
         "status": exam.status,
         "start_time": _iso(exam.start_time),
@@ -434,7 +540,7 @@ def serialize_exam(
         )
     if include_record_count:
         payload["record_count"] = len(exam.records)
-        payload["submitted_count"] = sum(item.status == "SUBMITTED" for item in exam.records)
+        payload["submitted_count"] = sum(item.status in {"SUBMITTED", "GRADED"} for item in exam.records)
     return payload
 
 
@@ -469,7 +575,13 @@ def serialize_record(record: ExamRecord, include_answers: bool) -> dict:
         "exam_title": record.exam.title if record.exam else None,
         "student_id": record.student_id,
         "student_name": record.student.real_name if record.student else None,
-        "score": float(record.score),
+        "score": None if record.exam.exam_type == "ATTACHMENT" and record.status != "GRADED" else float(record.score),
+        "exam_type": record.exam.exam_type,
+        "content": record.content,
+        "attachment": record.attachment,
+        "attachment_name": record.attachment_name,
+        "teacher_comment": record.teacher_comment,
+        "graded_time": _iso(record.graded_time),
         "total_score": float(record.exam.total_score) if record.exam else None,
         "correct_count": record.correct_count,
         "wrong_count": record.wrong_count,
@@ -484,7 +596,7 @@ def serialize_record(record: ExamRecord, include_answers: bool) -> dict:
             for item in record.answers
         ]
         payload["deadline"] = _iso(_record_deadline(record))
-    if include_answers:
+    if include_answers and record.exam.exam_type != "ATTACHMENT":
         by_question = {item.question_id: item for item in record.answers}
         payload["answers"] = []
         for question in sorted(record.exam.questions, key=lambda item: (item.sort_order, item.id)):
@@ -552,7 +664,7 @@ def _student_record(
         ExamRecord.student_id == student_id,
     )
     if for_update:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return db.session.scalar(statement)
 
 

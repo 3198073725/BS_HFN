@@ -385,3 +385,75 @@ def test_private_teaching_attachments_cannot_use_development_media(app, client):
         target.write_text("private", encoding="utf-8")
         assert client.get(f"/media/{folder}/private.txt").status_code == 404
         assert client.get(f"/media/avatars/../{folder}/private.txt").status_code == 404
+
+
+def test_attachment_paper_can_publish_without_questions_and_teacher_grades(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    outsider = login(client, context["other_student"])
+    other_teacher = login(client, context["other_teacher"])
+    exam = create_exam(client, teacher, context["course_id"], exam_type="ATTACHMENT")
+    base = f"/api/exams/{exam['id']}"
+    assert client.post(base + "/publish", headers=bearer(teacher)).status_code >= 400
+    assert client.post(base + "/attachment", headers=bearer(teacher),
+                       data={"attachment": (BytesIO(b"reference paper"), "paper.txt")}).status_code == 200
+    assert client.post(base + "/publish", headers=bearer(teacher)).status_code == 200
+    assert client.get(base, headers=bearer(student)).get_json()["data"]["questions"] == []
+    assert client.post(base + "/start", headers=bearer(outsider)).status_code == 403
+    started = client.post(base + "/start", headers=bearer(student)).get_json()["data"]
+    assert client.put(base + "/answers", headers=bearer(student), json={"answers": []}).status_code == 409
+    assert client.post(base + "/submit", headers=bearer(student), json={"answers": []}).status_code == 409
+    assert client.post(base + "/submission", headers=bearer(student), json={"content": ""}).status_code == 400
+    saved = client.put(base + "/submission", headers=bearer(student),
+                       data={"content": "第1题：答案", "attachment": (BytesIO(b"student answers"), "answer.txt")})
+    assert saved.status_code == 200
+    record = saved.get_json()["data"]
+    assert record["status"] == "DOING" and record["attachment_name"] == "answer.txt"
+    endpoint = f"/api/exams/records/{started['id']}"
+    assert client.get(endpoint + "/attachment", headers=bearer(outsider)).status_code == 403
+    assert client.get(endpoint + "/attachment", headers=bearer(other_teacher)).status_code == 403
+    response = client.get(endpoint + "/attachment", headers=bearer(teacher))
+    assert response.data == b"student answers"
+    response.close()
+    assert client.put(endpoint + "/grade", headers=bearer(teacher), json={"score": 85}).status_code == 409
+    submitted = client.post(base + "/submission", headers=bearer(student), json={"content": "第1题：最终答案"})
+    assert submitted.get_json()["data"]["score"] is None
+    assert submitted.get_json()["data"]["status"] == "SUBMITTED"
+    stats = client.get("/api/statistics", headers=bearer(student)).get_json()["data"]
+    assert stats["completed_exams"] == 1 and stats["average_exam_percent"] == 0
+    assert client.put(endpoint + "/grade", headers=bearer(other_teacher), json={"score": 85}).status_code == 403
+    assert client.put(endpoint + "/grade", headers=bearer(teacher), json={"score": "NaN"}).status_code == 400
+    assert client.put(endpoint + "/grade", headers=bearer(teacher), json={"score": 101}).status_code == 400
+    graded = client.put(endpoint + "/grade", headers=bearer(teacher), json={"score": 85, "teacher_comment": "答题完整"})
+    assert graded.status_code == 200 and graded.get_json()["data"]["status"] == "GRADED"
+    for method in (client.put, client.post):
+        assert method(base + "/submission", headers=bearer(student),
+                      data={"content": "篡改", "attachment": (BytesIO(b"changed"), "changed.txt")}).status_code == 409
+    assert client.post(base + "/start", headers=bearer(student)).status_code == 409
+    unchanged = client.get(base, headers=bearer(student)).get_json()["data"]["record"]
+    assert unchanged["content"] == "第1题：最终答案"
+    assert unchanged["score"] == 85 and unchanged["teacher_comment"] == "答题完整"
+    stats = client.get("/api/statistics", headers=bearer(student)).get_json()["data"]
+    assert stats["completed_exams"] == 1 and stats["average_exam_percent"] == 85
+    assert client.get("/api/exams/manage", headers=bearer(teacher)).get_json()["data"][0]["submitted_count"] == 1
+
+
+def test_attachment_paper_expiry_only_submits_saved_content(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    exam = create_exam(client, teacher, context["course_id"], exam_type="ATTACHMENT", time_limit_minutes=1)
+    base = f"/api/exams/{exam['id']}"
+    client.post(base + "/attachment", headers=bearer(teacher), data={"attachment": (BytesIO(b"paper"), "paper.txt")})
+    client.post(base + "/publish", headers=bearer(teacher))
+    record = client.post(base + "/start", headers=bearer(student)).get_json()["data"]
+    assert client.put(base + "/submission", headers=bearer(student), json={"content": "saved answer"}).status_code == 200
+    with app.app_context():
+        db.session.get(ExamRecord, record["id"]).started_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=2)
+        db.session.commit()
+    result = client.post(base + "/submission", headers=bearer(student),
+                         data={"content": "late answer", "attachment": (BytesIO(b"late"), "late.txt")}).get_json()["data"]
+    assert result["status"] == "SUBMITTED" and result["content"] == "saved answer"
+    assert result["attachment"] is None and result["score"] is None
+    assert result["duration_seconds"] == 60

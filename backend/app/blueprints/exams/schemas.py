@@ -9,6 +9,11 @@ class ValidationError(ValueError):
 
 def validate_exam(payload: dict, partial: bool = False) -> dict:
     data = {}
+    if not partial or "exam_type" in payload:
+        exam_type = str(payload.get("exam_type", "ONLINE")).upper()
+        if exam_type not in {"ONLINE", "ATTACHMENT"}:
+            raise ValidationError("测验方式必须为在线答题或附件试卷")
+        data["exam_type"] = exam_type
     if not partial or "course_id" in payload:
         data["course_id"] = _positive_int(payload.get("course_id"), "课程")
     if not partial or "title" in payload:

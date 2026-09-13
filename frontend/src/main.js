@@ -40,6 +40,7 @@ import router from './router'
 import { useAuthStore } from './stores/auth'
 import './assets/main.css'
 import './assets/learning.css'
+import './assets/teaching-dialogs.css'
 
 
 const app = createApp(App)

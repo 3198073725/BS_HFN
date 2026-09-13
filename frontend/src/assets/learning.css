@@ -879,8 +879,8 @@
   color: var(--ink-900);
 }
 
-.grade-panel span,
-.grade-panel p {
+.grade-panel > div:first-child > span,
+.grade-panel > p {
   color: var(--ink-600);
   font-size: 10px;
 }
@@ -3452,8 +3452,8 @@
 .submission-result p,
 .homework-attachment,
 .submission-result a,
-.grade-panel span,
-.grade-panel p,
+.grade-panel > div:first-child > span,
+.grade-panel > p,
 .exam-card-top > span,
 .exam-facts span,
 .exam-window,

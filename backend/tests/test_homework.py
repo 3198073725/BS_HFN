@@ -63,7 +63,7 @@ def create_context(app):
         }
 
 
-def test_homework_publish_submit_grade_and_resubmit(app, client):
+def test_homework_publish_submit_grade_and_lock_submission(app, client):
     context = create_context(app)
     teacher = login(client, context["teacher"])
     other_teacher = login(client, context["other_teacher"])
@@ -231,9 +231,14 @@ def test_homework_publish_submit_grade_and_resubmit(app, client):
         headers=bearer(student),
         json={"content": "根据评语再次提交"},
     )
-    assert resubmitted.get_json()["data"]["status"] == "SUBMITTED"
-    assert resubmitted.get_json()["data"]["score"] is None
-    assert resubmitted.get_json()["data"]["teacher_comment"] is None
+    assert resubmitted.status_code == 409
+    replaced = client.post(f"/api/homeworks/{homework_id}/submission/attachment", headers=bearer(student),
+                          data={"attachment": (BytesIO(b"changed"), "changed.txt")})
+    assert replaced.status_code == 409
+    unchanged = client.get(f"/api/homeworks/{homework_id}", headers=bearer(student)).get_json()["data"]["submission"]
+    assert unchanged["status"] == "GRADED"
+    assert unchanged["score"] == 92.5
+    assert unchanged["teacher_comment"] == "结构清晰，继续保持。"
 
     closed = client.post(f"/api/homeworks/{homework_id}/close", headers=bearer(teacher))
     assert closed.status_code == 200

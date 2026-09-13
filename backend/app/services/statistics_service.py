@@ -95,7 +95,7 @@ def get_teacher_class_statistics(class_id: int, teacher_id: int) -> dict:
             "average_exam_percent": _weighted_average(
                 course_rows,
                 "average_exam_percent",
-                lambda item: item["exam_submission_count"],
+                lambda item: item["scored_exam_count"],
             ),
             "ready_video_count": ready_video_count,
             "homework_count": homework_count,
@@ -141,11 +141,11 @@ def _student_overview(student_id: int) -> dict:
     exam = db.session.execute(
         db.select(
             func.count(ExamRecord.id),
-            func.avg(ExamRecord.score * 100.0 / Exam.total_score),
+            func.avg(_exam_score_percent()),
         )
         .select_from(ExamRecord)
         .join(Exam, Exam.id == ExamRecord.exam_id)
-        .where(ExamRecord.student_id == student_id, ExamRecord.status == "SUBMITTED")
+        .where(ExamRecord.student_id == student_id, ExamRecord.status.in_(("SUBMITTED", "GRADED")))
     ).one()
     return {
         "role": UserRole.STUDENT.value,
@@ -206,7 +206,7 @@ def _teacher_overview(teacher_id: int) -> dict:
         db.select(func.count(ExamRecord.id))
         .select_from(ExamRecord)
         .join(Exam, Exam.id == ExamRecord.exam_id)
-        .where(Exam.teacher_id == teacher_id, ExamRecord.status == "SUBMITTED")
+        .where(Exam.teacher_id == teacher_id, ExamRecord.status.in_(("SUBMITTED", "GRADED")))
     )
     return {
         "role": UserRole.TEACHER.value,
@@ -250,7 +250,7 @@ def _admin_overview() -> dict:
         "learning_records": _count(db.select(func.count(LearningRecord.id))),
         "homework_submissions": _count(db.select(func.count(HomeworkSubmission.id))),
         "exam_records": _count(
-            db.select(func.count(ExamRecord.id)).where(ExamRecord.status == "SUBMITTED")
+            db.select(func.count(ExamRecord.id)).where(ExamRecord.status.in_(("SUBMITTED", "GRADED")))
         ),
     }
 
@@ -292,10 +292,10 @@ def _course_statistics(course: Course) -> dict:
         .where(Homework.course_id == course.id)
     ).one()
     exam = db.session.execute(
-        db.select(func.count(ExamRecord.id), func.avg(ExamRecord.score * 100.0 / Exam.total_score))
+        db.select(func.count(ExamRecord.id), func.avg(_exam_score_percent()))
         .select_from(ExamRecord)
         .join(Exam, Exam.id == ExamRecord.exam_id)
-        .where(Exam.course_id == course.id, ExamRecord.status == "SUBMITTED")
+        .where(Exam.course_id == course.id, ExamRecord.status.in_(("SUBMITTED", "GRADED")))
     ).one()
     return {
         "course_id": course.id,
@@ -369,14 +369,15 @@ def _class_course_statistics(course: Course, student_ids, member_count: int) -> 
     exam = db.session.execute(
         db.select(
             func.count(ExamRecord.id),
-            func.avg(ExamRecord.score * 100.0 / Exam.total_score),
+            func.avg(_exam_score_percent()),
+            func.count(_exam_score_percent()),
         )
         .select_from(ExamRecord)
         .join(Exam, Exam.id == ExamRecord.exam_id)
         .where(
             ExamRecord.student_id.in_(student_ids),
             ExamRecord.exam_id.in_(visible_exam_ids),
-            ExamRecord.status == "SUBMITTED",
+            ExamRecord.status.in_(("SUBMITTED", "GRADED")),
         )
     ).one()
 
@@ -401,7 +402,16 @@ def _class_course_statistics(course: Course, student_ids, member_count: int) -> 
         "exam_submission_count": int(exam[0] or 0),
         "exam_completion_rate": _percentage(int(exam[0] or 0), member_count * exam_count),
         "average_exam_percent": _round(exam[1]),
+        "scored_exam_count": int(exam[2] or 0),
     }
+
+
+def _exam_score_percent():
+    return db.case(
+        (Exam.exam_type == "ONLINE", ExamRecord.score * 100.0 / Exam.total_score),
+        (ExamRecord.status == "GRADED", ExamRecord.score * 100.0 / Exam.total_score),
+        else_=None,
+    )
 
 
 def _percentage(numerator: int, denominator: int) -> float:

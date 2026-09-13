@@ -166,10 +166,13 @@ def submit_homework(homework_id: int, student_id: int, content: str) -> dict:
             HomeworkSubmission.homework_id == homework.id,
             HomeworkSubmission.student_id == student_id,
         )
+        .with_for_update().execution_options(populate_existing=True)
     )
     if submission is None:
         submission = HomeworkSubmission(homework_id=homework.id, student_id=student_id)
         db.session.add(submission)
+    elif submission.status == "GRADED":
+        raise HomeworkConflict("作业已批改，不能再修改内容或附件")
     submission.content = content
     _mark_submitted(submission)
     try:
@@ -209,11 +212,14 @@ def attach_submission_file(homework_id: int, student_id: int, file) -> dict:
             HomeworkSubmission.homework_id == homework.id,
             HomeworkSubmission.student_id == student_id,
         )
+        .with_for_update().execution_options(populate_existing=True)
     )
     if submission is None:
         submission = HomeworkSubmission(homework_id=homework.id, student_id=student_id)
         db.session.add(submission)
         db.session.flush()
+    elif submission.status == "GRADED":
+        raise HomeworkConflict("作业已批改，不能再修改内容或附件")
     relative_path, absolute_path = _save_attachment(file, homework.id, str(student_id))
     previous = submission.attachment
     submission.attachment = relative_path
@@ -247,6 +253,7 @@ def grade_submission(submission_id: int, teacher_id: int, score: float, comment:
             joinedload(HomeworkSubmission.homework),
         )
         .where(HomeworkSubmission.id == submission_id)
+        .with_for_update().execution_options(populate_existing=True)
     )
     if submission is None:
         raise HomeworkNotFound("作业提交不存在")

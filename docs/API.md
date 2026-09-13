@@ -161,7 +161,7 @@ Authorization: Bearer <access_token>
 | GET | `/api/homeworks/{id}/submissions` | 课程教师 | 学生提交列表 |
 | PUT | `/api/homeworks/submissions/{id}/grade` | 课程教师 | 保存得分和评语 |
 
-作业状态为 `DRAFT/PUBLISHED/CLOSED`。同一学生同一作业只保留一条最终提交；重新提交会将状态恢复为 `SUBMITTED` 并清除旧成绩。附件使用 `multipart/form-data` 的 `attachment` 字段，支持常用文档、压缩包和图片格式，最大 50 MB。
+作业状态为 `DRAFT/PUBLISHED/CLOSED`。同一学生同一作业只保留一条提交记录；未批改且作业仍开放时允许更新，教师批改为 `GRADED` 后内容与附件均锁定，更新接口返回409并保留成绩和评语，不需要教师先关闭整个作业。附件使用 `multipart/form-data` 的 `attachment` 字段，支持常用文档、压缩包和图片格式，最大 50 MB。
 
 ## 在线测验
 
@@ -186,10 +186,16 @@ Authorization: Bearer <access_token>
 | POST | `/api/exams/{id}/submit` | 课程学生 | 正式交卷并自动评分 |
 | GET | `/api/exams/{id}/records` | 课程教师 | 查看成绩记录 |
 | GET | `/api/exams/records/{id}` | 本人/课程教师 | 测验结果和逐题明细 |
+| PUT | `/api/exams/{id}/submission` | 课程学生 | 保存附件试卷答卷草稿，支持文字及附件 |
+| POST | `/api/exams/{id}/submission` | 课程学生 | 正式提交附件试卷答卷，提交后锁定 |
+| PUT | `/api/exams/records/{id}/grade` | 课程教师 | 批改已交卷的附件试卷，保存score和teacher_comment |
+| GET | `/api/exams/records/{id}/attachment` | 本人/课程教师 | 鉴权预览答卷附件，download=1强制下载 |
 
 第一版题型为 `SINGLE` 和 `JUDGE`，答案分别使用 `A/B/C/D` 与 `TRUE/FALSE`。保存和交卷体均为 `{"answers": [{"question_id": 1, "answer": "A"}]}`。每名学生每个测验只能正式提交一次；未交卷时响应不会包含 `correct_answer`。页面在选择答案后防抖保存，并在倒计时结束时自动交卷；若浏览器没有及时发出超时请求，后端在下一次查询或继续答题时会使用截止前已保存的答案完成交卷，不接受截止后的新答案。
 
 测验支持一份教师附件，详情返回 `attachment` 相对路径及 `attachment_name` 原文件名。默认最大 50MB（`EXAM_ATTACHMENT_MAX_LENGTH`），格式与作业附件一致；教师仅能上传、替换或移除本人的草稿附件，发布后锁定。已加入有效课程的学生可读取已发布或已关闭测验附件，未加入课程、草稿或下线课程不可读取。PDF、文本和图片支持浏览器预览，Office 文档和压缩包提供下载。附件不由匿名 `/media` 路径提供，替换、移除及删除草稿时清理旧文件。
+
+`exam_type` 为 `ONLINE`（默认，在线试题自动评分）或 `ATTACHMENT`（附件试卷教师批改）。附件试卷只需有效试卷附件即可发布，无需录入在线题目或校验题目分值合计；已存在在线题目的草稿需先删除题目才能切换。附件答卷接口接受JSON的content或multipart的content及attachment，文字最多10000位，附件最大50MB。学生先start再保存/交卷；状态为DOING → SUBMITTED（待批改，响应score为null）→ GRADED（已评分），交卷后不能再修改文字或附件。超时仅按截止前已保存答卷交卷，晚到的文字和文件被忽略。待批改记录计入提交数但不作为零分计入成绩平均值；批改后计入统计并通知学生。
 
 ## 站内消息
 

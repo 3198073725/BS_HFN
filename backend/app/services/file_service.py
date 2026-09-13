@@ -177,6 +177,10 @@ def clear_homework_files(media_root: Path, homework_id: int) -> None:
     _remove_tree_within(media_root / "homework" / str(homework_id), media_root)
 
 
+def clear_exam_files(media_root: Path, exam_id: int) -> None:
+    _remove_tree_within(media_root / "exams" / str(exam_id), media_root)
+
+
 def _valid_image_signature(suffix: str, header: bytes) -> bool:
     if suffix in {".jpg", ".jpeg"}:
         return header.startswith(b"\xff\xd8\xff")
