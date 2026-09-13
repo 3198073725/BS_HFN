@@ -506,10 +506,11 @@ function auditActionLabel(action) {
     CATEGORY_CREATE: '创建分类', CATEGORY_UPDATE: '编辑分类',
     CATEGORY_STATUS_CHANGE: '分类状态', NOTICE_CREATE: '创建公告',
     NOTICE_UPDATE: '编辑公告', NOTICE_STATUS_CHANGE: '公告状态', NOTICE_DELETE: '删除公告',
+    DEMO_SEED: '准备演示数据',
   }[action] || action
 }
 function auditResourceLabel(resource) {
-  return { USER: '用户', VIDEO: '视频', COURSE: '课程', CLASS: '班级', CATEGORY: '分类', NOTICE: '公告' }[resource] || resource
+  return { USER: '用户', VIDEO: '视频', COURSE: '课程', CLASS: '班级', CATEGORY: '分类', NOTICE: '公告', SYSTEM: '系统' }[resource] || resource
 }
 
 function formatDate(value) {

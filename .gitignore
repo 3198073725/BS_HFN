@@ -27,6 +27,11 @@ backend/media/videos/hls/*
 backend/media/videos/covers/*
 backend/media/homework/*
 !backend/media/**/.gitkeep
+backend/media/defense_assets/
+backend/backups/
+backend/demo-data-report.json
+output/
+tmp/
 
 # Editors / OS
 .idea/
