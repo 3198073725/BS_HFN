@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router'
 import api from '../api/client'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import { useAuthStore } from '../stores/auth'
+import { appendProgress, flushProgress, readProgressQueue as readStoredProgressQueue } from '../utils/progressQueue'
 
 
 const route = useRoute()
@@ -286,48 +287,22 @@ function progressQueueKey() {
 }
 
 function readProgressQueue() {
-  try {
-    const value = JSON.parse(localStorage.getItem(progressQueueKey()) || '[]')
-    return Array.isArray(value) ? value : []
-  } catch {
-    return []
-  }
-}
-
-function writeProgressQueue(items) {
-  const limited = items.slice(-200)
-  localStorage.setItem(progressQueueKey(), JSON.stringify(limited))
-  queuedProgressCount.value = limited.length
+  return readStoredProgressQueue(localStorage, progressQueueKey())
 }
 
 function queueProgress(payload) {
-  writeProgressQueue([...readProgressQueue(), { ...payload, queued_at: Date.now() }])
+  queuedProgressCount.value = appendProgress(localStorage, progressQueueKey(), payload)
 }
 
 async function flushProgressQueue() {
   if (!isStudent.value || !navigator.onLine) return
-  const queued = readProgressQueue()
-  if (!queued.length) {
-    queuedProgressCount.value = 0
-    return
-  }
-  const remaining = [...queued]
-  let sent = 0
-  while (remaining.length) {
-    const item = remaining[0]
-    try {
-      await api.put(`/learning/videos/${item.video_id}/progress`, {
+  const key = progressQueueKey()
+  const sent = await flushProgress(localStorage, key, (item) =>
+    api.put(`/learning/videos/${item.video_id}/progress`, {
         current_time: item.current_time,
         watch_duration_delta: item.watch_duration_delta,
-      })
-      remaining.shift()
-      sent += 1
-    } catch (error) {
-      if (!isConnectionError(error)) remaining.shift()
-      break
-    }
-  }
-  writeProgressQueue(remaining)
+    }), isConnectionError)
+  queuedProgressCount.value = readProgressQueue().length
   if (sent) ElMessage.success(`已补传 ${sent} 条离线学习进度`)
 }
 

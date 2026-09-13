@@ -272,7 +272,7 @@ async function changeStatus(exam, action) {
   const publishing = action === 'publish'
   try {
     await ElMessageBox.confirm(
-      publishing ? '发布后不能再修改题目和附件，确认发布？' : '关闭后学生不能再开始或提交，确认关闭？',
+      publishing ? '发布后不能再修改题目和附件，确认发布？' : '关闭后不能继续作答，已开始的测验将按保存的答卷交卷，确认关闭？',
       publishing ? '发布测验' : '关闭测验',
       { type: publishing ? 'info' : 'warning' },
     )
@@ -319,6 +319,25 @@ async function openExam(exam) {
   }
 }
 
+async function refreshFinishedRecord() {
+  const examId = selectedExam.value?.id
+  const recordId = selectedRecord.value?.id
+  if (!examId || !recordId) return false
+  try {
+    const response = await api.get(`/exams/${examId}`)
+    const record = response.data.record
+    if (selectedExam.value?.id !== examId || selectedRecord.value?.id !== recordId
+      || !record || record.status === 'DOING') return false
+    selectedRecord.value = record
+    selectedExam.value = response.data
+    stopCountdown()
+    answerSaveState.value = '已交卷'
+    exams.value = exams.value.map((item) => item.id === examId ? response.data : item)
+    ElMessage.warning('测验已结束，已显示保存答卷的交卷结果')
+    return true
+  } catch { return false }
+}
+
 async function submitExam() {
   if (saving.value || draftSaving.value || recordFinished.value) return
   if (selectedExam.value?.exam_type === 'ATTACHMENT' && !paperContent.value.trim() && !paperAttachment.value && !selectedRecord.value?.attachment) {
@@ -341,6 +360,7 @@ async function submitExam() {
     ElMessage.success(response.data.exam_type === 'ATTACHMENT' ? '答卷已提交，等待教师批改；提交后不可修改' : `交卷成功，得分 ${response.data.score}`)
     await load()
   } catch (error) {
+    if (error.code === 409 && await refreshFinishedRecord()) return
     if (error !== 'cancel') ElMessage.error(error.message || '测验提交失败')
   } finally {
     saving.value = false
@@ -364,6 +384,7 @@ async function saveDraftAnswers() {
   const recordId = selectedRecord.value.id
   const uploadedFile = paperAttachment.value
   const savedContent = paperContent.value
+  const savedAnswers = JSON.stringify(answers)
   if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
   answerSaveTimer = null
   const payload = Object.entries(answers).map(([questionId, answer]) => ({
@@ -379,17 +400,20 @@ async function saveDraftAnswers() {
     selectedExam.value.record = selectedRecord.value
     exams.value = exams.value.map((item) => item.id === selectedExam.value.id ? { ...item, record: selectedRecord.value } : item)
     if (uploadedFile === paperAttachment.value) paperAttachment.value = null
-    answerSaveState.value = '已自动保存'
+    answerSaveState.value = savedAnswers === JSON.stringify(answers) && savedContent === paperContent.value
+      ? '已自动保存' : '等待保存'
     return true
   } catch (error) {
     if (selectedRecord.value?.id !== recordId || selectedRecord.value.status !== 'DOING') return false
+    if (error.code === 409 && await refreshFinishedRecord()) return false
     answerSaveState.value = '保存失败'
     ElMessage.error(error.message || '答案自动保存失败')
     return false
   } finally {
     draftSaving.value = false
-    if (selectedExam.value?.exam_type === 'ATTACHMENT' && selectedRecord.value?.id === recordId && selectedRecord.value?.status === 'DOING'
-      && savedContent !== paperContent.value && remainingSeconds.value !== 0) scheduleAnswerSave()
+    if (selectedRecord.value?.id === recordId && selectedRecord.value?.status === 'DOING'
+      && (savedContent !== paperContent.value || savedAnswers !== JSON.stringify(answers))
+      && remainingSeconds.value !== 0) scheduleAnswerSave()
   }
 }
 
@@ -412,6 +436,7 @@ async function autoSubmitExam() {
     ElMessage.warning(response.data.exam_type === 'ATTACHMENT' ? '作答时间结束，已按保存的答卷自动交卷，等待教师批改' : `作答时间结束，系统已自动交卷，得分 ${response.data.score}`)
     await load()
   } catch (error) {
+    if (error.code === 409 && await refreshFinishedRecord()) return
     ElMessage.error(error.message || '自动交卷失败，请重新打开测验确认状态')
   } finally {
     saving.value = false

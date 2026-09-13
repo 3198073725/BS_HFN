@@ -16,6 +16,7 @@ const errorMessage = ref('')
 const profile = ref(null)
 const fileInput = ref(null)
 const localAvatarUrl = ref('')
+let profileRequestSequence = 0
 const form = reactive({ real_name: '', email: '', phone: '', bio: '' })
 const isOwnProfile = computed(() => route.name === 'my-profile')
 const roleLabel = computed(() => ({ ADMIN: '系统管理员', TEACHER: '授课教师', STUDENT: '学生' })[profile.value?.role] || '平台用户')
@@ -31,18 +32,23 @@ function fillForm(user) {
 }
 
 async function loadProfile() {
+  const requestId = ++profileRequestSequence
+  const ownProfile = isOwnProfile.value
   loading.value = true
+  profile.value = null
   errorMessage.value = ''
   clearLocalAvatar()
   try {
-    const response = await api.get(isOwnProfile.value ? '/users/me' : `/users/${route.params.id}`)
+    const response = await api.get(ownProfile ? '/users/me' : `/users/${route.params.id}`)
+    if (requestId !== profileRequestSequence) return
     profile.value = response.data
-    if (isOwnProfile.value) fillForm(profile.value)
+    if (ownProfile) fillForm(profile.value)
   } catch (error) {
+    if (requestId !== profileRequestSequence) return
     profile.value = null
     errorMessage.value = error.message || '个人主页加载失败'
   } finally {
-    loading.value = false
+    if (requestId === profileRequestSequence) loading.value = false
   }
 }
 
@@ -128,7 +134,7 @@ function clearLocalAvatar() {
 
 watch(() => route.fullPath, loadProfile)
 onMounted(loadProfile)
-onBeforeUnmount(clearLocalAvatar)
+onBeforeUnmount(() => { profileRequestSequence += 1; clearLocalAvatar() })
 </script>
 
 <template>

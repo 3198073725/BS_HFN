@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import hashlib
+import hmac
 
 from flask import current_app
 from flask_jwt_extended import decode_token
@@ -13,6 +15,12 @@ class TokenStoreUnavailable(RuntimeError):
 
 class InvalidCompanionToken(ValueError):
     pass
+
+
+def credential_signature(password_hash: str) -> str:
+    """Bind every session to current credentials without exposing the hash."""
+    secret = str(current_app.config["JWT_SECRET_KEY"]).encode()
+    return hmac.new(secret, password_hash.encode(), hashlib.sha256).hexdigest()
 
 
 def decode_owned_token(encoded_token: str, expected_subject: str | int) -> dict:

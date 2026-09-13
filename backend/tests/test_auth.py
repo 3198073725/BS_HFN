@@ -210,6 +210,7 @@ def test_role_permissions_and_admin_user_creation(app, client):
 def test_password_recovery_and_admin_password_reset_are_verified(app, client):
     registered = client.post("/api/auth/register", json=STUDENT)
     assert registered.status_code == 201
+    original_session = registered.get_json()["data"]
 
     with app.app_context():
         student = db.session.scalar(db.select(User).where(User.username == STUDENT["username"]))
@@ -289,6 +290,8 @@ def test_password_recovery_and_admin_password_reset_are_verified(app, client):
     )
     assert approved.status_code == 200
     assert approved.get_json()["data"]["status"] == "APPROVED"
+    assert client.get("/api/users/me", headers=bearer(original_session["access_token"])).status_code == 401
+    assert client.post("/api/auth/refresh", headers=bearer(original_session["refresh_token"])).status_code == 401
     assert client.post(
         "/api/auth/login",
         json={"account": STUDENT["username"], "password": "NewStudy123!"},
@@ -324,12 +327,17 @@ def test_password_recovery_and_admin_password_reset_are_verified(app, client):
     ).status_code == 409
     with app.app_context():
         student_id = db.session.scalar(db.select(User.id).where(User.username == STUDENT["username"]))
+    before_admin_reset = client.post("/api/auth/login", json={
+        "account": STUDENT["username"], "password": "NewStudy123!",
+    }).get_json()["data"]
     reset = client.put(
         f"/api/admin/users/{student_id}/password",
         headers=bearer(admin_token),
         json={"new_password": "AdminReset123!"},
     )
     assert reset.status_code == 200
+    assert client.get("/api/users/me", headers=bearer(before_admin_reset["access_token"])).status_code == 401
+    assert client.post("/api/auth/refresh", headers=bearer(before_admin_reset["refresh_token"])).status_code == 401
     assert client.post(
         "/api/auth/login",
         json={"account": STUDENT["username"], "password": "AdminReset123!"},
@@ -354,3 +362,41 @@ def test_student_password_reset_requires_a_current_class_teacher(app, client):
     )
     assert response.status_code == 409
     assert response.get_json()["message"] == "账号尚未加入班级，请联系管理员重置密码"
+
+
+def test_teacher_recovery_requires_admin_and_invalidates_old_sessions(app, client):
+    with app.app_context():
+        teacher = User(username="secure_teacher", real_name="教师", role="TEACHER",
+                       teacher_no="SEC001", email="secure@example.com", phone="13800000000",
+                       password_hash=generate_password_hash("Teacher123!"))
+        admin = User(username="secure_admin", real_name="管理员", role="ADMIN",
+                     password_hash=generate_password_hash("Admin123!"))
+        db.session.add_all([teacher, admin]); db.session.commit()
+        teacher_id = teacher.id
+    old = client.post("/api/auth/login", json={"account": "secure_teacher", "password": "Teacher123!"}).get_json()["data"]
+    for verification in ("SEC001", "secure@example.com", "13800000000"):
+        response = client.post("/api/auth/reset-password", json={
+            "username": "secure_teacher", "verification": verification, "new_password": "NewTeacher123!",
+        })
+        assert response.status_code == 400
+        assert "联系管理员" in response.get_json()["message"]
+    assert client.get("/api/users/me", headers=bearer(old["access_token"])).status_code == 200
+    admin_token = client.post("/api/auth/login", json={"account": "secure_admin", "password": "Admin123!"}).get_json()["data"]["access_token"]
+    assert client.put(f"/api/admin/users/{teacher_id}/password", headers=bearer(admin_token),
+                      json={"new_password": "NewTeacher123!"}).status_code == 200
+    assert client.get("/api/users/me", headers=bearer(old["access_token"])).status_code == 401
+    assert client.post("/api/auth/refresh", headers=bearer(old["refresh_token"])).status_code == 401
+    new = client.post("/api/auth/login", json={"account": "secure_teacher", "password": "NewTeacher123!"}).get_json()["data"]
+    assert client.get("/api/users/me", headers=bearer(new["access_token"])).status_code == 200
+    assert client.post("/api/auth/refresh", headers=bearer(new["refresh_token"])).status_code == 200
+
+
+def test_legacy_tokens_without_credential_binding_require_login(app, client):
+    from flask_jwt_extended import create_access_token, create_refresh_token
+    registered = client.post("/api/auth/register", json=STUDENT).get_json()["data"]
+    with app.app_context():
+        identity = str(registered["user"]["id"])
+        access = create_access_token(identity=identity)
+        refresh = create_refresh_token(identity=identity)
+    assert client.get("/api/users/me", headers=bearer(access)).status_code == 401
+    assert client.post("/api/auth/refresh", headers=bearer(refresh)).status_code == 401

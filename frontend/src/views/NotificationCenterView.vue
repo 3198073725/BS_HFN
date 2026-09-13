@@ -1,6 +1,6 @@
 <script setup>
 import { ElMessage } from 'element-plus'
-import { onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
@@ -12,21 +12,25 @@ const notifications = ref([])
 const unreadOnly = ref(false)
 const paging = reactive({ page: 1, page_size: 12, total: 0 })
 const unreadCount = ref(0)
+let requestSequence = 0
 
 async function load() {
+  const requestId = ++requestSequence
   loading.value = true
   try {
     const response = await api.get('/notifications', {
       params: { page: paging.page, page_size: paging.page_size, unread_only: unreadOnly.value },
     })
+    if (requestId !== requestSequence) return
     notifications.value = response.data.items
     Object.assign(paging, response.data.pagination)
     unreadCount.value = response.data.unread_count
     window.dispatchEvent(new CustomEvent('bs-hfn:notification-count', { detail: unreadCount.value }))
   } catch (error) {
+    if (requestId !== requestSequence) return
     ElMessage.error(error.message || '通知加载失败')
   } finally {
-    loading.value = false
+    if (requestId === requestSequence) loading.value = false
   }
 }
 
@@ -78,6 +82,7 @@ function categoryLabel(value) {
 }
 
 onMounted(load)
+onBeforeUnmount(() => { requestSequence += 1 })
 </script>
 
 <template>

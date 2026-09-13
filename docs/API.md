@@ -27,7 +27,7 @@ Authorization: Bearer <access_token>
 | GET | `/api/health` | 公开 | 健康检查 |
 | POST | `/api/auth/register` | 公开 | 注册学生账号 |
 | POST | `/api/auth/login` | 公开 | 用户名、邮箱、学号或工号登录 |
-| POST | `/api/auth/reset-password` | 公开 | 使用用户名与已登记邮箱、学号、工号或手机号核验；学生生成待教师审批申请，教师账号直接重置 |
+| POST | `/api/auth/reset-password` | 公开 | 学生使用用户名与登记信息发起待教师审批申请；教师须联系管理员核验并代重置，公开入口不能直接修改教师密码 |
 | POST | `/api/auth/refresh` | Refresh Token | 轮换 Token 对；旧 Refresh Token 立即失效 |
 | POST | `/api/auth/logout` | 任意 JWT | 注销当前及请求体中属于同一用户的 Token |
 | GET | `/api/users/me` | 登录用户 | 当前用户资料 |
@@ -41,6 +41,8 @@ Authorization: Bearer <access_token>
 | PUT | `/api/admin/users/{id}/password` | 管理员 | 为其他账号设置新密码并记录审计日志；不能重置当前登录账号 |
 
 注册核心字段：`username`、`password`、`real_name`，可选 `email`、`phone`、`student_no`。登录字段为 `account`、`password`。退出时可在 JSON 中附带 `access_token`、`refresh_token`，后端会校验归属后统一注销。
+
+Access/Refresh Token 均绑定当前密码的服务端HMAC签名版本，不返回密码哈希；教师批准学生重置、管理员代重置或其他密码变更生效后，所有旧Token立即返回401，旧Refresh Token不能恢复登录。学生仅发起申请、教师拒绝申请时不撤销原会话。本次更新前未绑定凭据的旧Token同样要求重新登录，无数据库迁移或业务数据重置。
 
 ## 班级与课程安排
 
@@ -180,7 +182,7 @@ Authorization: Bearer <access_token>
 | PUT | `/api/exams/questions/{id}` | 课程教师 | 更新草稿试题 |
 | DELETE | `/api/exams/questions/{id}` | 课程教师 | 删除草稿试题 |
 | POST | `/api/exams/{id}/publish` | 课程教师 | 校验题目总分并发布 |
-| POST | `/api/exams/{id}/close` | 课程教师 | 关闭测验 |
+| POST | `/api/exams/{id}/close` | 课程教师 | 关闭测验，并按已保存答卷结算所有作答中记录；不接纳未保存答案 |
 | POST | `/api/exams/{id}/start` | 课程学生 | 开始或继续未提交测验，并返回已保存答案 |
 | PUT | `/api/exams/{id}/answers` | 课程学生 | 保存未交卷测验的答案草稿 |
 | POST | `/api/exams/{id}/submit` | 课程学生 | 正式交卷并自动评分 |

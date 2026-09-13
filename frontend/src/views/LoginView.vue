@@ -144,7 +144,7 @@ async function resetPassword() {
     </section>
 
     <el-dialog v-model="resetDialog" title="找回密码" width="min(520px, 94vw)" :close-on-click-modal="!resetting">
-      <p class="dialog-tip">学生提交后需由所属班级教师同意，新密码才会生效；教师核验身份后可直接重置。管理员账号请由另一位管理员在系统后台处理。</p>
+      <p class="dialog-tip">学生提交后需由所属班级教师同意，新密码才会生效；教师请联系管理员核验身份后代重置。管理员账号请由另一位管理员在系统后台处理。重置生效后需要重新登录。</p>
       <el-form label-position="top" @submit.prevent="resetPassword">
         <el-form-item label="用户名" required>
           <el-input v-model.trim="resetForm.username" maxlength="50" autocomplete="username" placeholder="请输入用户名" />

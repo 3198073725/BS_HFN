@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
+import pytest
 
 from werkzeug.security import generate_password_hash
 
@@ -75,6 +76,66 @@ def create_exam(client, token, course_id, total_score=100, **extra):
     response = client.post("/api/exams", headers=bearer(token), json=payload)
     assert response.status_code == 201
     return response.get_json()["data"]
+
+
+@pytest.mark.parametrize("exam_type", ["ONLINE", "ATTACHMENT"])
+def test_closing_unlimited_exam_finalizes_saved_records(app, client, exam_type):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    exam = create_exam(client, teacher, context["course_id"], exam_type=exam_type, time_limit_minutes=None)
+    exam_id = exam["id"]
+    if exam_type == "ONLINE":
+        question = client.post(f"/api/exams/{exam_id}/questions", headers=bearer(teacher), json={
+            "question_type": "JUDGE", "content": "判断题", "correct_answer": "TRUE", "score": 100,
+        }).get_json()["data"]
+    else:
+        assert client.post(f"/api/exams/{exam_id}/attachment", headers=bearer(teacher),
+                           data={"attachment": (BytesIO(b"paper"), "paper.txt")}).status_code == 200
+    assert client.post(f"/api/exams/{exam_id}/publish", headers=bearer(teacher)).status_code == 200
+    record = client.post(f"/api/exams/{exam_id}/start", headers=bearer(student)).get_json()["data"]
+    if exam_type == "ONLINE":
+        assert client.put(f"/api/exams/{exam_id}/answers", headers=bearer(student), json={
+            "answers": [{"question_id": question["id"], "answer": "TRUE"}],
+        }).status_code == 200
+    else:
+        assert client.put(f"/api/exams/{exam_id}/submission", headers=bearer(student),
+                          json={"content": "已保存答案"}).status_code == 200
+    closed = client.post(f"/api/exams/{exam_id}/close", headers=bearer(teacher))
+    assert closed.status_code == 200
+    assert closed.get_json()["data"]["submitted_count"] == 1
+    result = client.get(f"/api/exams/records/{record['id']}", headers=bearer(student)).get_json()["data"]
+    assert result["status"] == "SUBMITTED"
+    assert result["submit_time"] and result["duration_seconds"] >= 0
+    assert result["score"] == (100 if exam_type == "ONLINE" else None)
+    if exam_type == "ATTACHMENT":
+        assert result["content"] == "已保存答案"
+        assert client.put(f"/api/exams/records/{record['id']}/grade", headers=bearer(teacher),
+                          json={"score": 90}).status_code == 200
+    assert client.post(f"/api/exams/{exam_id}/start", headers=bearer(student)).status_code == 409
+
+
+def test_unauthorized_record_read_has_no_finalization_side_effect(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    other_student = login(client, context["other_student"])
+    other_teacher = login(client, context["other_teacher"])
+    exam = create_exam(client, teacher, context["course_id"])
+    exam_id = exam["id"]
+    client.post(f"/api/exams/{exam_id}/questions", headers=bearer(teacher), json={
+        "question_type": "JUDGE", "content": "判断题", "correct_answer": "TRUE", "score": 100,
+    })
+    client.post(f"/api/exams/{exam_id}/publish", headers=bearer(teacher))
+    record_id = client.post(f"/api/exams/{exam_id}/start", headers=bearer(student)).get_json()["data"]["id"]
+    with app.app_context():
+        db.session.get(ExamRecord, record_id).started_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+        db.session.commit()
+    for token in (other_student, other_teacher):
+        assert client.get(f"/api/exams/records/{record_id}", headers=bearer(token)).status_code == 403
+        with app.app_context():
+            assert db.session.get(ExamRecord, record_id).status == "DOING"
+    assert client.get(f"/api/exams/records/{record_id}", headers=bearer(student)).get_json()["data"]["status"] == "SUBMITTED"
 
 
 def test_exam_question_publish_take_and_auto_score(app, client):

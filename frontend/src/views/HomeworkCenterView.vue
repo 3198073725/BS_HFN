@@ -31,7 +31,8 @@ const homeworkFormRef = ref(null)
 const pendingHomeworkId = ref(null)
 const editingHomeworkId = ref(null)
 const existingTeacherAttachment = ref(null)
-const submissionContentSaved = ref(false)
+const submissionContentSaved = ref(null)
+let previewRequestSequence = 0
 const homeworkForm = reactive({
   course_id: null,
   title: '',
@@ -175,7 +176,7 @@ function openSubmission(homework) {
   selectedHomework.value = homework
   submissionForm.content = homework.submission?.content || ''
   submissionAttachment.value = null
-  submissionContentSaved.value = false
+  submissionContentSaved.value = null
   submissionDialog.value = true
 }
 
@@ -189,10 +190,10 @@ async function submitHomework() {
   saving.value = true
   try {
     let submission = selectedHomework.value.submission
-    if (content && !submissionContentSaved.value) {
+    if (content && content !== submissionContentSaved.value) {
       const response = await api.put(`/homeworks/${selectedHomework.value.id}/submission`, { content })
       submission = response.data
-      submissionContentSaved.value = true
+      submissionContentSaved.value = content
       updateSelectedSubmission(submission)
     }
     if (submissionAttachment.value) {
@@ -282,7 +283,7 @@ function resetHomeworkForm() {
 }
 
 function resetSubmissionDialog() {
-  submissionContentSaved.value = false
+  submissionContentSaved.value = null
   submissionAttachment.value = null
 }
 
@@ -334,9 +335,10 @@ function selectSubmissionAttachment(event) {
 }
 
 async function openAttachment(homework, submission = null) {
+  clearPreview()
+  const requestId = previewRequestSequence
   previewLoading.value = true
   previewDialog.value = true
-  clearPreview()
   const storedPath = String(submission?.attachment || homework.attachment || '')
   const suffix = storedPath.split('.').pop()?.toLowerCase()
   const label = submission ? `${submission.student_name || '学生'}的提交附件` : `${homework.title} · 教师附件`
@@ -346,6 +348,7 @@ async function openAttachment(homework, submission = null) {
     : `/homeworks/${homework.id}/attachment`
   try {
     const blob = await api.get(endpoint, { responseType: 'blob', timeout: 30000 })
+    if (requestId !== previewRequestSequence || !previewDialog.value) return
     previewUrl.value = URL.createObjectURL(blob)
     const type = String(blob.type || '').toLowerCase()
     previewKind.value = type.startsWith('image/') || ['png', 'jpg', 'jpeg'].includes(suffix)
@@ -354,10 +357,11 @@ async function openAttachment(homework, submission = null) {
         ? 'document'
         : 'unsupported'
   } catch (error) {
+    if (requestId !== previewRequestSequence || !previewDialog.value) return
     previewDialog.value = false
     ElMessage.error(error.message || '附件加载失败')
   } finally {
-    previewLoading.value = false
+    if (requestId === previewRequestSequence) previewLoading.value = false
   }
 }
 
@@ -370,6 +374,8 @@ function downloadPreview() {
 }
 
 function clearPreview() {
+  previewRequestSequence += 1
+  previewLoading.value = false
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
   previewKind.value = 'unsupported'
@@ -591,7 +597,7 @@ onBeforeUnmount(clearPreview)
       :show-close="!saving"
       @closed="resetSubmissionDialog"
     >
-      <p class="dialog-tip">支持重复提交；重新提交后，已有成绩和评语会等待教师再次确认。</p>
+      <p class="dialog-tip">在作业开放且未截止、未批改时可以修改提交；教师批改后，内容和附件均不可再修改。</p>
       <el-input
         v-model="submissionForm.content"
         type="textarea"
@@ -647,7 +653,7 @@ onBeforeUnmount(clearPreview)
         </div>
       </div>
     </el-dialog>
-    <el-dialog v-model="previewDialog" :title="previewName" width="min(920px, 96vw)" @closed="clearPreview">
+    <el-dialog v-model="previewDialog" :title="previewName" width="min(920px, 96vw)" @close="clearPreview">
       <div v-loading="previewLoading" class="attachment-preview">
         <img v-if="previewUrl && previewKind === 'image'" :src="previewUrl" :alt="previewName" />
         <iframe v-else-if="previewUrl && previewKind === 'document'" :src="previewUrl" :title="previewName"></iframe>

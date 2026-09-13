@@ -7,6 +7,7 @@ from app.constants import UserRole
 from app.datetime_utils import utc_now
 from app.extensions import db
 from app.models import User
+from app.services.token_service import credential_signature
 from app.services.password_reset_service import (
     PasswordResetRequestConflict,
     cancel_pending_password_resets,
@@ -80,7 +81,7 @@ def authenticate(account: str, password: str) -> User:
 
 def issue_token_pair(user: User) -> dict:
     identity = str(user.id)
-    claims = {"role": user.role}
+    claims = {"role": user.role, "credentials": credential_signature(user.password_hash)}
     return {
         "access_token": create_access_token(identity=identity, additional_claims=claims),
         "refresh_token": create_refresh_token(identity=identity, additional_claims=claims),
@@ -104,6 +105,8 @@ def reset_password(username: str, verification: str, new_password: str) -> str:
         raise AuthenticationError("管理员账号不能通过公开入口重置密码")
     if not user.status:
         raise AuthenticationError("账号已被禁用，请联系管理员")
+    if user.role == UserRole.TEACHER.value:
+        raise AuthenticationError("教师账号请联系管理员核验身份后重置密码")
     if check_password_hash(user.password_hash, new_password):
         raise ConflictError("新密码不能与当前密码相同")
     if user.role == UserRole.STUDENT.value:
@@ -112,9 +115,7 @@ def reset_password(username: str, verification: str, new_password: str) -> str:
         except PasswordResetRequestConflict as exc:
             raise ConflictError(str(exc)) from exc
         return "PENDING"
-    user.password_hash = generate_password_hash(new_password)
-    db.session.commit()
-    return "COMPLETED"
+    raise AuthenticationError("该账号不能通过公开入口重置密码")
 
 
 def set_user_password(user_id: int, new_password: str, reviewer_id: int | None = None) -> User:

@@ -34,6 +34,9 @@ def init_celery(app: Flask) -> Celery:
 
 def init_jwt_callbacks(app: Flask) -> None:
     from redis import Redis, RedisError
+    import hmac
+    from app.models import User
+    from app.services.token_service import credential_signature
 
     redis_client = Redis.from_url(app.config["REDIS_URL"], decode_responses=True)
     app.extensions["redis"] = redis_client
@@ -41,6 +44,14 @@ def init_jwt_callbacks(app: Flask) -> None:
 
     @jwt.token_in_blocklist_loader
     def is_token_revoked(_header, payload):
+        try:
+            user = db.session.get(User, int(payload["sub"]))
+        except (KeyError, TypeError, ValueError):
+            return True
+        signature = payload.get("credentials")
+        if (user is None or not user.status or not isinstance(signature, str)
+                or not hmac.compare_digest(signature, credential_signature(user.password_hash))):
+            return True
         jti = payload["jti"]
         if app.config["TESTING"]:
             return jti in app.extensions["testing_jwt_blocklist"]

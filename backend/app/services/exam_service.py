@@ -190,6 +190,14 @@ def change_exam_status(exam_id: int, teacher_id: int, status: PublishStatus) -> 
     elif status is PublishStatus.CLOSED:
         if exam.status != PublishStatus.PUBLISHED.value:
             raise ExamConflict("只有已发布测验可以关闭")
+        closed_at = _now()
+        records = db.session.scalars(_record_query().where(
+            ExamRecord.exam_id == exam.id, ExamRecord.status == "DOING"
+        ).with_for_update().execution_options(populate_existing=True)).unique().all()
+        for record in records:
+            deadline = _record_deadline(record)
+            _finalize_record(record, _saved_answers(record),
+                             submitted_at=min(closed_at, deadline) if deadline else closed_at)
     exam.status = status.value
     db.session.commit()
     return serialize_exam(exam, reveal_answers=True, include_record_count=True)
@@ -492,6 +500,9 @@ def list_exam_records(exam_id: int, teacher_id: int) -> list[dict]:
 
 def get_visible_record(record_id: int, user_id: int, role: str) -> dict:
     record = _get_record(record_id)
+    if not ((role == UserRole.TEACHER.value and record.exam.teacher_id == user_id)
+            or (role == UserRole.STUDENT.value and record.student_id == user_id)):
+        raise ExamPermissionDenied("无权查看该测验记录")
     if record.status == "DOING" and _record_expired(record):
         _finalize_record(record, _saved_answers(record), submitted_at=_record_deadline(record))
         db.session.commit()
@@ -719,6 +730,9 @@ def _ensure_record_time(record: ExamRecord) -> None:
 
 def _record_deadline(record: ExamRecord):
     deadline = record.exam.end_time
+    if record.exam.status == PublishStatus.CLOSED.value:
+        closed_at = record.exam.updated_at or _now()
+        deadline = min(deadline, closed_at) if deadline else closed_at
     if record.exam.time_limit_minutes and record.started_at:
         limit = record.started_at + timedelta(minutes=record.exam.time_limit_minutes)
         deadline = min(deadline, limit) if deadline else limit
