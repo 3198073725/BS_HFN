@@ -955,7 +955,46 @@ test('作业附件上传失败时重试不会重复创建草稿', async ({ page 
 })
 
 
-test('学生提交测验后教师可以查看自动评分结果', async ({ page }) => {
+test('测验附件上传失败可以重试且不重复创建草稿', async ({ page }) => {
+  await login(page, 'e2e_teacher')
+  await page.getByRole('link', { name: '测验管理', exact: true }).click()
+  let createRequests = 0
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/exams') && request.method() === 'POST') createRequests += 1
+  })
+  const attachmentRoute = /\/api\/exams\/\d+\/attachment$/
+  await page.route(attachmentRoute, (route) => route.fulfill({
+    status: 503, contentType: 'application/json',
+    body: JSON.stringify({ code: 503, message: '附件服务暂不可用', data: null }),
+  }))
+  await page.getByRole('button', { name: '＋ 创建测验' }).click()
+  const dialog = page.getByRole('dialog', { name: '创建测验草稿' })
+  await dialog.getByText('请选择课程', { exact: true }).click()
+  await page.getByRole('option', { name: '端测基础课程', exact: true }).click()
+  await dialog.getByPlaceholder('例如：第一章基础测验').fill('测验附件失败重试')
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'reference.txt', mimeType: 'text/plain', buffer: Buffer.from('reference'),
+  })
+  await dialog.getByRole('button', { name: '保存并添加试题', exact: true }).click()
+  await expect(page.getByText(/测验草稿已保存，但附件处理失败/)).toBeVisible()
+  await expect(dialog.getByPlaceholder('例如：第一章基础测验')).toBeDisabled()
+  expect(createRequests).toBe(1)
+  await page.unroute(attachmentRoute)
+  await dialog.getByRole('button', { name: '重试附件处理', exact: true }).click()
+  const manager = page.getByRole('dialog', { name: '测验附件失败重试 · 试题管理' })
+  await expect(manager).toBeVisible()
+  expect(createRequests).toBe(1)
+  await manager.getByRole('button', { name: '稍后继续', exact: true }).click()
+  const card = page.locator('.exam-card').filter({ hasText: '测验附件失败重试' })
+  await card.getByRole('button', { name: '编辑信息', exact: true }).click()
+  const editDialog = page.getByRole('dialog', { name: '编辑测验草稿' })
+  await expect(editDialog.getByRole('button', { name: '查看现有附件', exact: true })).toBeVisible()
+  await editDialog.getByRole('button', { name: '移除附件', exact: true }).click()
+  await editDialog.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(card.getByRole('button', { name: '测验附件', exact: true })).toHaveCount(0)
+})
+
+test('学生提交测验后教师可以查看自动评分结果', async ({ page }, testInfo) => {
   const examTitle = '端到端测验'
   await login(page, 'e2e_teacher')
   await page.getByRole('link', { name: '测验管理', exact: true }).click()
@@ -966,10 +1005,44 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   await page.getByRole('option', { name: '端测基础课程', exact: true }).click()
   await createDialog.getByPlaceholder('例如：第一章基础测验').fill(examTitle)
   await createDialog.getByPlaceholder('填写作答要求…').fill('请选择正确答案。')
+  await createDialog.locator('input[type="file"]').setInputFiles({
+    name: '测验参考资料.txt', mimeType: 'text/plain', buffer: Buffer.from('Exam attachment reference'),
+  })
   await createDialog.getByRole('button', { name: '保存并添加试题', exact: true }).click()
   await expect(page.getByText('测验草稿已创建，请继续添加试题')).toBeVisible()
 
-  const questionDialog = page.getByRole('dialog', { name: `${examTitle} · 试题管理` })
+  const questionDialog = page.getByRole('dialog', { name: `${examTitle} · 试题管理` }).locator('.el-dialog')
+  await expect(questionDialog).toBeVisible()
+  await page.setViewportSize({ width: 1366, height: 768 })
+  const desktopPanel = await questionDialog.locator('.question-create-panel').boundingBox()
+  expect(desktopPanel.width).toBeCloseTo(400, 0)
+  await expect.poll(async () => {
+    const box = await questionDialog.boundingBox()
+    return Math.abs(box.y + box.height / 2 - 384)
+  }).toBeLessThanOrEqual(2)
+  const modalBefore = await questionDialog.boundingBox()
+  expect(Math.abs(modalBefore.x + modalBefore.width / 2 - 683)).toBeLessThanOrEqual(2)
+  expect(modalBefore.y).toBeGreaterThanOrEqual(15)
+  expect(modalBefore.y + modalBefore.height).toBeLessThanOrEqual(753)
+  expect(Math.abs(modalBefore.y + modalBefore.height / 2 - 384)).toBeLessThanOrEqual(2)
+  await questionDialog.locator('.question-create-panel').hover()
+  await page.mouse.wheel(0, 500)
+  await expect.poll(() => questionDialog.locator('.question-create-panel').evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  const modalAfter = await questionDialog.boundingBox()
+  expect(modalAfter.y).toBeCloseTo(modalBefore.y, 0)
+  expect(await questionDialog.locator('.question-create-panel').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await questionDialog.locator('.question-create-panel').evaluate((element) => { element.scrollTop = 0 })
+  await questionDialog.screenshot({ path: testInfo.outputPath('question-manager-desktop.png') })
+  await page.setViewportSize({ width: 1100, height: 720 })
+  expect((await questionDialog.locator('.question-create-panel').boundingBox()).width).toBeCloseTo(400, 0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(async () => {
+    const box = await questionDialog.boundingBox()
+    return Math.abs(box.y + box.height / 2 - 422) + Math.abs(box.x + box.width / 2 - 195)
+  }).toBeLessThanOrEqual(2)
+  expect(await questionDialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await questionDialog.screenshot({ path: testInfo.outputPath('question-manager-mobile.png') })
+  await page.setViewportSize({ width: 1366, height: 768 })
   const questionColumnHeights = await Promise.all([
     questionDialog.locator('.exam-question-list').evaluate((element) => element.getBoundingClientRect().height),
     questionDialog.locator('.question-create-panel').evaluate((element) => element.getBoundingClientRect().height),
@@ -1008,6 +1081,13 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '在线测验', exact: true }).click()
   let examCard = page.locator('.exam-card').filter({ hasText: examTitle })
+  await examCard.getByRole('button', { name: '测验附件', exact: true }).click()
+  const preview = page.getByRole('dialog', { name: '测验参考资料.txt', exact: true })
+  await expect(preview.locator('iframe')).toBeVisible()
+  const attachmentDownload = page.waitForEvent('download')
+  await preview.getByRole('button', { name: '下载附件', exact: true }).click()
+  expect((await attachmentDownload).suggestedFilename()).toBe('测验参考资料.txt')
+  await preview.getByRole('button', { name: '关闭', exact: true }).click()
   await examCard.getByRole('button', { name: '开始测验', exact: true }).click()
   const takeDialog = page.getByRole('dialog', { name: examTitle })
   const answerSaved = page.waitForResponse((response) => (

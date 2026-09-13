@@ -77,6 +77,7 @@ class BaseConfig:
         os.getenv("MAX_JSON_CONTENT_LENGTH", str(1024**2))
     )
     AVATAR_MAX_LENGTH = int(os.getenv("AVATAR_MAX_LENGTH", str(3 * 1024**2)))
+    EXAM_ATTACHMENT_MAX_LENGTH = int(os.getenv("EXAM_ATTACHMENT_MAX_LENGTH", str(50 * 1024**2)))
     HOMEWORK_ATTACHMENT_MAX_LENGTH = int(
         os.getenv("HOMEWORK_ATTACHMENT_MAX_LENGTH", str(50 * 1024**2))
     )

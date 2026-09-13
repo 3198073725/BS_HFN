@@ -173,6 +173,9 @@ Authorization: Bearer <access_token>
 | GET | `/api/exams/{id}` | 课程成员/课程教师 | 测验详情 |
 | PUT | `/api/exams/{id}` | 课程教师 | 编辑草稿测验 |
 | DELETE | `/api/exams/{id}` | 课程教师 | 删除测验草稿及其试题 |
+| POST | `/api/exams/{id}/attachment` | 课程教师 | 上传或替换草稿测验附件（multipart 字段 attachment） |
+| DELETE | `/api/exams/{id}/attachment` | 课程教师 | 移除草稿测验附件 |
+| GET | `/api/exams/{id}/attachment` | 课程成员/课程教师 | 在线预览附件；download=1 强制按原文件名下载 |
 | POST | `/api/exams/{id}/questions` | 课程教师 | 添加单选题或判断题 |
 | PUT | `/api/exams/questions/{id}` | 课程教师 | 更新草稿试题 |
 | DELETE | `/api/exams/questions/{id}` | 课程教师 | 删除草稿试题 |
@@ -185,6 +188,8 @@ Authorization: Bearer <access_token>
 | GET | `/api/exams/records/{id}` | 本人/课程教师 | 测验结果和逐题明细 |
 
 第一版题型为 `SINGLE` 和 `JUDGE`，答案分别使用 `A/B/C/D` 与 `TRUE/FALSE`。保存和交卷体均为 `{"answers": [{"question_id": 1, "answer": "A"}]}`。每名学生每个测验只能正式提交一次；未交卷时响应不会包含 `correct_answer`。页面在选择答案后防抖保存，并在倒计时结束时自动交卷；若浏览器没有及时发出超时请求，后端在下一次查询或继续答题时会使用截止前已保存的答案完成交卷，不接受截止后的新答案。
+
+测验支持一份教师附件，详情返回 `attachment` 相对路径及 `attachment_name` 原文件名。默认最大 50MB（`EXAM_ATTACHMENT_MAX_LENGTH`），格式与作业附件一致；教师仅能上传、替换或移除本人的草稿附件，发布后锁定。已加入有效课程的学生可读取已发布或已关闭测验附件，未加入课程、草稿或下线课程不可读取。PDF、文本和图片支持浏览器预览，Office 文档和压缩包提供下载。附件不由匿名 `/media` 路径提供，替换、移除及删除草稿时清理旧文件。
 
 ## 站内消息
 

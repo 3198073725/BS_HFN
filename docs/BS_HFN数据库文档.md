@@ -950,6 +950,8 @@ NOT_SUBMITTED
 | teacher_id | BIGINT | 教师 |
 | title | VARCHAR(200) | 名称 |
 | description | TEXT | 说明 |
+| attachment | VARCHAR(500) | 测验附件相对路径，可空，仅鉴权接口提供 |
+| attachment_name | VARCHAR(255) | 测验附件原文件名，可空 |
 | total_score | DECIMAL(6,2) | 总分 |
 | status | VARCHAR(20) | 状态 |
 | start_time | DATETIME | 开始 |
@@ -1775,6 +1777,8 @@ CREATE TABLE exam (
 
     title VARCHAR(200) NOT NULL,
     description TEXT NULL,
+    attachment VARCHAR(500) NULL,
+    attachment_name VARCHAR(255) NULL,
 
     total_score DECIMAL(6,2)
         NOT NULL DEFAULT 100,

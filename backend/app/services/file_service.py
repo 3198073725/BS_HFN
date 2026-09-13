@@ -64,12 +64,15 @@ def save_homework_attachment(
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{uuid4().hex}{suffix}"
     try:
-        file.save(target)
-        size = target.stat().st_size
+        size = 0
+        with target.open("xb") as output:
+            while chunk := file.stream.read(64 * 1024):
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise ValueError(f"附件不能超过{maximum_bytes // 1024 // 1024}MB")
+                output.write(chunk)
         if size == 0:
             raise ValueError("附件文件不能为空")
-        if size > maximum_bytes:
-            raise ValueError(f"附件不能超过{maximum_bytes // 1024 // 1024}MB")
     except Exception:
         remove_file(target)
         raise

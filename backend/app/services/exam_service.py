@@ -1,5 +1,8 @@
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
+
+from flask import current_app
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
@@ -9,6 +12,7 @@ from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import Course, CourseStudent, Exam, ExamAnswer, ExamQuestion, ExamRecord
 from app.services.notification_service import queue_course_notifications
+from app.services.file_service import remove_media_file, save_homework_attachment
 
 
 class ExamNotFound(ValueError):
@@ -21,6 +25,68 @@ class ExamPermissionDenied(PermissionError):
 
 class ExamConflict(ValueError):
     pass
+
+
+class ExamAttachmentError(ValueError):
+    pass
+
+
+def attach_exam_file(exam_id: int, teacher_id: int, file) -> dict:
+    exam = _teacher_exam(exam_id, teacher_id)
+    _require_draft(exam)
+    root = Path(current_app.config["MEDIA_ROOT"])
+    try:
+        target = save_homework_attachment(
+            file, root / "exams" / str(exam.id),
+            current_app.config["EXAM_ATTACHMENT_MAX_LENGTH"],
+        )
+    except ValueError as exc:
+        raise ExamAttachmentError(str(exc)) from exc
+    previous = exam.attachment
+    exam.attachment = target.relative_to(root).as_posix()
+    exam.attachment_name = Path(str(file.filename).replace("\\", "/")).name.strip()
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        target.unlink(missing_ok=True)
+        raise
+    _remove_exam_attachment(previous)
+    return serialize_exam(exam, reveal_answers=True)
+
+
+def remove_exam_attachment(exam_id: int, teacher_id: int) -> dict:
+    exam = _teacher_exam(exam_id, teacher_id)
+    _require_draft(exam)
+    previous = exam.attachment
+    exam.attachment = None
+    exam.attachment_name = None
+    db.session.commit()
+    _remove_exam_attachment(previous)
+    return serialize_exam(exam, reveal_answers=True)
+
+
+def get_exam_attachment(exam_id: int, user_id: int, role: str) -> tuple[Path, str]:
+    exam = _get_exam(exam_id)
+    if role == UserRole.TEACHER.value:
+        if exam.teacher_id != user_id:
+            raise ExamPermissionDenied("不能查看其他教师的测验附件")
+    elif role == UserRole.STUDENT.value:
+        _ensure_student_access(exam, user_id)
+    else:
+        raise ExamPermissionDenied("无权查看测验附件")
+    root = Path(current_app.config["MEDIA_ROOT"]).resolve()
+    target = (root / (exam.attachment or "")).resolve()
+    if not exam.attachment or target == root or not target.is_relative_to(root) or not target.is_file():
+        raise ExamNotFound("附件不存在")
+    return target, exam.attachment_name or target.name
+
+
+def _remove_exam_attachment(path: str | None) -> None:
+    try:
+        remove_media_file(Path(current_app.config["MEDIA_ROOT"]), path)
+    except (OSError, ValueError):
+        current_app.logger.exception("测验附件清理失败，保留原文件；数据库已保存")
 
 
 def create_exam(teacher_id: int, data: dict) -> dict:
@@ -50,8 +116,10 @@ def update_exam(exam_id: int, teacher_id: int, data: dict) -> dict:
 def delete_draft_exam(exam_id: int, teacher_id: int) -> None:
     exam = _teacher_exam(exam_id, teacher_id)
     _require_draft(exam)
+    attachment = exam.attachment
     db.session.delete(exam)
     db.session.commit()
+    _remove_exam_attachment(attachment)
 
 
 def add_question(exam_id: int, teacher_id: int, data: dict) -> dict:
@@ -343,6 +411,8 @@ def serialize_exam(
         "teacher_name": exam.teacher.real_name if exam.teacher else None,
         "title": exam.title,
         "description": exam.description,
+        "attachment": exam.attachment,
+        "attachment_name": exam.attachment_name,
         "total_score": float(exam.total_score),
         "status": exam.status,
         "start_time": _iso(exam.start_time),

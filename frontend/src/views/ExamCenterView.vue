@@ -3,6 +3,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
+import TeachingAttachmentPreview from '../components/TeachingAttachmentPreview.vue'
+import '../assets/teaching-dialogs.css'
 import { useAuthStore } from '../stores/auth'
 
 
@@ -19,6 +21,11 @@ const recordsDialog = ref(false)
 const selectedExam = ref(null)
 const selectedRecord = ref(null)
 const editingExamId = ref(null)
+const pendingExam = ref(null)
+const examAttachment = ref(null)
+const existingAttachment = ref(null)
+const removeAttachment = ref(false)
+const attachmentPreview = ref(null)
 const editingQuestionId = ref(null)
 const records = ref([])
 const answers = reactive({})
@@ -89,6 +96,10 @@ async function load() {
 
 function openExamForm(exam = null) {
   editingExamId.value = exam?.id || null
+  pendingExam.value = null
+  examAttachment.value = null
+  existingAttachment.value = exam?.attachment ? exam : null
+  removeAttachment.value = false
   Object.assign(examForm, {
     course_id: exam?.course_id || null,
     title: exam?.title || '',
@@ -103,8 +114,11 @@ function openExamForm(exam = null) {
 }
 
 async function saveExam() {
-  const valid = await examFormRef.value?.validate().catch(() => false)
-  if (!valid || saving.value) return
+  if (saving.value) return
+  if (!pendingExam.value) {
+    const valid = await examFormRef.value?.validate().catch(() => false)
+    if (!valid) return
+  }
   if (examForm.start_time && examForm.end_time && examForm.start_time >= examForm.end_time) {
     ElMessage.warning('结束时间必须晚于开始时间')
     return
@@ -112,20 +126,38 @@ async function saveExam() {
   saving.value = true
   try {
     const editing = Boolean(editingExamId.value)
-    const response = editing
-      ? await api.put(`/exams/${editingExamId.value}`, examForm)
-      : await api.post('/exams', examForm)
+    if (!pendingExam.value) {
+      const response = editing
+        ? await api.put(`/exams/${editingExamId.value}`, examForm)
+        : await api.post('/exams', examForm)
+      pendingExam.value = response.data
+    }
+    try {
+      if (examAttachment.value) {
+        const data = new FormData()
+        data.append('attachment', examAttachment.value)
+        const response = await api.post(`/exams/${pendingExam.value.id}/attachment`, data, { timeout: 60000 })
+        pendingExam.value = response.data
+      } else if (removeAttachment.value) {
+        const response = await api.delete(`/exams/${pendingExam.value.id}/attachment`)
+        pendingExam.value = response.data
+      }
+    } catch (error) {
+      await load()
+      ElMessage.warning(`测验草稿已保存，但附件处理失败：${error.message || '请重试'}；不会重复创建测验`)
+      return
+    }
+    const savedExam = pendingExam.value
     createDialog.value = false
     if (editing) {
-      const index = exams.value.findIndex((item) => item.id === response.data.id)
-      if (index >= 0) exams.value[index] = response.data
+      const index = exams.value.findIndex((item) => item.id === savedExam.id)
+      if (index >= 0) exams.value[index] = savedExam
       ElMessage.success('测验草稿已更新')
     } else {
-      exams.value.unshift(response.data)
+      exams.value = [savedExam, ...exams.value.filter((item) => item.id !== savedExam.id)]
       currentPage.value = 1
       ElMessage.success('测验草稿已创建，请继续添加试题')
-      resetExamForm()
-      await openQuestionManager(response.data)
+      await openQuestionManager(savedExam)
     }
   } catch (error) {
     ElMessage.error(error.message || '测验保存失败')
@@ -208,7 +240,7 @@ async function removeQuestion(question) {
 async function deleteExam(exam) {
   try {
     await ElMessageBox.confirm(
-      `确认删除测验草稿“${exam.title}”？试题也会一并删除。`,
+      `确认删除测验草稿“${exam.title}”？试题和附件也会一并删除。`,
       '删除测验草稿',
       { type: 'warning' },
     )
@@ -224,7 +256,7 @@ async function changeStatus(exam, action) {
   const publishing = action === 'publish'
   try {
     await ElMessageBox.confirm(
-      publishing ? '发布后不能再修改题目，确认发布？' : '关闭后学生不能再开始或提交，确认关闭？',
+      publishing ? '发布后不能再修改题目和附件，确认发布？' : '关闭后学生不能再开始或提交，确认关闭？',
       publishing ? '发布测验' : '关闭测验',
       { type: publishing ? 'info' : 'warning' },
     )
@@ -397,6 +429,10 @@ function handleTakeClosed() {
 
 function resetExamForm() {
   editingExamId.value = null
+  pendingExam.value = null
+  examAttachment.value = null
+  existingAttachment.value = null
+  removeAttachment.value = false
   Object.assign(examForm, {
     course_id: null,
     title: '',
@@ -407,6 +443,22 @@ function resetExamForm() {
     time_limit_minutes: 30,
   })
   examFormRef.value?.clearValidate()
+}
+
+function selectExamAttachment(event) {
+  const file = event.target.files?.[0]
+  if (file && (file.size === 0 || file.size > 50 * 1024 * 1024)) {
+    ElMessage.warning('请选择非空且不超过 50MB 的附件')
+    event.target.value = ''
+    return
+  }
+  examAttachment.value = file || null
+  if (file) removeAttachment.value = false
+}
+
+function previewAttachment(exam) {
+  const suffix = String(exam.attachment || '').split('.').pop()
+  attachmentPreview.value?.open(`/exams/${exam.id}/attachment`, exam.attachment_name || `${exam.title} · 测验附件.${suffix}`)
 }
 
 function resetQuestionForm() {
@@ -521,6 +573,7 @@ onBeforeUnmount(() => {
           <strong>{{ exam.record.score }} / {{ exam.total_score }}</strong>
         </div>
         <div class="exam-actions">
+          <el-button v-if="exam.attachment" @click="previewAttachment(exam)">测验附件</el-button>
           <template v-if="isTeacher">
             <el-button v-if="exam.status === 'DRAFT'" plain @click="openExamForm(exam)">编辑信息</el-button>
             <el-button v-if="exam.status === 'DRAFT'" type="primary" @click="openQuestionManager(exam)">
@@ -573,7 +626,8 @@ onBeforeUnmount(() => {
       :show-close="!saving"
       @closed="resetExamForm"
     >
-      <el-form ref="examFormRef" :model="examForm" :rules="examRules" label-position="top">
+      <p v-if="pendingExam" class="dialog-tip">草稿已保存，请重试附件处理，不会重复创建测验。</p>
+      <el-form ref="examFormRef" :model="examForm" :rules="examRules" :disabled="Boolean(pendingExam)" label-position="top">
         <el-form-item label="所属课程" prop="course_id">
           <el-select v-model="examForm.course_id" placeholder="请选择课程" style="width: 100%">
             <el-option v-for="course in courses" :key="course.id" :label="course.name" :value="course.id" />
@@ -602,18 +656,38 @@ onBeforeUnmount(() => {
           </el-form-item>
         </div>
       </el-form>
+      <div class="teaching-attachment-field">
+        <p>测验附件（可选）</p>
+        <div v-if="existingAttachment && !removeAttachment" class="attachment-existing">
+          <el-button @click="previewAttachment(existingAttachment)">查看现有附件</el-button>
+          <el-button :disabled="saving" @click="removeAttachment = true; examAttachment = null">移除附件</el-button>
+        </div>
+        <p v-if="removeAttachment" class="dialog-tip">保存后移除现有附件。<el-button link :disabled="saving" @click="removeAttachment = false">撤销</el-button></p>
+        <label class="file-picker compact-file-picker">
+          <input type="file" :disabled="saving" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.jpg,.jpeg,.png" @change="selectExamAttachment" />
+          <span>{{ existingAttachment ? '替换附件' : '选择附件' }}</span>
+          <strong>{{ examAttachment?.name || '最大 50MB' }}</strong>
+        </label>
+        <small>支持 PDF、Office 文档、文本、图片和压缩包；PDF、文本及图片可在线预览。发布后附件不可更改。</small>
+      </div>
       <template #footer>
         <el-button :disabled="saving" @click="createDialog = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveExam">
-          {{ editingExamId ? '保存修改' : '保存并添加试题' }}
+          {{ pendingExam ? '重试附件处理' : editingExamId ? '保存修改' : '保存并添加试题' }}
         </el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="questionDialog"
+      class="question-manager-dialog"
       :title="`${selectedExam?.title || ''} · 试题管理`"
-      width="min(980px, 96vw)"
+      width="min(1120px, calc(100vw - 32px))"
+      align-center
+      append-to-body
+      :close-on-click-modal="!saving"
+      :close-on-press-escape="!saving"
+      :show-close="!saving"
       @closed="load"
     >
       <div v-if="selectedExam" class="question-manager">
@@ -658,8 +732,8 @@ onBeforeUnmount(() => {
               <el-radio-button value="FALSE">错误</el-radio-button>
             </el-radio-group>
             <div class="question-number-row">
-              <el-input-number v-model="questionForm.score" :min="0.01" :max="999.99" :precision="2" />
-              <el-input-number v-model="questionForm.sort_order" :min="0" :max="100000" />
+              <label>分值<el-input-number v-model="questionForm.score" :min="0.01" :max="999.99" :precision="2" aria-label="试题分值" /></label>
+              <label>排序<el-input-number v-model="questionForm.sort_order" :min="0" :max="100000" aria-label="试题排序" /></label>
             </div>
             <div class="question-editor-actions">
               <el-button v-if="editingQuestionId" :disabled="saving" @click="cancelQuestionEdit">取消编辑</el-button>
@@ -671,10 +745,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <template #footer>
-        <el-button @click="questionDialog = false">稍后继续</el-button>
+        <el-button :disabled="saving" @click="questionDialog = false">稍后继续</el-button>
         <el-button
           type="primary"
-          :disabled="!selectedExam?.questions.length || !scoreMatches"
+          :disabled="saving || !selectedExam?.questions.length || !scoreMatches"
           @click="changeStatus(selectedExam, 'publish')"
         >
           发布测验
@@ -689,6 +763,7 @@ onBeforeUnmount(() => {
       :close-on-click-modal="selectedRecord?.status === 'SUBMITTED'"
       @closed="handleTakeClosed"
     >
+      <el-button v-if="selectedExam?.attachment" @click="previewAttachment(selectedExam)">查看测验附件</el-button>
       <div v-if="selectedRecord?.status === 'SUBMITTED'" class="exam-result">
         <div class="result-score">
           <span>本次得分</span>
@@ -760,5 +835,6 @@ onBeforeUnmount(() => {
         <template #empty><el-empty description="还没有学生开始测验" :image-size="64" /></template>
       </el-table>
     </el-dialog>
+    <TeachingAttachmentPreview ref="attachmentPreview" />
   </section>
 </template>

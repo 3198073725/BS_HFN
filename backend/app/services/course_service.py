@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.constants import CourseStatus, VideoStatus
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, Homework, Video
+from app.models import Chapter, Course, CourseCategory, Exam, Homework, Video
 from .file_service import (
     clear_homework_files,
     remove_all_video_files,
@@ -120,11 +120,19 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
     homework_ids = db.session.scalars(
         db.select(Homework.id).where(Homework.course_id == course.id)
     ).all()
+    exam_attachments = db.session.scalars(
+        db.select(Exam.attachment).where(Exam.course_id == course.id, Exam.attachment.is_not(None))
+    ).all()
     cover_file = course.cover
     db.session.delete(course)
     db.session.commit()
     _cleanup_deleted_video_files(video_files)
     _cleanup_deleted_homework_files(homework_ids)
+    for attachment in exam_attachments:
+        try:
+            remove_media_file(Path(current_app.config["MEDIA_ROOT"]), attachment)
+        except (OSError, ValueError):
+            current_app.logger.exception("测验附件清理失败")
     _cleanup_course_cover(cover_file)
 
 

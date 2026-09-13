@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
 from app.constants import CourseStatus, UserRole
 from app.extensions import db
-from app.models import Course, CourseCategory, CourseStudent, ExamRecord, User
+from app.models import Course, CourseCategory, CourseStudent, Exam, ExamRecord, User
 
 
 def bearer(token):
@@ -301,3 +303,85 @@ def test_exam_answers_are_saved_and_expired_record_uses_saved_draft(app, client)
     assert submitted.get_json()["data"]["status"] == "SUBMITTED"
     assert submitted.get_json()["data"]["score"] == 100.0
     assert submitted.get_json()["data"]["duration_seconds"] == 1800
+
+
+def test_exam_attachment_permissions_validation_and_lifecycle(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    other_teacher = login(client, context["other_teacher"])
+    student = login(client, context["student"])
+    outsider = login(client, context["other_student"])
+    exam = create_exam(client, teacher, context["course_id"])
+    endpoint = f"/api/exams/{exam['id']}/attachment"
+
+    def upload(token=teacher, name="测验资料.txt", content=b"exam reference"):
+        return client.post(endpoint, headers=bearer(token),
+                           data={"attachment": (BytesIO(content), name)})
+
+    assert client.get(endpoint).status_code == 401
+    assert client.post(endpoint, headers=bearer(teacher)).status_code == 400
+    assert upload(other_teacher).status_code == 403
+    assert upload(student).status_code == 403
+    assert upload(name="unsafe.html").status_code == 400
+    assert upload(content=b"").status_code == 400
+    app.config["EXAM_ATTACHMENT_MAX_LENGTH"] = 4
+    assert upload(content=b"12345").status_code == 400
+    app.config["EXAM_ATTACHMENT_MAX_LENGTH"] = 50 * 1024**2
+    response = upload()
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["attachment_name"] == "测验资料.txt"
+    path = Path(app.config["MEDIA_ROOT"]) / data["attachment"]
+    assert path.read_bytes() == b"exam reference"
+    assert client.get(endpoint, headers=bearer(student)).status_code == 404
+    assert client.get(endpoint, headers=bearer(other_teacher)).status_code == 403
+    preview = client.get(endpoint, headers=bearer(teacher))
+    assert preview.data == b"exam reference"
+    assert preview.headers["Content-Disposition"].startswith("inline")
+    assert "no-store" in preview.headers["Cache-Control"]
+    preview.close()
+    download = client.get(endpoint + "?download=1", headers=bearer(teacher))
+    assert download.headers["Content-Disposition"].startswith("attachment")
+    download.close()
+
+    replacement = upload(name="replacement.txt", content=b"new").get_json()["data"]
+    new_path = Path(app.config["MEDIA_ROOT"]) / replacement["attachment"]
+    assert not path.exists() and new_path.is_file()
+    assert client.delete(endpoint, headers=bearer(other_teacher)).status_code == 403
+    assert client.delete(endpoint, headers=bearer(teacher)).get_json()["data"]["attachment"] is None
+    assert not new_path.exists()
+    assert client.get(endpoint, headers=bearer(teacher)).status_code == 404
+    data = upload().get_json()["data"]
+    path = Path(app.config["MEDIA_ROOT"]) / data["attachment"]
+    with app.app_context():
+        db.session.get(Exam, exam["id"]).status = "PUBLISHED"
+        db.session.commit()
+    visible = client.get(endpoint, headers=bearer(student))
+    assert visible.status_code == 200
+    visible.close()
+    assert client.get(endpoint, headers=bearer(outsider)).status_code == 403
+    assert upload().status_code == 409
+    assert client.delete(endpoint, headers=bearer(teacher)).status_code == 409
+    with app.app_context():
+        course = db.session.get(Course, context["course_id"])
+        course.status = "OFFLINE"
+        db.session.commit()
+    assert client.get(endpoint, headers=bearer(student)).status_code == 404
+    with app.app_context():
+        db.session.get(Exam, exam["id"]).status = "DRAFT"
+        db.session.commit()
+    assert client.delete(f"/api/exams/{exam['id']}", headers=bearer(teacher)).status_code == 200
+    assert not path.exists()
+
+
+def test_private_teaching_attachments_cannot_use_development_media(app, client):
+    from app import register_development_media
+    app.config["DEBUG"] = True
+    register_development_media(app)
+    root = Path(app.config["MEDIA_ROOT"])
+    for folder in ("exams", "homework"):
+        target = root / folder / "private.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("private", encoding="utf-8")
+        assert client.get(f"/media/{folder}/private.txt").status_code == 404
+        assert client.get(f"/media/avatars/../{folder}/private.txt").status_code == 404

@@ -26,6 +26,7 @@ backend/media/videos/processed/*
 backend/media/videos/hls/*
 backend/media/videos/covers/*
 backend/media/homework/*
+backend/media/exams/*
 !backend/media/**/.gitkeep
 backend/media/defense_assets/
 backend/backups/

@@ -47,6 +47,7 @@ def create_runtime_directories(app: Flask) -> None:
         "videos/hls",
         "videos/covers",
         "homework",
+        "exams",
     ):
         (media_root / relative).mkdir(parents=True, exist_ok=True)
 
@@ -89,6 +90,11 @@ def register_development_media(app: Flask) -> None:
     if app.config["DEBUG"]:
         @app.get("/media/<path:filename>")
         def media_file(filename: str):
+            import posixpath
+            # Teaching attachments must use the authenticated, ownership-checked API.
+            filename = posixpath.normpath(filename.replace("\\", "/"))
+            if filename.split("/")[0] in {"homework", "exams"}:
+                abort(404)
             return send_from_directory(app.config["MEDIA_ROOT"], filename)
 
 

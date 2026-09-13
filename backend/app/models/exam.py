@@ -24,6 +24,8 @@ class Exam(IdMixin, TimestampMixin, db.Model):
     )
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
+    attachment = db.Column(db.String(500))
+    attachment_name = db.Column(db.String(255))
     total_score = db.Column(db.Numeric(6, 2), nullable=False, default=100, server_default="100")
     status = db.Column(db.String(20), nullable=False, default="DRAFT", server_default="DRAFT")
     start_time = db.Column(db.DateTime)

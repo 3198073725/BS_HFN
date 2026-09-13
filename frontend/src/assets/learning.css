@@ -1169,7 +1169,7 @@
 
 .question-manager-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  grid-template-columns: minmax(0, 1fr) 400px;
   gap: 16px;
 }
 
@@ -1253,8 +1253,21 @@
 
 .question-number-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
+}
+
+.question-number-row > label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--ink-600);
+  font-size: 13px;
+}
+
+.question-number-row .el-input-number {
+  width: 100%;
+  min-width: 0;
 }
 
 .exam-paper-bar {

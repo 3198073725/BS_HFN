@@ -30,6 +30,7 @@ const pageSize = 6
 const homeworkFormRef = ref(null)
 const pendingHomeworkId = ref(null)
 const editingHomeworkId = ref(null)
+const existingTeacherAttachment = ref(null)
 const submissionContentSaved = ref(false)
 const homeworkForm = reactive({
   course_id: null,
@@ -78,6 +79,7 @@ async function load() {
 function openHomework(homework = null) {
   editingHomeworkId.value = homework?.id || null
   pendingHomeworkId.value = null
+  existingTeacherAttachment.value = homework?.attachment ? homework : null
   Object.assign(homeworkForm, {
     course_id: homework?.course_id || null,
     title: homework?.title || '',
@@ -115,7 +117,7 @@ async function saveHomework() {
       const attachmentData = new FormData()
       attachmentData.append('attachment', homeworkAttachment.value)
       try {
-        await api.post(`/homeworks/${pendingHomeworkId.value}/attachment`, attachmentData)
+        await api.post(`/homeworks/${pendingHomeworkId.value}/attachment`, attachmentData, { timeout: 60000 })
       } catch (error) {
         await load()
         const prefix = committedAction === 'created'
@@ -313,7 +315,13 @@ function deadlineTone(homework) {
 }
 
 function selectHomeworkAttachment(event) {
-  homeworkAttachment.value = event.target.files?.[0] || null
+  const file = event.target.files?.[0]
+  if (file && (file.size === 0 || file.size > 50 * 1024 * 1024)) {
+    ElMessage.warning('请选择非空且不超过 50MB 的附件')
+    event.target.value = ''
+    return
+  }
+  homeworkAttachment.value = file || null
 }
 
 function selectSubmissionAttachment(event) {
@@ -553,9 +561,10 @@ onBeforeUnmount(clearPreview)
           </el-form-item>
         </div>
         <el-form-item label="作业附件（可选）">
+          <el-button v-if="existingTeacherAttachment" :disabled="false" @click="openAttachment(existingTeacherAttachment)">查看现有附件</el-button>
           <label class="file-picker compact-file-picker">
-            <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.jpg,.jpeg,.png" @change="selectHomeworkAttachment" />
-            <span>选择附件</span>
+            <input type="file" :disabled="saving" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.jpg,.jpeg,.png" @change="selectHomeworkAttachment" />
+            <span>{{ existingTeacherAttachment ? '替换附件' : '选择附件' }}</span>
             <strong>{{ homeworkAttachment?.name || '最大 50MB' }}</strong>
           </label>
         </el-form-item>

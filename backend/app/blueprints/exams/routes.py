@@ -1,3 +1,4 @@
+from flask import request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from app.constants import PublishStatus, UserRole
@@ -5,9 +6,13 @@ from app.extensions import db
 from app.models import User
 from app.services.exam_service import (
     ExamConflict,
+    ExamAttachmentError,
     ExamNotFound,
     ExamPermissionDenied,
     add_question,
+    attach_exam_file,
+    get_exam_attachment,
+    remove_exam_attachment,
     change_exam_status,
     create_exam,
     delete_draft_exam,
@@ -80,6 +85,33 @@ def add_exam_question(exam_id: int):
     except ValidationError as exc:
         return error(str(exc), 400)
     return _handle(lambda: success(add_question(exam_id, _user_id(), data), "试题添加成功", 201))
+
+
+@exams_bp.post("/<int:exam_id>/attachment")
+@roles_required(UserRole.TEACHER)
+def upload_exam_attachment(exam_id: int):
+    file = request.files.get("attachment")
+    if file is None:
+        return error("请选择附件", 400)
+    return _handle(lambda: success(attach_exam_file(exam_id, _user_id(), file), "附件上传成功"))
+
+
+@exams_bp.delete("/<int:exam_id>/attachment")
+@roles_required(UserRole.TEACHER)
+def delete_exam_attachment(exam_id: int):
+    return _handle(lambda: success(remove_exam_attachment(exam_id, _user_id()), "附件已移除"))
+
+
+@exams_bp.get("/<int:exam_id>/attachment")
+@roles_required(UserRole.STUDENT, UserRole.TEACHER)
+def download_exam_attachment(exam_id: int):
+    def respond():
+        path, name = get_exam_attachment(exam_id, _user_id(), _current_role())
+        response = send_file(path, download_name=name, as_attachment=request.args.get("download") == "1")
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+    return _handle(respond)
 
 
 @exams_bp.put("/questions/<int:question_id>")
@@ -187,3 +219,5 @@ def _handle(action):
         return error(str(exc), 403)
     except ExamConflict as exc:
         return error(str(exc), 409)
+    except ExamAttachmentError as exc:
+        return error(str(exc), 400)
