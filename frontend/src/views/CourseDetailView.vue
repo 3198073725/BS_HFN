@@ -31,13 +31,21 @@ const learningState = reactive({ joined: false, favorited: false })
 const classDialogVisible = ref(false)
 const classOptions = ref([])
 const classOptionsLoading = ref(false)
+const classOptionsLoaded = ref(false)
 const joiningClassId = ref(null)
 const isStudent = computed(() => auth.user?.role === 'STUDENT')
+const classButtonLabel = computed(() => {
+  if (!classOptionsLoaded.value) return classOptionsLoading.value ? '读取班级中' : '查看班级'
+  if (classOptions.value.some((classroom) => classroom.joined)) return '已加入班级'
+  if (classOptions.value.some((classroom) => classroom.request_status === 'PENDING')) return '待教师审批'
+  return '加入班级'
+})
 let lastPosition = null
 let pendingWatchDuration = 0
 let lastSaveAt = Date.now()
 let courseRequestSequence = 0
 let courseStateRequestSequence = 0
+let classOptionsRequestSequence = 0
 let learningRequestSequence = 0
 
 async function loadCourse() {
@@ -49,6 +57,9 @@ async function loadCourse() {
   selectedVideo.value = null
   Object.assign(learningState, { joined: false, favorited: false })
   classOptions.value = []
+  classOptionsLoaded.value = false
+  classOptionsLoading.value = false
+  classOptionsRequestSequence += 1
   classDialogVisible.value = false
   resetLearningContext()
   try {
@@ -59,7 +70,7 @@ async function loadCourse() {
       course.value.chapters
         .flatMap((chapter) => chapter.videos)
         .find((video) => video.status === 'READY') || null
-    if (isStudent.value) await loadCourseState(courseId)
+    if (isStudent.value) await Promise.all([loadCourseState(courseId), loadCourseClasses(courseId)])
   } catch (error) {
     if (requestId !== courseRequestSequence || String(route.params.id) !== courseId) return
     errorMessage.value = error.message || '课程加载失败'
@@ -98,21 +109,42 @@ async function joinCourse() {
   }
 }
 
-async function openClassDialog() {
-  if (classOptionsLoading.value) return
+async function loadCourseClasses(courseId = String(route.params.id), quiet = false) {
+  const requestId = ++classOptionsRequestSequence
   classOptionsLoading.value = true
   try {
-    const response = await api.get(`/courses/${route.params.id}/classes`)
+    const response = await api.get(`/courses/${courseId}/classes`)
+    if (requestId !== classOptionsRequestSequence || String(route.params.id) !== courseId) return false
     classOptions.value = response.data
-    if (!classOptions.value.length) {
-      ElMessage.info('授课教师暂未给这门课程关联班级')
-      return
-    }
-    classDialogVisible.value = true
+    classOptionsLoaded.value = true
+    return true
   } catch (error) {
-    ElMessage.error(error.message || '班级列表加载失败')
+    if (!quiet && requestId === classOptionsRequestSequence && String(route.params.id) === courseId) {
+      ElMessage.error(error.message || '班级列表加载失败')
+    }
+    return false
   } finally {
-    classOptionsLoading.value = false
+    if (requestId === classOptionsRequestSequence) classOptionsLoading.value = false
+  }
+}
+
+async function openClassDialog() {
+  if (classOptionsLoading.value) return
+  if (!await loadCourseClasses()) return
+  if (!classOptions.value.length) {
+    ElMessage.info('授课教师暂未给这门课程关联班级')
+    return
+  }
+  classDialogVisible.value = true
+}
+
+async function refreshClassState() {
+  if (document.visibilityState !== 'visible' || !isStudent.value || !course.value || loading.value || classOptionsLoading.value || joiningClassId.value !== null) return
+  const courseId = String(route.params.id)
+  const refreshed = await loadCourseClasses(courseId, true)
+  // Approval also enrolls the student in the course; do not reset an ongoing learning session.
+  if (refreshed && !learningState.joined && classOptions.value.some((classroom) => classroom.joined)) {
+    await loadCourseState(courseId)
   }
 }
 
@@ -401,14 +433,21 @@ watch(() => route.params.id, async (nextId, previousId) => {
 onMounted(() => {
   queuedProgressCount.value = readProgressQueue().length
   window.addEventListener('online', flushProgressQueue)
+  window.addEventListener('focus', refreshClassState)
+  window.addEventListener('online', refreshClassState)
+  document.addEventListener('visibilitychange', refreshClassState)
   void loadCourse().then(flushProgressQueue)
 })
 onBeforeUnmount(() => {
   courseRequestSequence += 1
   courseStateRequestSequence += 1
+  classOptionsRequestSequence += 1
   learningRequestSequence += 1
   void saveProgress(true)
   window.removeEventListener('online', flushProgressQueue)
+  window.removeEventListener('focus', refreshClassState)
+  window.removeEventListener('online', refreshClassState)
+  document.removeEventListener('visibilitychange', refreshClassState)
 })
 </script>
 
@@ -459,10 +498,11 @@ onBeforeUnmount(() => {
                 <button
                   class="hero-small-button"
                   type="button"
+                  aria-label="查看课程班级"
                   :disabled="classOptionsLoading"
                   @click="openClassDialog"
                 >
-                  {{ classOptionsLoading ? '读取班级中' : '加入班级' }}
+                  {{ classButtonLabel }}
                 </button>
               </template>
               <RouterLink

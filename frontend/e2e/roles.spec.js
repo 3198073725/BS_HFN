@@ -184,7 +184,9 @@ test('学生从课程详情申请入班并由教师审批', async ({ page }) => 
   await expect(page.getByRole('link', { name: /端测基础课程/ })).toBeVisible()
 
   await page.goto('/courses/1')
-  await page.getByRole('button', { name: '加入班级', exact: true }).click()
+  const classEntry = page.getByRole('button', { name: '查看课程班级', exact: true })
+  await expect(classEntry).toHaveText('已加入班级')
+  await classEntry.click()
   const dialog = page.getByRole('dialog', { name: '选择课程班级' })
   await expect(dialog.getByText('端测密码审批班', { exact: true })).toBeVisible()
   const availableClass = dialog.locator('.course-class-option').filter({ hasText: '端测自主加入班' })
@@ -205,7 +207,8 @@ test('学生从课程详情申请入班并由教师审批', async ({ page }) => 
   await expect(joinHistory).toContainText('已撤回')
 
   await page.goto('/courses/1')
-  await page.getByRole('button', { name: '加入班级', exact: true }).click()
+  await expect(classEntry).toHaveText('已加入班级')
+  await classEntry.click()
   const reopenedDialog = page.getByRole('dialog', { name: '选择课程班级' })
   const cancelledClass = reopenedDialog.locator('.course-class-option').filter({ hasText: '端测自主加入班' })
   await cancelledClass.getByRole('button', { name: '再次申请', exact: true }).click()
@@ -229,9 +232,63 @@ test('学生从课程详情申请入班并由教师审批', async ({ page }) => 
   await page.getByRole('link', { name: '我的班级', exact: true }).click()
   await expect(page.locator('.classroom-card').filter({ hasText: '端测自主加入班' })).toBeVisible()
   await expect(page.locator('[aria-label="我的入班申请"]')).toContainText('已通过')
+  await page.goto('/courses/1')
+  await expect(classEntry).toHaveText('已加入班级')
+  await classEntry.click()
+  await expect(page.getByRole('dialog', { name: '选择课程班级' })
+    .locator('.course-class-option').filter({ hasText: '端测自主加入班' })
+    .getByRole('button', { name: '已加入', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
   await page.locator('a[href="/notifications"]').click()
   await expect(page.getByText('班级通知', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('CLASS', { exact: true })).toHaveCount(0)
+})
+
+test('课程班级入口同步未加入、待审批和已加入状态', async ({ page }) => {
+  await login(page, 'e2e_student')
+  let joined = false
+  let requestStatus = null
+  await page.route('**/api/learning/courses/1/state', async (route) => {
+    await route.fulfill({ json: { data: { joined, favorited: false } } })
+  })
+  await page.route('**/api/courses/1/classes', async (route) => {
+    await route.fulfill({ json: { data: [{
+      id: 999, name: '状态同步测试班', description: '', member_count: joined ? 1 : 0,
+      joined, request_status: requestStatus,
+    }] } })
+  })
+  await page.route('**/api/courses/1/classes/999/apply', async (route) => {
+    requestStatus = 'PENDING'
+    await route.fulfill({ status: 202, json: { data: { status: 'PENDING' } } })
+  })
+  await page.goto('/courses/1')
+  const classEntry = page.getByRole('button', { name: '查看课程班级', exact: true })
+  await expect(classEntry).toHaveText('加入班级')
+  await expect(page.getByRole('button', { name: '＋ 加入课程', exact: true })).toBeEnabled()
+  await classEntry.click()
+  await page.getByRole('dialog', { name: '选择课程班级' })
+    .getByRole('button', { name: '申请加入', exact: true }).click()
+  await expect(classEntry).toHaveText('待教师审批')
+  await page.keyboard.press('Escape')
+  await page.reload()
+  await expect(classEntry).toHaveText('待教师审批')
+
+  joined = true
+  requestStatus = 'APPROVED'
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(classEntry).toHaveText('已加入班级')
+  await expect(page.getByRole('button', { name: '✓ 已加入课程', exact: true })).toBeDisabled()
+  await classEntry.click()
+  await expect(page.getByRole('dialog', { name: '选择课程班级' })
+    .getByRole('button', { name: '已加入', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+
+  joined = false
+  for (const status of ['REJECTED', 'CANCELLED']) {
+    requestStatus = status
+    await page.reload()
+    await expect(classEntry).toHaveText('加入班级')
+  }
 })
 
 

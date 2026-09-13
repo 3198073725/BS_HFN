@@ -329,6 +329,12 @@ def test_student_class_join_request_requires_teacher_approval(app, client):
     )
     assert approved.status_code == 200
     assert approved.get_json()["data"]["status"] == "APPROVED"
+    approved_options = client.get(
+        f"/api/courses/{course_id}/classes",
+        headers=bearer(student),
+    ).get_json()["data"][0]
+    assert approved_options["joined"] is True
+    assert approved_options["request_status"] == "APPROVED"
     approved_history = client.get(
         "/api/classes/join-requests/mine",
         headers=bearer(student),
