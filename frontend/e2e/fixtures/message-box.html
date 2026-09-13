@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>提示框布局回归测试</title></head>
+  <body>
+    <button id="confirm">提交测验</button>
+    <button id="prompt">输入提示</button>
+    <button id="long">长内容警告</button>
+    <button id="neutral">管理员确认</button>
+    <button id="custom">自定义宽度</button>
+    <script type="module">
+      import { ElMessageBox, provideGlobalConfig } from 'element-plus'
+      import { createApp } from 'vue'
+      import zhCn from 'element-plus/es/locale/lang/zh-cn'
+      import 'element-plus/dist/index.css'
+      import '../../src/assets/main.css'
+      import '../../src/assets/learning.css'
+      import '../../src/assets/teaching-dialogs.css'
+      provideGlobalConfig({ locale: zhCn }, createApp({}), true)
+      const actions = {
+        confirm: () => ElMessageBox.confirm('提交后不能再次修改答案，确认交卷？', '提交测验', { type: 'warning' }),
+        prompt: () => ElMessageBox.prompt('请输入说明', '输入提示', { inputPlaceholder: '说明内容' }),
+        long: () => ElMessageBox.alert('很长的警告说明，用于验证只有内容区域滚动。'.repeat(400), '长内容警告', { type: 'warning' }),
+        neutral: () => ElMessageBox.confirm('确认恢复此视频处理任务？', '恢复任务', { customClass: 'admin-neutral-dialog', type: 'warning' }),
+        custom: () => ElMessageBox.confirm('验证组件宽度变量仍然有效。', '自定义宽度', { customStyle: { '--el-messagebox-width': '480px' } }),
+      }
+      Object.entries(actions).forEach(([id, open]) => {
+        document.getElementById(id).addEventListener('click', () => { open().catch(() => {}) })
+      })
+      document.body.dataset.ready = 'true'
+    </script>
+  </body>
+</html>

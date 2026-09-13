@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { expectCompactMessageBox } from './message-box-layout'
 
 
 const password = 'E2ePassword123!'
@@ -1014,6 +1015,7 @@ test('附件试卷无需在线题目即可发布提交和教师批改', async ({
   await expect(take.getByPlaceholder('按题号填写答案，或上传答卷附件')).toHaveValue('1. HTTP 是超文本传输协议。')
   await expect(take.getByRole('button', { name: '查看已保存答卷附件', exact: true })).toBeVisible()
   await take.getByRole('button', { name: '提交测验', exact: true }).click()
+  await expectCompactMessageBox(page)
   await page.getByRole('dialog', { name: '提交测验', exact: true }).getByRole('button', { name: '确定', exact: true }).click()
   await expect(take.getByText('已交卷，等待教师批改', { exact: true })).toBeVisible()
   await expect(take.getByRole('button', { name: '提交测验', exact: true })).toHaveCount(0)
@@ -1187,6 +1189,8 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   expect((await answerSaved).status()).toBe(200)
   await expect(takeDialog.getByText('已自动保存', { exact: true })).toBeVisible()
   await takeDialog.getByRole('button', { name: '提交测验', exact: true }).click()
+  await expectCompactMessageBox(page)
+  await page.screenshot({ path: testInfo.outputPath('exam-submit-confirmation.png') })
   await page.getByRole('dialog', { name: '提交测验' }).getByRole('button', { name: '确定' }).click()
   await expect(page.getByText('交卷成功，得分 100')).toBeVisible()
   await expect(takeDialog.locator('.result-score strong')).toHaveText('100')

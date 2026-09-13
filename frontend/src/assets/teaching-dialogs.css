@@ -1,11 +1,17 @@
 /* All dialogs stay centered in the viewport, including short and nested ones. */
 .el-overlay-dialog,
-.el-overlay-message-box {
+.is-message-box .el-overlay-message-box {
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   padding: 16px;
+}
+
+/* Element Plus uses an inline-block spacer for centering; flex does not need it. */
+.is-message-box .el-overlay-message-box::after {
+  display: none;
+  content: none;
 }
 
 .el-dialog:not(.is-fullscreen) {
@@ -34,6 +40,9 @@
 .el-message-box {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+  /* Keep confirmations compact instead of expanding their stock width: 100%. */
+  width: var(--el-messagebox-width, 420px);
   max-height: calc(100dvh - 32px);
   max-width: calc(100vw - 32px);
 }
@@ -47,6 +56,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  overflow-wrap: anywhere;
 }
 
 /* Dense question panes scroll independently inside the fixed dialog. */
