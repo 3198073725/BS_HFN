@@ -4,6 +4,7 @@ from sqlalchemy.orm import joinedload
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import CourseStudent, Notification
+from app.services.course_task_access_service import class_task_access_condition
 
 
 class NotificationNotFound(ValueError):
@@ -44,6 +45,7 @@ def queue_course_notifications(
         db.select(CourseStudent.student_id).where(
             CourseStudent.course_id == course_id,
             CourseStudent.status.is_(True),
+            class_task_access_condition(course_id, CourseStudent.student_id),
         )
     ).all()
     for student_id in set(student_ids):

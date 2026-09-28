@@ -299,6 +299,64 @@ def test_exam_score_sum_and_time_window_validation(app, client):
     assert invalid_window.status_code == 400
 
 
+def test_exam_past_end_time_is_ended_without_teacher_closing(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    end_time = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    exam = create_exam(
+        client,
+        teacher,
+        context["course_id"],
+        total_score=100,
+        end_time=end_time,
+        time_limit_minutes=None,
+    )
+    exam_id = exam["id"]
+    assert client.post(
+        f"/api/exams/{exam_id}/questions",
+        headers=bearer(teacher),
+        json={
+            "question_type": "JUDGE",
+            "content": "截止后不能开始",
+            "correct_answer": "TRUE",
+            "score": 100,
+        },
+    ).status_code == 201
+    assert client.post(f"/api/exams/{exam_id}/publish", headers=bearer(teacher)).status_code == 200
+
+    with app.app_context():
+        stored = db.session.get(Exam, exam_id)
+        stored.end_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
+        db.session.commit()
+
+    student_item = client.get("/api/exams", headers=bearer(student)).get_json()["data"][0]
+    assert student_item["status"] == "PUBLISHED"
+    assert student_item["availability"] == "ENDED"
+    assert student_item["is_expired"] is True
+    teacher_item = client.get("/api/exams/manage", headers=bearer(teacher)).get_json()["data"][0]
+    assert teacher_item["availability"] == "ENDED"
+    assert client.post(f"/api/exams/{exam_id}/start", headers=bearer(student)).status_code == 409
+
+
+def test_exam_draft_with_past_end_time_remains_draft(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    exam = create_exam(
+        client,
+        teacher,
+        context["course_id"],
+        end_time=past,
+        time_limit_minutes=None,
+    )
+    assert exam["status"] == "DRAFT"
+    assert exam["availability"] == "DRAFT"
+    assert exam["is_expired"] is False
+    teacher_item = client.get("/api/exams/manage", headers=bearer(teacher)).get_json()["data"][0]
+    assert teacher_item["availability"] == "DRAFT"
+
+
 def test_only_owner_can_delete_draft_exam_with_questions(app, client):
     context = create_context(app)
     teacher = login(client, context["teacher"])
@@ -364,6 +422,11 @@ def test_exam_answers_are_saved_and_expired_record_uses_saved_draft(app, client)
     assert submitted.get_json()["data"]["status"] == "SUBMITTED"
     assert submitted.get_json()["data"]["score"] == 100.0
     assert submitted.get_json()["data"]["duration_seconds"] == 1800
+    assert client.put(
+        f"/api/exams/{exam['id']}/answers",
+        headers=bearer(student),
+        json={"answers": [{"question_id": question["id"], "answer": "B"}]},
+    ).status_code == 409
 
 
 def test_exam_attachment_permissions_validation_and_lifecycle(app, client):
@@ -372,7 +435,7 @@ def test_exam_attachment_permissions_validation_and_lifecycle(app, client):
     other_teacher = login(client, context["other_teacher"])
     student = login(client, context["student"])
     outsider = login(client, context["other_student"])
-    exam = create_exam(client, teacher, context["course_id"])
+    exam = create_exam(client, teacher, context["course_id"], exam_type="ATTACHMENT")
     endpoint = f"/api/exams/{exam['id']}/attachment"
 
     def upload(token=teacher, name="测验资料.txt", content=b"exam reference"):

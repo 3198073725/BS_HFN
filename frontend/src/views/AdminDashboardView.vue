@@ -3,6 +3,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
+import OverflowText from '../components/OverflowText.vue'
+import StatisticsChart from '../components/StatisticsChart.vue'
+import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 
 
@@ -10,8 +13,21 @@ const auth = useAuthStore()
 const activeSection = ref('videos')
 const loading = ref(false)
 const refreshingVideos = ref(false)
+const terminatingVideoId = ref(null)
 const saving = ref(false)
 const overview = ref({})
+const chartsOpen = ref(false)
+const accountChartRows = computed(() => [
+  { label: '学生', values: [overview.value.students] },
+  { label: '教师', values: [overview.value.teachers] },
+  { label: '管理员', values: [overview.value.administrators] },
+])
+const videoChartRows = computed(() => [
+  { label: '可播放', values: [overview.value.ready_videos] },
+  { label: '等待 / 处理中', values: [overview.value.processing_videos] },
+  { label: '失败', values: [overview.value.failed_videos] },
+  { label: '已终止', values: [videoOperations.value.summary?.CANCELLED || 0] },
+])
 const videoOperations = ref({ items: [], pagination: {}, summary: {}, runtime: {} })
 const users = ref([])
 const courses = ref([])
@@ -24,6 +40,10 @@ const passwordDialog = ref(false)
 const passwordUser = ref(null)
 const noticeDialog = ref(false)
 const categoryDialog = ref(false)
+const restoreUserFocus = useDialogFocus(userDialog)
+const restorePasswordFocus = useDialogFocus(passwordDialog)
+const restoreCategoryFocus = useDialogFocus(categoryDialog)
+const restoreNoticeFocus = useDialogFocus(noticeDialog)
 const userFormRef = ref(null)
 const editingNoticeId = ref(null)
 const editingCategoryId = ref(null)
@@ -91,6 +111,7 @@ const videoSummaryItems = computed(() => [
   { label: '处理中', key: 'processing', value: videoOperations.value.summary?.PROCESSING || 0 },
   { label: '可播放', key: 'ready', value: videoOperations.value.summary?.READY || 0 },
   { label: '失败', key: 'failed', value: videoOperations.value.summary?.FAILED || 0 },
+  { label: '已终止', key: 'cancelled', value: videoOperations.value.summary?.CANCELLED || 0 },
 ])
 
 const sections = computed(() => [
@@ -264,15 +285,34 @@ async function retryVideo(video) {
   }
 }
 
+async function cancelVideo(video) {
+  if (terminatingVideoId.value !== null) return
+  try {
+    await ElMessageBox.confirm(
+      `确认终止“${video.title}”的转码任务？系统会停止后台处理并清理未完成产物，原始视频文件会保留，之后仍可重新转码。`,
+      '终止转码任务',
+      confirmOptions({ confirmButtonText: '确认终止' }),
+    )
+    terminatingVideoId.value = video.id
+    const response = await api.post(`/admin/videos/${video.id}/cancel`)
+    ElMessage.success(response.message || '转码任务已终止')
+    await Promise.all([loadVideos(), loadOverview()])
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '终止转码任务失败')
+  } finally {
+    terminatingVideoId.value = null
+  }
+}
+
 async function removeVideo(video) {
   try {
     await ElMessageBox.confirm(
-      `将永久删除“${video.title}”的失败任务、原始文件和残留产物，此操作不可恢复。`,
-      '清理失败任务',
+      `将永久删除“${video.title}”的任务记录、原始文件和残留产物，此操作不可恢复。`,
+      '清理视频任务',
       confirmOptions({ confirmButtonText: '确认清理' }),
     )
     await api.delete(`/admin/videos/${video.id}`)
-    ElMessage.success('失败任务及相关文件已清理')
+    ElMessage.success('视频任务及相关文件已清理')
     await Promise.all([loadVideos(), loadOverview()])
   } catch (error) {
     if (error !== 'cancel') ElMessage.error(error.message || '任务清理失败')
@@ -493,15 +533,15 @@ watch(activeSection, (section) => {
 
 function roleLabel(role) { return { ADMIN: '管理员', TEACHER: '教师', STUDENT: '学生' }[role] || role }
 function courseStatusLabel(status) { return { DRAFT: '草稿', PUBLISHED: '已发布', OFFLINE: '已下线' }[status] || status }
-function videoStatusLabel(status) { return { UPLOADING: '上传中', PENDING: '等待处理', PROCESSING: '处理中', READY: '可播放', FAILED: '失败' }[status] || status }
+function videoStatusLabel(status) { return { UPLOADING: '上传中', PENDING: '等待处理', PROCESSING: '处理中', READY: '可播放', FAILED: '失败', CANCELLED: '已终止' }[status] || status }
 function videoStepLabel(step) {
-  return { QUEUED: '等待队列', PROBING: '读取媒体信息', TRANSCODING: '生成标准 MP4', HLS: '生成 HLS 分片', COVER: '提取封面', FINISHED: '处理完成' }[step] || (step || '等待处理')
+  return { QUEUED: '等待队列', PROBING: '读取媒体信息', TRANSCODING: '生成标准 MP4', HLS: '生成 HLS 分片', COVER: '提取封面', FINISHED: '处理完成', CANCELLED: '任务已终止' }[step] || (step || '等待处理')
 }
 function noticeStatusLabel(status) { return { DRAFT: '草稿', PUBLISHED: '已发布', OFFLINE: '已下线' }[status] || status }
 function auditActionLabel(action) {
   return {
     USER_CREATE: '创建用户', USER_STATUS_CHANGE: '用户状态', USER_PASSWORD_RESET: '重置密码',
-    VIDEO_RETRY: '重新转码', VIDEO_DELETE: '清理视频',
+    VIDEO_RETRY: '重新转码', VIDEO_CANCEL: '终止转码', VIDEO_DELETE: '清理视频',
     COURSE_STATUS_CHANGE: '课程状态', CLASS_DELETE: '删除班级',
     CATEGORY_CREATE: '创建分类', CATEGORY_UPDATE: '编辑分类',
     CATEGORY_STATUS_CHANGE: '分类状态', NOTICE_CREATE: '创建公告',
@@ -553,6 +593,14 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
       <article v-for="metric in metrics" :key="metric.label"><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong><small>{{ metric.detail }}</small></article>
     </div>
 
+    <details class="admin-chart-disclosure" @toggle="chartsOpen = $event.target.open">
+      <summary>查看数据图表</summary>
+      <div v-if="chartsOpen && !loading" class="admin-statistics-charts">
+        <StatisticsChart title="用户角色分布" caption="所有账号按角色统计，包含禁用账号；不受用户列表筛选影响。" :rows="accountChartRows" :series="['账号数量']" unit="人" neutral />
+        <StatisticsChart title="视频处理状态分布" caption="全部视频任务的当前状态，等待与处理中合并统计；不受任务搜索与分页影响。" :rows="videoChartRows" :series="['视频数量']" unit="个" neutral />
+      </div>
+    </details>
+
     <nav class="admin-section-tabs" aria-label="后台管理功能">
       <button v-for="section in sections" :key="section.value" type="button" :class="{ active: activeSection === section.value }" @click="activeSection = section.value">
         {{ section.label }}<span>{{ section.count }}</span>
@@ -561,7 +609,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
 
     <div v-if="activeSection === 'videos'" class="management-surface admin-panel admin-video-center">
       <div class="surface-heading admin-panel-heading">
-        <div><strong>视频处理中心</strong><span>查看每一步转码状态，恢复异常任务并清理失败文件</span></div>
+        <div><strong>视频处理中心</strong><span>查看处理状态，终止进行中的任务、恢复异常任务并清理失败文件</span></div>
         <el-button text class="admin-quiet-button" :loading="refreshingVideos" @click="loadVideos()">刷新</el-button>
       </div>
       <div class="video-runtime-bar">
@@ -579,26 +627,31 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
       <div class="admin-filters video-filters">
         <el-input v-model="videoFilters.keyword" clearable placeholder="搜索视频、课程、教师或文件名" @keyup.enter="searchVideos" />
         <el-select v-model="videoFilters.status" placeholder="全部状态">
-          <el-option label="全部状态" value="" /><el-option label="上传中" value="UPLOADING" /><el-option label="等待处理" value="PENDING" /><el-option label="处理中" value="PROCESSING" /><el-option label="可播放" value="READY" /><el-option label="失败" value="FAILED" />
+          <el-option label="全部状态" value="" /><el-option label="上传中" value="UPLOADING" /><el-option label="等待处理" value="PENDING" /><el-option label="处理中" value="PROCESSING" /><el-option label="可播放" value="READY" /><el-option label="失败" value="FAILED" /><el-option label="已终止" value="CANCELLED" />
         </el-select>
         <el-button @click="searchVideos">查询任务</el-button>
       </div>
       <p class="table-scroll-hint">左右滑动表格可查看媒体参数、错误原因和操作</p>
-      <el-table :data="videoOperations.items" max-height="530" empty-text="没有符合条件的视频任务">
+      <el-table
+        :data="videoOperations.items"
+        :height="videoPage.total > videoPage.page_size ? 530 : undefined"
+        max-height="530"
+        empty-text="没有符合条件的视频任务"
+      >
         <el-table-column label="视频 / 文件" min-width="220" fixed="left">
-          <template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.title }}</strong><span>{{ scope.row.original_name || '未记录原文件名' }} · {{ formatBytes(scope.row.file_size) }}</span></div></template>
+          <template #default="scope"><div class="admin-primary-cell"><strong :title="scope.row.title">{{ scope.row.title }}</strong><span :title="scope.row.original_name">{{ scope.row.original_name || '未记录原文件名' }} · {{ formatBytes(scope.row.file_size) }}</span><details class="admin-cell-details"><summary>查看完整信息</summary><div>{{ scope.row.title }}<br>{{ scope.row.original_name || '未记录原文件名' }}<br>{{ scope.row.course_name }} · {{ scope.row.chapter_title }} · {{ scope.row.teacher_name }}</div></details></div></template>
         </el-table-column>
         <el-table-column label="课程位置" min-width="190">
           <template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.course_name }}</strong><span>{{ scope.row.chapter_title }} · {{ scope.row.teacher_name }}</span></div></template>
         </el-table-column>
         <el-table-column label="状态" width="110"><template #default="scope"><span :class="['operation-state', `state-${scope.row.status.toLowerCase()}`]">{{ videoStatusLabel(scope.row.status) }}</span></template></el-table-column>
         <el-table-column label="处理阶段 / 错误" min-width="230">
-          <template #default="scope"><div class="video-step-cell"><strong>{{ videoStepLabel(scope.row.process_step) }}</strong><span v-if="scope.row.status === 'FAILED'" class="video-error">{{ scope.row.error_message || '未记录错误原因' }}</span><span v-else>{{ formatMedia(scope.row) }}</span></div></template>
+          <template #default="scope"><div class="video-step-cell"><strong>{{ videoStepLabel(scope.row.process_step) }}</strong><details v-if="['FAILED', 'CANCELLED'].includes(scope.row.status)" class="admin-cell-details"><summary>{{ scope.row.status === 'CANCELLED' ? '查看终止说明' : '查看错误原因' }}</summary><div>{{ scope.row.error_message || '未记录处理说明' }}</div></details><span v-else>{{ formatMedia(scope.row) }}</span></div></template>
         </el-table-column>
         <el-table-column label="原始文件" width="105"><template #default="scope"><span :class="['file-presence', scope.row.original_exists ? 'present' : 'missing']">{{ scope.row.original_exists ? '文件存在' : '文件丢失' }}</span></template></el-table-column>
         <el-table-column label="最后更新" width="130"><template #default="scope">{{ formatDate(scope.row.updated_at) }}</template></el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="scope"><el-button v-if="scope.row.retryable" link @click="retryVideo(scope.row)">重新转码</el-button><el-button v-if="scope.row.removable" link @click="removeVideo(scope.row)">清理</el-button><span v-if="!scope.row.retryable && !scope.row.removable" class="no-action">无需处理</span></template>
+        <el-table-column label="操作" width="190" fixed="right">
+          <template #default="scope"><el-button v-if="scope.row.cancellable" link :loading="terminatingVideoId === scope.row.id" :disabled="terminatingVideoId !== null" @click="cancelVideo(scope.row)">终止转码</el-button><el-button v-if="scope.row.retryable" link @click="retryVideo(scope.row)">重新转码</el-button><el-button v-if="scope.row.removable" link @click="removeVideo(scope.row)">清理</el-button><span v-if="!scope.row.cancellable && !scope.row.retryable && !scope.row.removable" class="no-action">无需处理</span></template>
         </el-table-column>
       </el-table>
       <el-pagination
@@ -622,7 +675,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <el-button @click="searchUsers">查询用户</el-button>
       </div>
       <p class="table-scroll-hint">左右滑动表格可查看账号状态和操作</p>
-      <el-table :data="users" max-height="530">
+      <el-table :data="users" :height="userPage.total > userPage.page_size ? 530 : undefined" max-height="530">
         <el-table-column prop="username" label="用户名" min-width="140" /><el-table-column prop="real_name" label="姓名" min-width="120" />
         <el-table-column label="角色" width="100"><template #default="scope">{{ roleLabel(scope.row.role) }}</template></el-table-column>
         <el-table-column label="学号 / 工号" min-width="150"><template #default="scope">{{ scope.row.student_no || scope.row.teacher_no || '—' }}</template></el-table-column>
@@ -650,8 +703,13 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
           <el-select v-model="courseFilters.status" placeholder="全部状态"><el-option label="全部状态" value="" /><el-option label="草稿" value="DRAFT" /><el-option label="已发布" value="PUBLISHED" /><el-option label="已下线" value="OFFLINE" /></el-select>
           <el-button @click="searchCourses">查询课程</el-button>
         </div>
-        <el-table :data="courses" max-height="470" empty-text="没有符合条件的课程">
-          <el-table-column label="课程" min-width="185"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.category_name }} · {{ scope.row.teacher_name }}</span></div></template></el-table-column>
+        <el-table
+          :data="courses"
+          :height="coursePage.total > coursePage.page_size ? 470 : undefined"
+          max-height="470"
+          empty-text="没有符合条件的课程"
+        >
+          <el-table-column label="课程" min-width="185"><template #default="scope"><div class="admin-primary-cell"><OverflowText :text="scope.row.name" label="查看课程名称全文" /><OverflowText :text="`${scope.row.category_name} · ${scope.row.teacher_name}`" label="查看授课信息全文" /></div></template></el-table-column>
           <el-table-column label="资源" width="125"><template #default="scope">{{ scope.row.chapter_count }} 章 · {{ scope.row.ready_video_count }}/{{ scope.row.video_count }} 视频</template></el-table-column>
           <el-table-column label="学生" width="75"><template #default="scope">{{ scope.row.student_count }}</template></el-table-column>
           <el-table-column label="状态" width="90"><template #default="scope"><span :class="['operation-state', `state-${scope.row.status.toLowerCase()}`]">{{ courseStatusLabel(scope.row.status) }}</span></template></el-table-column>
@@ -672,7 +730,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
         <div class="surface-heading admin-panel-heading"><div><strong>班级监管</strong><span>删除班级不会删除师生账号</span></div></div>
         <div class="admin-filters class-filters"><el-input v-model="classKeyword" clearable placeholder="搜索班级、教师或工号" @keyup.enter="loadClasses" /><el-button @click="loadClasses">查询班级</el-button></div>
         <el-table :data="classrooms" max-height="470" empty-text="没有符合条件的班级">
-          <el-table-column label="班级" min-width="180"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.description || '暂无说明' }}</span></div></template></el-table-column>
+          <el-table-column label="班级" min-width="180"><template #default="scope"><div class="admin-primary-cell"><OverflowText :text="scope.row.name" label="查看班级名称全文" /><OverflowText :text="scope.row.description || '暂无说明'" label="查看班级说明全文" /></div></template></el-table-column>
           <el-table-column label="负责教师" min-width="125"><template #default="scope">{{ scope.row.teacher_name }}<br><small>{{ scope.row.teacher_no || '—' }}</small></template></el-table-column>
           <el-table-column prop="member_count" label="学生" width="70" /><el-table-column label="操作" width="90" fixed="right"><template #default="scope"><el-button link @click="removeClassroom(scope.row)">删除</el-button></template></el-table-column>
         </el-table>
@@ -682,7 +740,7 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
     <div v-else-if="activeSection === 'categories'" class="management-surface admin-panel admin-categories">
       <div class="surface-heading admin-panel-heading"><div><strong>课程分类管理</strong><span>控制教师创建课程时可选择的分类</span></div><el-button @click="openCategory()">＋ 新建分类</el-button></div>
       <el-table :data="categories" max-height="530" empty-text="暂无课程分类">
-        <el-table-column prop="sort_order" label="排序" width="85" /><el-table-column label="分类" min-width="180"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.name }}</strong><span>{{ scope.row.description || '暂无说明' }}</span></div></template></el-table-column>
+        <el-table-column prop="sort_order" label="排序" width="85" /><el-table-column label="分类" min-width="180"><template #default="scope"><div class="admin-primary-cell"><OverflowText :text="scope.row.name" label="查看分类名称全文" /><OverflowText :text="scope.row.description || '暂无说明'" label="查看分类说明全文" /></div></template></el-table-column>
         <el-table-column prop="course_count" label="课程数" width="100" /><el-table-column label="状态" width="100"><template #default="scope"><span :class="['account-state', scope.row.status ? 'active' : 'disabled']">{{ scope.row.status ? '启用' : '禁用' }}</span></template></el-table-column>
         <el-table-column label="最后更新" width="150"><template #default="scope">{{ formatDate(scope.row.updated_at) }}</template></el-table-column>
         <el-table-column label="操作" width="150" fixed="right"><template #default="scope"><el-button link @click="openCategory(scope.row)">编辑</el-button><el-button link @click="toggleCategory(scope.row)">{{ scope.row.status ? '禁用' : '启用' }}</el-button></template></el-table-column>
@@ -708,16 +766,22 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
           <el-option label="全部对象" value="" /><el-option label="用户" value="USER" /><el-option label="视频" value="VIDEO" /><el-option label="课程" value="COURSE" /><el-option label="班级" value="CLASS" /><el-option label="分类" value="CATEGORY" /><el-option label="公告" value="NOTICE" />
         </el-select>
         <el-select v-model="auditFilters.action" placeholder="全部操作">
-          <el-option label="全部操作" value="" /><el-option label="创建用户" value="USER_CREATE" /><el-option label="用户状态" value="USER_STATUS_CHANGE" /><el-option label="重新转码" value="VIDEO_RETRY" /><el-option label="清理视频" value="VIDEO_DELETE" /><el-option label="课程状态" value="COURSE_STATUS_CHANGE" /><el-option label="删除班级" value="CLASS_DELETE" /><el-option label="创建分类" value="CATEGORY_CREATE" /><el-option label="编辑分类" value="CATEGORY_UPDATE" /><el-option label="分类状态" value="CATEGORY_STATUS_CHANGE" /><el-option label="创建公告" value="NOTICE_CREATE" /><el-option label="编辑公告" value="NOTICE_UPDATE" /><el-option label="公告状态" value="NOTICE_STATUS_CHANGE" /><el-option label="删除公告" value="NOTICE_DELETE" />
+          <el-option label="重置密码" value="USER_PASSWORD_RESET" />
+          <el-option label="全部操作" value="" /><el-option label="创建用户" value="USER_CREATE" /><el-option label="用户状态" value="USER_STATUS_CHANGE" /><el-option label="重新转码" value="VIDEO_RETRY" /><el-option label="终止转码" value="VIDEO_CANCEL" /><el-option label="清理视频" value="VIDEO_DELETE" /><el-option label="课程状态" value="COURSE_STATUS_CHANGE" /><el-option label="删除班级" value="CLASS_DELETE" /><el-option label="创建分类" value="CATEGORY_CREATE" /><el-option label="编辑分类" value="CATEGORY_UPDATE" /><el-option label="分类状态" value="CATEGORY_STATUS_CHANGE" /><el-option label="创建公告" value="NOTICE_CREATE" /><el-option label="编辑公告" value="NOTICE_UPDATE" /><el-option label="公告状态" value="NOTICE_STATUS_CHANGE" /><el-option label="删除公告" value="NOTICE_DELETE" />
         </el-select>
         <el-button @click="searchAuditLogs">查询记录</el-button>
       </div>
       <p class="table-scroll-hint">审计记录只读，保留管理员、对象、来源地址与操作时间</p>
-      <el-table :data="auditLogs" max-height="530" empty-text="暂无管理员操作记录">
+      <el-table
+        :data="auditLogs"
+        :height="auditPage.total > auditPage.page_size ? 530 : undefined"
+        max-height="530"
+        empty-text="暂无管理员操作记录"
+      >
         <el-table-column label="管理员" min-width="145"><template #default="scope"><div class="admin-primary-cell"><strong>{{ scope.row.admin_name }}</strong><span>{{ scope.row.admin_username }}</span></div></template></el-table-column>
         <el-table-column label="操作" min-width="120"><template #default="scope">{{ auditActionLabel(scope.row.action) }}</template></el-table-column>
         <el-table-column label="对象" min-width="110"><template #default="scope">{{ auditResourceLabel(scope.row.resource_type) }}<span v-if="scope.row.resource_id"> #{{ scope.row.resource_id }}</span></template></el-table-column>
-        <el-table-column prop="summary" label="操作摘要" min-width="260" show-overflow-tooltip />
+        <el-table-column prop="summary" label="操作摘要" min-width="260"><template #default="scope"><OverflowText :text="scope.row.summary" label="查看操作摘要全文" /></template></el-table-column>
         <el-table-column label="来源 IP" min-width="130"><template #default="scope">{{ scope.row.ip_address || '—' }}</template></el-table-column>
         <el-table-column label="操作时间" width="145"><template #default="scope">{{ formatDate(scope.row.created_at) }}</template></el-table-column>
       </el-table>
@@ -733,11 +797,11 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
       />
     </div>
 
-    <el-dialog v-model="userDialog" class="admin-neutral-dialog" title="创建教师或学生账号" width="min(620px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetUserForm">
+    <el-dialog v-model="userDialog" class="admin-neutral-dialog" title="创建教师或学生账号" width="min(620px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="resetUserForm" @close-auto-focus="restoreUserFocus">
       <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-position="top"><el-form-item label="账号角色"><el-radio-group v-model="userForm.role"><el-radio-button value="STUDENT">学生</el-radio-button><el-radio-button value="TEACHER">教师</el-radio-button></el-radio-group></el-form-item><div class="admin-form-grid"><el-form-item label="用户名" prop="username"><el-input v-model.trim="userForm.username" placeholder="3–50 位字符" /></el-form-item><el-form-item label="真实姓名" prop="real_name"><el-input v-model.trim="userForm.real_name" placeholder="请输入姓名" /></el-form-item><el-form-item :label="userForm.role === 'STUDENT' ? '学号' : '工号'" :prop="userForm.role === 'STUDENT' ? 'student_no' : 'teacher_no'"><el-input v-if="userForm.role === 'STUDENT'" v-model.trim="userForm.student_no" placeholder="请输入学号" /><el-input v-else v-model.trim="userForm.teacher_no" placeholder="请输入工号" /></el-form-item><el-form-item label="初始密码" prop="password"><el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位" /></el-form-item><el-form-item label="邮箱" prop="email"><el-input v-model.trim="userForm.email" maxlength="100" placeholder="可选" /></el-form-item><el-form-item label="手机号" prop="phone"><el-input v-model.trim="userForm.phone" maxlength="11" placeholder="可选" /></el-form-item></div></el-form>
       <template #footer><el-button :disabled="saving" @click="userDialog = false">取消</el-button><el-button :loading="saving" @click="createUser">创建账号</el-button></template>
     </el-dialog>
-    <el-dialog v-model="passwordDialog" class="admin-neutral-dialog" :title="`重置密码 · ${passwordUser?.username || ''}`" width="min(500px, 94vw)" :close-on-click-modal="!saving">
+    <el-dialog v-model="passwordDialog" class="admin-neutral-dialog" :title="`重置密码 · ${passwordUser?.username || ''}`" width="min(500px, 94vw)" :close-on-click-modal="!saving" @close-auto-focus="restorePasswordFocus">
       <p class="dialog-tip">请将新密码通过线下方式告知用户，不要在公告或公开页面中发送。</p>
       <el-form :model="passwordForm" label-position="top">
         <el-form-item label="新密码"><el-input v-model="passwordForm.new_password" type="password" show-password maxlength="72" placeholder="8–72 位" /></el-form-item>
@@ -745,13 +809,20 @@ onBeforeUnmount(() => window.clearInterval(videoPoller))
       </el-form>
       <template #footer><el-button :disabled="saving" @click="passwordDialog = false">取消</el-button><el-button :loading="saving" @click="resetUserPassword">确认重置</el-button></template>
     </el-dialog>
-    <el-dialog v-model="categoryDialog" class="admin-neutral-dialog" :title="editingCategoryId ? '编辑课程分类' : '新建课程分类'" width="min(560px, 94vw)">
+    <el-dialog v-model="categoryDialog" class="admin-neutral-dialog" :title="editingCategoryId ? '编辑课程分类' : '新建课程分类'" width="min(560px, 94vw)" @close-auto-focus="restoreCategoryFocus">
       <el-form :model="categoryForm" label-position="top"><el-form-item label="分类名称" required><el-input v-model.trim="categoryForm.name" maxlength="50" show-word-limit placeholder="例如：计算机基础" /></el-form-item><el-form-item label="分类说明"><el-input v-model.trim="categoryForm.description" type="textarea" :rows="4" maxlength="255" show-word-limit placeholder="说明该分类包含的课程范围" /></el-form-item><el-form-item label="排序"><el-input-number v-model="categoryForm.sort_order" :min="0" :max="100000" /></el-form-item></el-form>
       <template #footer><el-button :disabled="saving" @click="categoryDialog = false">取消</el-button><el-button :loading="saving" @click="saveCategory">保存分类</el-button></template>
     </el-dialog>
-    <el-dialog v-model="noticeDialog" class="admin-neutral-dialog" :title="editingNoticeId ? '编辑公告' : '新建公告'" width="min(620px, 94vw)">
+    <el-dialog v-model="noticeDialog" class="admin-neutral-dialog" :title="editingNoticeId ? '编辑公告' : '新建公告'" width="min(620px, 94vw)" @close-auto-focus="restoreNoticeFocus">
       <el-form :model="noticeForm" label-position="top"><el-form-item label="公告标题" required><el-input v-model.trim="noticeForm.title" maxlength="200" show-word-limit placeholder="请输入公告标题" /></el-form-item><el-form-item label="公告内容" required><el-input v-model.trim="noticeForm.content" type="textarea" :rows="8" maxlength="50000" placeholder="请输入公告内容" /></el-form-item></el-form>
       <template #footer><el-button :disabled="saving" @click="noticeDialog = false">取消</el-button><el-button :loading="saving" @click="saveNotice">保存公告</el-button></template>
     </el-dialog>
   </section>
 </template>
+
+<style scoped>
+.admin-chart-disclosure { margin: 18px 0; color: #526576; font-size: 13px; }
+.admin-chart-disclosure > summary { cursor: pointer; padding: 9px 0; }
+.admin-statistics-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 10px; align-items: start; }
+@media (max-width: 900px) { .admin-statistics-charts { grid-template-columns: minmax(0, 1fr); } }
+</style>

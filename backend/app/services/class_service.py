@@ -15,6 +15,7 @@ from app.models import (
     User,
 )
 from app.services.notification_service import queue_notification
+from app.services.review_guard import claim_pending, lock_student
 
 
 class ClassNotFound(ValueError):
@@ -91,6 +92,7 @@ def list_course_class_options(course_id: int, student_id: int) -> list[dict]:
 
 
 def request_course_class_join(course_id: int, class_id: int, student_id: int) -> dict:
+    lock_student(student_id)
     course = db.session.get(Course, course_id)
     if course is None or course.status != CourseStatus.PUBLISHED.value:
         raise ClassNotFound("课程不存在或尚未发布")
@@ -134,7 +136,11 @@ def request_course_class_join(course_id: int, class_id: int, student_id: int) ->
         join_request.reviewer_id = None
         join_request.reviewed_at = None
         join_request.created_at = now
-    db.session.flush()
+    try:
+        db.session.flush()
+    except IntegrityError as exc:
+        db.session.rollback()
+        raise ClassConflict("你已经提交过入班申请，请等待教师审批") from exc
     student_name = db.session.scalar(db.select(User.real_name).where(User.id == student_id))
     queue_notification(
         classroom.teacher_id,
@@ -191,6 +197,7 @@ def list_student_class_join_requests(student_id: int) -> list[dict]:
 
 
 def cancel_class_join_request(request_id: int, student_id: int) -> dict:
+    lock_student(student_id)
     join_request = db.session.scalar(
         db.select(TeachingClassJoinRequest)
         .options(
@@ -207,9 +214,8 @@ def cancel_class_join_request(request_id: int, student_id: int) -> dict:
     if join_request.status != ClassJoinRequestStatus.PENDING.value:
         raise ClassConflict("只有待审批的入班申请可以撤回")
 
-    join_request.status = ClassJoinRequestStatus.CANCELLED.value
-    join_request.reviewer_id = None
-    join_request.reviewed_at = utc_now()
+    claim_pending(join_request, {"status": ClassJoinRequestStatus.CANCELLED.value,
+        "reviewer_id": None, "reviewed_at": utc_now()}, ClassConflict, "该入班申请已经处理")
     queue_notification(
         join_request.classroom.teacher_id,
         "学生撤回入班申请",
@@ -227,6 +233,12 @@ def review_class_join_request(
     teacher_id: int,
     action: str,
 ) -> dict:
+    if action not in (ClassJoinRequestStatus.APPROVED.value, ClassJoinRequestStatus.REJECTED.value):
+        raise ClassConflict("不支持的审批操作")
+    student_id = db.session.scalar(db.select(TeachingClassJoinRequest.student_id).where(TeachingClassJoinRequest.id == request_id))
+    if student_id is None:
+        raise ClassNotFound("入班申请不存在")
+    lock_student(student_id)
     join_request = db.session.scalar(
         db.select(TeachingClassJoinRequest)
         .options(
@@ -236,6 +248,7 @@ def review_class_join_request(
             selectinload(TeachingClassJoinRequest.source_course),
         )
         .where(TeachingClassJoinRequest.id == request_id)
+        .with_for_update().execution_options(populate_existing=True)
     )
     if join_request is None:
         raise ClassNotFound("入班申请不存在")
@@ -245,9 +258,11 @@ def review_class_join_request(
         raise ClassConflict("该入班申请已经处理")
 
     approved = action == ClassJoinRequestStatus.APPROVED.value
+    if approved and not join_request.student.status:
+        raise ClassConflict("该学生账号已被禁用，不能加入班级")
+    claim_pending(join_request, {"status": action, "reviewer_id": teacher_id, "reviewed_at": utc_now()},
+        ClassConflict, "该入班申请已经处理")
     if approved:
-        if not join_request.student.status:
-            raise ClassConflict("该学生账号已被禁用，不能加入班级")
         membership = db.session.scalar(
             db.select(TeachingClassStudent).where(
                 TeachingClassStudent.class_id == join_request.class_id,
@@ -382,6 +397,7 @@ def add_student(class_id: int, teacher_id: int, account: str) -> dict:
     )
     if student is None:
         raise ClassNotFound("没有找到对应的学生账号")
+    student = lock_student(student.id)
     if student.role != UserRole.STUDENT.value:
         raise ClassConflict("该账号不是学生账号")
     if not student.status:
@@ -403,9 +419,8 @@ def add_student(class_id: int, teacher_id: int, account: str) -> dict:
         )
     )
     if pending_request is not None:
-        pending_request.status = ClassJoinRequestStatus.APPROVED.value
-        pending_request.reviewer_id = teacher_id
-        pending_request.reviewed_at = utc_now()
+        claim_pending(pending_request, {"status": ClassJoinRequestStatus.APPROVED.value,
+            "reviewer_id": teacher_id, "reviewed_at": utc_now()}, ClassConflict, "该入班申请已经处理")
         queue_notification(
             student.id,
             "入班申请已通过",
@@ -424,6 +439,7 @@ def add_student(class_id: int, teacher_id: int, account: str) -> dict:
 
 
 def remove_student(class_id: int, student_id: int, teacher_id: int) -> dict:
+    lock_student(student_id)
     classroom = _owned_classroom(class_id, teacher_id)
     link = db.session.scalar(
         db.select(TeachingClassStudent).where(

@@ -13,9 +13,9 @@ let pagesChecked = 0
 try {
   for (const [account, paths] of [
     ['defense_admin', [['/admin', '系统后台']]],
-    ['defense_teacher', [['/classes', '班级管理'], ['/teacher/courses', '教学管理'], ['/teacher/questions', '课程答疑'], ['/homeworks', '作业管理'], ['/exams', '测验管理']]],
+    ['defense_teacher', [['/classes', '班级管理'], ['/teacher/courses', '教学管理'], ['/teacher/questions', '课程答疑'], ['/homeworks', '作业管理'], ['/exams', '测验管理'], ['/statistics', '教学数据']]],
     ['defense_student01', [['/learning', '我的学习'], ['/classes', '我的班级'], ['/homeworks', '课程作业'], ['/exams', '在线测验'], ['/statistics', '学习数据']]],
-    ['defense_new_student', [[`/courses/${report.courses.c}`, 'C语言程序设计 · 从入门到实践']]],
+    ['defense_student29', [[`/courses/${report.courses.c}`, 'C语言程序设计 · 从入门到实践']]],
   ]) {
     const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 960 } })
     const page = await context.newPage()
@@ -33,7 +33,15 @@ try {
       await page.goto(path)
       await expect(page.getByRole('heading', { name: title, exact: true }).first()).toBeVisible()
       await expect(page.locator('.el-loading-mask:visible')).toHaveCount(0)
-      if (account === 'defense_new_student') {
+      if (path === '/statistics') {
+        await expect(page.locator('.statistics-chart-canvas svg')).toHaveCount(2)
+      }
+      if (path === '/learning') {
+        const cover = page.locator('.learning-card-mark img').first()
+        await expect.poll(() => cover.evaluate((image) => image.naturalWidth)).toBeGreaterThan(0)
+        expect(await cover.evaluate((image) => getComputedStyle(image).objectFit)).toBe('contain')
+      }
+      if (account === 'defense_student29') {
         await expect(page.getByRole('button', { name: '查看课程班级', exact: true })).toHaveText('加入班级')
         const player = page.locator('video')
         await expect.poll(() => player.evaluate((video) => video.readyState)).toBeGreaterThanOrEqual(2)
@@ -42,6 +50,11 @@ try {
         await player.evaluate((video) => video.pause())
       }
       if (account === 'defense_admin') {
+        await page.getByText('查看数据图表', { exact: true }).click()
+        await expect(page.locator('.statistics-chart-canvas svg')).toHaveCount(2)
+        await page.screenshot({ path: fileURLToPath(new URL('defense-admin-charts.png', screenshots)), fullPage: true })
+        await page.getByText('查看数据图表', { exact: true }).click()
+        await expect(page.locator('.statistics-chart-canvas')).toHaveCount(0)
         await page.getByPlaceholder('搜索视频、课程、教师或文件名').fill('（演示）')
         await page.getByRole('button', { name: '查询任务', exact: true }).click()
         for (const title of ['等待超时任务（演示）', '处理中断任务（演示）']) {

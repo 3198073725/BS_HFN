@@ -19,6 +19,7 @@ class VideoStatus(StrEnum):
     PROCESSING = "PROCESSING"
     READY = "READY"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class LearningStatus(StrEnum):

@@ -226,7 +226,7 @@ def seed_demo_data(app, password=None):
                              avatar=copy(assets / f"teacher-{index}.png", f"avatars/defense-teacher-{index}.png"))
                         for index, (username, name, bio) in enumerate(TEACHERS)]
             students = [user(f"defense_student{index+1:02}", name, "STUDENT", student_no=f"DFS2026{index+1:03}",
-                             email=f"defense_student{index+1:02}@example.invalid", status=index < 28,
+                             email=f"defense_student{index+1:02}@example.invalid", status=index < 29,
                              bio="正在学习程序设计与大学通识课程，喜欢记录笔记并通过练习巩固知识。")
                         for index, name in enumerate(STUDENT_NAMES)]
             fresh = user("defense_new_student", "新同学何苗", "STUDENT", student_no="DFS2026031", email="defense_new_student@example.invalid", bio="尚未选课，用于现场展示申请入班、教师审批与课程同步。")
@@ -463,7 +463,12 @@ def check_demo(app):
                     assert (Path(app.config["MEDIA_ROOT"]) / relative).is_file(), f"缺少媒体文件：{relative}"
                     files += 1
         retry = serialize_admin_video(db.session.get(Video, report["video_tasks"]["retry"]))
-        assert retry["retryable"] and retry["removable"]
+        # This fixture may already have been retried during a rehearsal. Both the
+        # original recoverable failure and a completed retry are valid states.
+        if retry["status"] == "READY":
+            assert retry["original_exists"] and not retry["retryable"] and not retry["removable"]
+        else:
+            assert retry["status"] == "FAILED" and retry["retryable"] and retry["removable"]
         for key in ("pending", "processing"):
             assert serialize_admin_video(db.session.get(Video, report["video_tasks"][key]))["retryable"]
         missing = serialize_admin_video(db.session.get(Video, report["video_tasks"]["missing"]))

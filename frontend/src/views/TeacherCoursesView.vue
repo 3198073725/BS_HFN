@@ -1,19 +1,27 @@
 <script setup>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import api from '../api/client'
+import OverflowText from '../components/OverflowText.vue'
+import { focusElement, useDialogFocus } from '../utils/dialogFocus'
 
 
 const courses = ref([])
 const categories = ref([])
 const loading = ref(false)
+const loadError = ref('')
 const courseFormRef = ref(null)
 const chapterFormRef = ref(null)
 const videoFormRef = ref(null)
+const videoTitleInput = ref(null)
 const courseDialog = ref(false)
 const chapterDialog = ref(false)
 const videoDialog = ref(false)
+const restoreCourseFocus = useDialogFocus(courseDialog)
+const restoreChapterFocus = useDialogFocus(chapterDialog)
+const chapterUploadButton = ref(null)
+let videoEditorOpener = null
 const videoDialogMode = ref('upload')
 const selectedCourse = ref(null)
 const selectedChapter = ref(null)
@@ -32,7 +40,11 @@ const uploading = ref(false)
 const savingCourse = ref(false)
 const savingChapter = ref(false)
 const processingVideoId = ref(null)
+const chapterBusy = computed(() => savingChapter.value || uploading.value || processingVideoId.value !== null)
 let disposed = false
+let loadRequestSequence = 0
+let videoMonitorSequence = 0
+const activeVideoMonitors = new Map()
 const courseForm = reactive({ name: '', category_id: null, description: '', detail: '' })
 const chapterForm = reactive({ title: '', description: '', sort_order: 0 })
 const courseRules = {
@@ -53,18 +65,32 @@ const chapterRules = {
 }
 
 async function load() {
+  const requestId = ++loadRequestSequence
   loading.value = true
+  loadError.value = ''
   try {
     const [courseResponse, categoryResponse] = await Promise.all([
       api.get('/courses/mine'),
       api.get('/courses/categories'),
     ])
+    if (disposed || requestId !== loadRequestSequence) return
     courses.value = courseResponse.data
     categories.value = categoryResponse.data
+    // Refresh the chapter's video list without overwriting either unsaved form.
+    if (chapterDialog.value && editingChapterId.value) {
+      const currentCourse = courses.value.find((item) => item.id === selectedCourse.value?.id)
+      const currentChapter = currentCourse?.chapters?.find((item) => item.id === editingChapterId.value)
+      if (currentCourse && currentChapter) {
+        selectedCourse.value = currentCourse
+        selectedChapter.value = currentChapter
+      }
+    }
   } catch (error) {
+    if (disposed || requestId !== loadRequestSequence) return
+    loadError.value = error.message || '教学课程加载失败'
     ElMessage.error(error.message || '教学课程加载失败')
   } finally {
-    loading.value = false
+    if (!disposed && requestId === loadRequestSequence) loading.value = false
   }
 }
 
@@ -194,7 +220,11 @@ async function saveCourse() {
 }
 
 function openChapter(course, chapter = null) {
+  if (chapterBusy.value) return
   selectedCourse.value = course
+  selectedChapter.value = chapter
+  videoDialog.value = false
+  resetVideoForm()
   editingChapterId.value = chapter?.id || null
   Object.assign(chapterForm, {
     title: chapter?.title || '',
@@ -206,14 +236,20 @@ function openChapter(course, chapter = null) {
 }
 
 function resetChapterForm() {
+  videoDialog.value = false
+  resetVideoForm()
+  selectedChapter.value = null
+  selectedCourse.value = null
+  videoEditorOpener = null
   editingChapterId.value = null
   Object.assign(chapterForm, { title: '', description: '', sort_order: 0 })
   chapterFormRef.value?.clearValidate()
 }
 
 async function saveChapter() {
+  if (chapterBusy.value) return
   const valid = await chapterFormRef.value?.validate().catch(() => false)
-  if (!valid || savingChapter.value) return
+  if (!valid || chapterBusy.value) return
 
   savingChapter.value = true
   try {
@@ -222,21 +258,27 @@ async function saveChapter() {
         `/courses/${selectedCourse.value.id}/chapters/${editingChapterId.value}`,
         chapterForm,
       )
+      if (disposed) return
       ElMessage.success('章节信息已更新')
     } else {
-      await api.post(`/courses/${selectedCourse.value.id}/chapters`, chapterForm)
+      const response = await api.post(`/courses/${selectedCourse.value.id}/chapters`, { ...chapterForm })
+      if (disposed) return
+      editingChapterId.value = response.data.id
+      selectedChapter.value = { ...response.data, videos: response.data.videos || [] }
       ElMessage.success('章节创建成功')
     }
-    chapterDialog.value = false
     await load()
   } catch (error) {
-    ElMessage.error(error.message || '章节保存失败')
+    if (!disposed) ElMessage.error(error.message || '章节保存失败')
   } finally {
     savingChapter.value = false
   }
 }
 
-function openVideo(chapter) {
+function openVideo(course, chapter) {
+  if (chapterBusy.value || videoDialog.value) return
+  if (!chapterDialog.value) openChapter(course, chapter)
+  videoEditorOpener = document.activeElement
   videoDialogMode.value = 'upload'
   selectedChapter.value = chapter
   selectedVideo.value = null
@@ -245,9 +287,12 @@ function openVideo(chapter) {
   videoInputKey.value += 1
   videoFormRef.value?.clearValidate()
   videoDialog.value = true
+  void focusVideoEditor()
 }
 
 function openVideoEdit(course, chapter, video) {
+  if (chapterBusy.value || videoDialog.value) return
+  videoEditorOpener = document.activeElement
   videoDialogMode.value = 'edit'
   selectedCourse.value = course
   selectedChapter.value = chapter
@@ -261,9 +306,12 @@ function openVideoEdit(course, chapter, video) {
   videoInputKey.value += 1
   videoFormRef.value?.clearValidate()
   videoDialog.value = true
+  void focusVideoEditor()
 }
 
 function openVideoReplace(course, chapter, video) {
+  if (chapterBusy.value || videoDialog.value) return
+  videoEditorOpener = document.activeElement
   videoDialogMode.value = 'replace'
   selectedCourse.value = course
   selectedChapter.value = chapter
@@ -277,6 +325,14 @@ function openVideoReplace(course, chapter, video) {
   videoInputKey.value += 1
   videoFormRef.value?.clearValidate()
   videoDialog.value = true
+  void focusVideoEditor()
+}
+
+async function focusVideoEditor() {
+  await nextTick()
+  if (disposed || !chapterDialog.value || !videoDialog.value) return
+  videoTitleInput.value?.focus()
+  videoTitleInput.value?.input?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
 }
 
 const videoForm = reactive({ title: '', description: '', sort_order: 0 })
@@ -296,6 +352,7 @@ const statusLabels = {
   PROCESSING: '处理中',
   READY: '可播放',
   FAILED: '处理失败',
+  CANCELLED: '已终止',
 }
 
 function statusLabel(status) {
@@ -315,6 +372,14 @@ function canChangeVideoContent(course, video) {
     && !['PENDING', 'PROCESSING'].includes(video.status)
 }
 
+function canDeleteVideo(course) {
+  return ['DRAFT', 'OFFLINE'].includes(course.status)
+}
+
+function isVideoProcessing(video) {
+  return ['UPLOADING', 'PENDING', 'PROCESSING'].includes(video.status)
+}
+
 function videoDialogTitle() {
   return { upload: '上传视频', edit: '编辑视频资料', replace: '替换视频文件' }[videoDialogMode.value]
 }
@@ -329,18 +394,31 @@ function resetVideoForm() {
   videoFormRef.value?.clearValidate()
 }
 
+async function closeVideoEditor() {
+  if (uploading.value) return
+  videoDialog.value = false
+  resetVideoForm()
+  await nextTick()
+  if (!disposed && chapterDialog.value) {
+    if (videoEditorOpener?.closest('.chapter-editor-dialog') && focusElement(videoEditorOpener)) return
+    focusElement(chapterUploadButton.value?.$el)
+  }
+}
+
 function selectVideoFile(event) {
   videoFile.value = event.target.files?.[0] || null
 }
 
 async function saveVideo() {
+  if (chapterBusy.value) return
   const valid = await videoFormRef.value?.validate().catch(() => false)
-  if (!valid || uploading.value) return
+  if (!valid || chapterBusy.value) return
 
   if (videoDialogMode.value !== 'edit' && !videoFile.value) {
     ElMessage.warning('请选择视频文件')
     return
   }
+  uploading.value = true
   if (videoDialogMode.value === 'replace') {
     try {
       await ElMessageBox.confirm(
@@ -349,26 +427,30 @@ async function saveVideo() {
         { confirmButtonText: '确认替换', cancelButtonText: '取消', type: 'warning' },
       )
     } catch {
+      uploading.value = false
       return
     }
   }
+  if (disposed) { uploading.value = false; return }
 
   if (videoDialogMode.value === 'edit') {
-    uploading.value = true
+    let succeeded = false
     try {
       await api.put(`/videos/${selectedVideo.value.id}`, {
         title: videoForm.title,
         description: videoForm.description,
         sort_order: videoForm.sort_order,
       })
+      if (disposed) return
       ElMessage.success('视频资料已更新')
-      videoDialog.value = false
       await load()
+      succeeded = true
     } catch (error) {
-      ElMessage.error(error.message || '视频资料保存失败')
+      if (!disposed) ElMessage.error(error.message || '视频资料保存失败')
     } finally {
       uploading.value = false
     }
+    if (succeeded && !disposed) await closeVideoEditor()
     return
   }
 
@@ -384,6 +466,7 @@ async function saveVideo() {
       ? `/videos/${selectedVideo.value.id}/replace`
       : '/videos/upload'
     const response = await api.post(endpoint, data, { timeout: 0 })
+    if (disposed) return
     if (response.data.status === 'READY') {
       ElMessage.success(videoDialogMode.value === 'replace' ? '视频替换完成' : '视频处理完成')
       await load()
@@ -395,45 +478,65 @@ async function saveVideo() {
       await load()
       void monitorVideo(response.data.id)
     }
-    videoDialog.value = false
+    if (disposed) return
+    uploading.value = false
+    await closeVideoEditor()
   } catch (error) {
-    ElMessage.error(error.message || (videoDialogMode.value === 'replace' ? '视频替换失败' : '视频上传失败'))
+    if (!disposed) ElMessage.error(error.message || (videoDialogMode.value === 'replace' ? '视频替换失败' : '视频上传失败'))
   } finally {
     uploading.value = false
   }
 }
 
 async function monitorVideo(videoId) {
+  const monitorId = ++videoMonitorSequence
+  activeVideoMonitors.set(videoId, monitorId)
   let consecutiveErrors = 0
-  for (let attempt = 0; attempt < 150 && !disposed; attempt += 1) {
+  for (let attempt = 0; attempt < 150 && !disposed && activeVideoMonitors.get(videoId) === monitorId; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2000))
-    if (disposed) return
+    if (disposed || activeVideoMonitors.get(videoId) !== monitorId) return
     try {
       const response = await api.get(`/videos/${videoId}/status`)
       consecutiveErrors = 0
       if (response.data.status === 'READY') {
         ElMessage.success(`视频“${response.data.title}”处理完成`)
         await load()
+        activeVideoMonitors.delete(videoId)
         return
       }
       if (response.data.status === 'FAILED') {
         ElMessage.error(response.data.error_message || '后台视频处理失败')
         await load()
+        activeVideoMonitors.delete(videoId)
         return
       }
-    } catch {
+      if (response.data.status === 'CANCELLED') {
+        await load()
+        activeVideoMonitors.delete(videoId)
+        return
+      }
+    } catch (error) {
+      if (Number(error?.code) === 404) {
+        activeVideoMonitors.delete(videoId)
+        await load()
+        return
+      }
       consecutiveErrors += 1
       if (consecutiveErrors >= 3) {
         ElMessage.warning('暂时无法获取视频处理状态，请稍后刷新课程列表')
+        activeVideoMonitors.delete(videoId)
         return
       }
     }
   }
-  if (!disposed) ElMessage.warning('视频仍在后台处理，请稍后刷新课程列表')
+  if (!disposed && activeVideoMonitors.get(videoId) === monitorId) {
+    activeVideoMonitors.delete(videoId)
+    ElMessage.warning('视频仍在后台处理，请稍后刷新课程列表')
+  }
 }
 
 async function retryVideo(video) {
-  if (processingVideoId.value !== null) return
+  if (chapterBusy.value) return
   processingVideoId.value = video.id
   try {
     const response = await api.post(`/videos/${video.id}/retry`, null, { timeout: 0 })
@@ -456,19 +559,26 @@ async function retryVideo(video) {
 }
 
 async function removeVideo(course, video) {
+  if (chapterBusy.value) return
+  processingVideoId.value = video.id
   try {
+    const processing = isVideoProcessing(video)
     await ElMessageBox.confirm(
-      `删除“${video.title}”会同时清除相关学习进度、笔记和答疑，确定继续吗？`,
-      '删除视频',
+      processing
+        ? `“${video.title}”仍在转码。继续将终止任务并删除视频，确定吗？`
+        : `删除“${video.title}”会同时清除相关学习进度、笔记和答疑，确定继续吗？`,
+      processing ? '终止并删除视频' : '删除视频',
       { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
+    processingVideoId.value = null
     return
   }
   processingVideoId.value = video.id
   try {
     await api.delete(`/videos/${video.id}`)
-    ElMessage.success('视频已删除')
+    activeVideoMonitors.delete(video.id)
+    ElMessage.success(isVideoProcessing(video) ? '转码任务已终止，视频已删除' : '视频已删除')
     await load()
   } catch (error) {
     ElMessage.error(error.message || '视频删除失败')
@@ -511,6 +621,9 @@ async function removeCourse(course) {
       type: 'warning',
     })
     await api.delete(`/courses/${course.id}`)
+    for (const chapter of course.chapters || []) {
+      for (const video of chapter.videos || []) activeVideoMonitors.delete(video.id)
+    }
     ElMessage.success('课程草稿已删除')
     await load()
   } catch (error) {
@@ -524,6 +637,7 @@ async function removeChapter(course, chapter) {
       type: 'warning',
     })
     await api.delete(`/courses/${course.id}/chapters/${chapter.id}`)
+    for (const video of chapter.videos || []) activeVideoMonitors.delete(video.id)
     ElMessage.success('章节已删除')
     await load()
   } catch (error) {
@@ -534,6 +648,7 @@ async function removeChapter(course, chapter) {
 onMounted(load)
 onBeforeUnmount(() => {
   disposed = true
+  activeVideoMonitors.clear()
   releaseCourseCoverPreview()
 })
 </script>
@@ -544,12 +659,15 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">教师工作台</p>
         <h1>教学管理</h1>
-        <p>创建课程、组织章节并上传视频；已发布课程下线后可继续编辑。</p>
+        <p>创建课程、组织章节并上传视频；发布中也可编辑资料，删除章节等操作需先下线。</p>
       </div>
       <el-button type="primary" size="large" @click="openCourse()">＋ 创建课程</el-button>
     </div>
 
-    <div class="management-surface">
+    <el-result v-if="loadError" icon="error" title="教学课程加载失败" :sub-title="loadError">
+      <template #extra><el-button @click="load">重新加载</el-button></template>
+    </el-result>
+    <div v-else class="management-surface">
       <div class="surface-heading">
         <div>
           <strong>我的课程</strong>
@@ -576,33 +694,13 @@ onBeforeUnmount(() => {
                         <span :class="`video-state state-${video.status.toLowerCase()}`"></span>
                         <span>{{ video.title }} · {{ statusLabel(video.status) }}</span>
                       </div>
-                      <div class="video-inline-actions">
-                        <el-button text @click="openVideoEdit(scope.row, chapter, video)">编辑视频</el-button>
-                        <el-button
-                          v-if="video.status === 'FAILED'"
-                          text
-                          :loading="processingVideoId === video.id"
-                          @click="retryVideo(video)"
-                        >重新处理</el-button>
-                        <el-button
-                          v-if="canChangeVideoContent(scope.row, video)"
-                          text
-                          @click="openVideoReplace(scope.row, chapter, video)"
-                        >替换文件</el-button>
-                        <el-button
-                          v-if="canChangeVideoContent(scope.row, video)"
-                          text
-                          type="danger"
-                          :loading="processingVideoId === video.id"
-                          @click="removeVideo(scope.row, video)"
-                        >删除视频</el-button>
-                      </div>
                     </div>
                   </div>
                 </div>
                 <div class="chapter-actions">
                   <el-button
                     v-if="canMaintain(scope.row)"
+                    :disabled="chapterBusy"
                     link
                     type="primary"
                     @click="openChapter(scope.row, chapter)"
@@ -613,7 +711,7 @@ onBeforeUnmount(() => {
                     type="danger"
                     @click="removeChapter(scope.row, chapter)"
                   >删除</el-button>
-                  <el-button :disabled="!canMaintain(scope.row)" @click="openVideo(chapter)">上传视频</el-button>
+                  <el-button :disabled="!canMaintain(scope.row) || chapterBusy" @click="openVideo(scope.row, chapter)">上传视频</el-button>
                 </div>
               </div>
               <el-empty v-if="!scope.row.chapters.length" description="暂无章节，先添加第一个章节吧" :image-size="64" />
@@ -629,7 +727,7 @@ onBeforeUnmount(() => {
                 :style="scope.row.cover_url ? { backgroundImage: `url(&quot;${scope.row.cover_url}&quot;)` } : null"
                 aria-hidden="true"
               >{{ scope.row.cover_url ? '' : (scope.row.name?.slice(0, 1) || '课') }}</div>
-              <strong class="course-name-cell">{{ scope.row.name }}</strong>
+              <OverflowText class="course-name-cell" :text="scope.row.name" label="查看课程名称全文" />
             </div>
           </template>
         </el-table-column>
@@ -665,6 +763,7 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="courseDialog"
+      @close-auto-focus="restoreCourseFocus"
       :title="editingCourseId ? '编辑课程' : '创建课程'"
       width="min(560px, 92vw)"
       :close-on-click-modal="!savingCourse"
@@ -742,14 +841,17 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="chapterDialog"
+      @close-auto-focus="restoreChapterFocus"
       :title="editingChapterId ? '编辑章节' : '添加章节'"
-      width="min(520px, 92vw)"
-      :close-on-click-modal="!savingChapter"
-      :close-on-press-escape="!savingChapter"
-      :show-close="!savingChapter"
+      width="min(960px, 94vw)"
+      class="chapter-editor-dialog"
+      :close-on-click-modal="!chapterBusy"
+      :close-on-press-escape="!chapterBusy"
+      :show-close="!chapterBusy"
       @closed="resetChapterForm"
     >
-      <el-form ref="chapterFormRef" :model="chapterForm" :rules="chapterRules" label-position="top">
+      <p class="dialog-tip chapter-context">所属课程：{{ selectedCourse?.name }}。章节资料和视频分别保存，成功后立即生效。</p>
+      <el-form ref="chapterFormRef" :model="chapterForm" :rules="chapterRules" :disabled="chapterBusy" label-position="top">
         <el-form-item label="章节标题" prop="title">
           <el-input v-model.trim="chapterForm.title" placeholder="例如：第一章 课程导学" />
         </el-form-item>
@@ -763,24 +865,29 @@ onBeforeUnmount(() => {
         </el-form-item>
         <el-form-item label="排序"><el-input-number v-model="chapterForm.sort_order" :min="0" :max="100000" /></el-form-item>
       </el-form>
-      <template #footer>
-        <el-button :disabled="savingChapter" @click="chapterDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingChapter" @click="saveChapter">保存章节</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="videoDialog"
-      :title="videoDialogTitle()"
-      width="min(520px, 92vw)"
-      :close-on-click-modal="!uploading"
-      :close-on-press-escape="!uploading"
-      :show-close="!uploading"
-      @closed="resetVideoForm"
-    >
-      <el-form ref="videoFormRef" :model="videoForm" :rules="videoRules" label-position="top">
+      <section class="chapter-video-section" aria-label="本章节视频管理">
+        <div class="chapter-video-heading">
+          <div><h3>本章节视频</h3><span>{{ selectedChapter?.videos?.length || 0 }} 个视频 · 上传到当前章节</span></div>
+          <el-button ref="chapterUploadButton" :disabled="!editingChapterId || chapterBusy || videoDialog" @click="openVideo(selectedCourse, selectedChapter)">上传视频</el-button>
+        </div>
+        <p v-if="!editingChapterId" class="dialog-tip">请先保存章节资料，再上传本章节的视频。</p>
+        <div v-else class="chapter-editor-videos">
+          <article v-for="video in selectedChapter?.videos || []" :key="video.id" class="chapter-editor-video">
+            <div class="chapter-editor-video-copy"><OverflowText :text="video.title" label="查看视频标题全文" /><small>{{ statusLabel(video.status) }} · 排序 {{ video.sort_order || 0 }}</small></div>
+            <div class="chapter-editor-video-actions">
+              <el-button :disabled="chapterBusy || videoDialog" @click="openVideoEdit(selectedCourse, selectedChapter, video)">编辑视频</el-button>
+              <el-button v-if="['FAILED', 'CANCELLED'].includes(video.status)" :disabled="chapterBusy || videoDialog" @click="retryVideo(video)">重新处理</el-button>
+              <el-button v-if="canChangeVideoContent(selectedCourse, video)" :disabled="chapterBusy || videoDialog" @click="openVideoReplace(selectedCourse, selectedChapter, video)">替换文件</el-button>
+              <el-button v-if="canDeleteVideo(selectedCourse)" :disabled="chapterBusy || videoDialog" @click="removeVideo(selectedCourse, video)">{{ isVideoProcessing(video) ? '终止并删除' : '删除视频' }}</el-button>
+            </div>
+          </article>
+          <el-empty v-if="!selectedChapter?.videos?.length" description="本章节还没有视频" :image-size="48" />
+        </div>
+        <section v-if="videoDialog" class="chapter-video-form" :aria-label="videoDialogTitle()">
+        <h3>{{ videoDialogTitle() }}</h3>
+        <el-form ref="videoFormRef" :model="videoForm" :rules="videoRules" :disabled="chapterBusy" label-position="top">
         <el-form-item label="视频标题" prop="title">
-          <el-input v-model.trim="videoForm.title" placeholder="请输入视频标题" />
+          <el-input ref="videoTitleInput" v-model.trim="videoForm.title" placeholder="请输入视频标题" />
         </el-form-item>
         <el-form-item label="视频描述" prop="description">
           <el-input
@@ -796,6 +903,7 @@ onBeforeUnmount(() => {
             <input
               :key="videoInputKey"
               type="file"
+              :disabled="chapterBusy"
               accept=".mp4,.mov,.mkv,.avi,.webm,video/mp4,video/quicktime,video/x-matroska,video/webm"
               @change="selectVideoFile"
             />
@@ -811,12 +919,39 @@ onBeforeUnmount(() => {
         替换仅允许草稿或已下线课程。系统会创建新视频并清除原视频对应的学习进度、笔记和答疑。
       </p>
       <p v-else class="dialog-tip">修改标题、描述和排序不会影响学生已有学习记录。</p>
-      <template #footer>
-        <el-button :disabled="uploading" @click="videoDialog = false">取消</el-button>
+      <div class="chapter-video-form-actions">
+        <el-button :disabled="chapterBusy" @click="closeVideoEditor">取消视频编辑</el-button>
         <el-button type="primary" :loading="uploading" @click="saveVideo">
           {{ videoDialogMode === 'edit' ? '保存修改' : (videoDialogMode === 'replace' ? '替换并处理' : '上传并处理') }}
         </el-button>
+      </div>
+      </section>
+      </section>
+      <template #footer>
+        <el-button :disabled="chapterBusy" @click="chapterDialog = false">关闭</el-button>
+        <el-button type="primary" :disabled="uploading || processingVideoId !== null" :loading="savingChapter" @click="saveChapter">保存章节</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
+
+<style scoped>
+.chapter-context { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chapter-video-section { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 18px; }
+.chapter-video-heading, .chapter-editor-video { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.chapter-video-heading h3, .chapter-video-form h3 { margin: 0 0 8px; font-size: 16px; }
+.chapter-video-heading span, .chapter-editor-video-copy small { color: var(--ink-600); font-size: 12px; }
+.chapter-editor-videos { max-height: 260px; overflow: auto; overscroll-behavior: contain; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; }
+.chapter-editor-video { padding: 12px; border-bottom: 1px solid var(--line); }
+.chapter-editor-video:last-child { border-bottom: 0; }
+.chapter-editor-video-copy { flex: 1; min-width: 0; }
+.chapter-editor-video-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+.chapter-editor-video-actions :deep(.el-button) { margin: 0; }
+.chapter-video-form { margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: #f8f9fa; }
+.chapter-video-form-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 620px) {
+  .chapter-editor-video { align-items: stretch; flex-direction: column; gap: 10px; }
+  .chapter-editor-video-actions { flex-shrink: 1; }
+  .chapter-video-form { padding: 12px; }
+}
+</style>

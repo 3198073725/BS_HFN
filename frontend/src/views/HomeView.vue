@@ -7,13 +7,19 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const notices = ref([])
+const noticesLoading = ref(false)
+const noticesError = ref('')
 
 async function loadNotices() {
+  noticesLoading.value = true
+  noticesError.value = ''
   try {
     const response = await api.get('/notices')
     notices.value = response.data.slice(0, 4)
-  } catch {
-    notices.value = []
+  } catch (error) {
+    noticesError.value = error.message || '公告加载失败'
+  } finally {
+    noticesLoading.value = false
   }
 }
 
@@ -43,7 +49,7 @@ onMounted(loadNotices)
       </div>
 
       <aside class="portal-service-card" aria-label="平台服务说明">
-        <div class="portal-card-heading"><h2>平台服务</h2><span>正常运行</span></div>
+        <div class="portal-card-heading"><h2>平台服务</h2><span>教学服务</span></div>
         <dl>
           <div><dt>课程资源</dt><dd>按课程和章节统一管理</dd></div>
           <div><dt>视频学习</dt><dd>支持电脑与移动端播放</dd></div>
@@ -85,15 +91,18 @@ onMounted(loadNotices)
         </div>
       </div>
 
-      <aside class="portal-notices" aria-labelledby="notice-title">
-        <div class="portal-card-heading"><h2 id="notice-title">通知公告</h2><span>{{ notices.length ? `共 ${notices.length} 条` : '暂无公告' }}</span></div>
-        <div v-if="notices.length" class="portal-notice-list">
+      <aside class="portal-notices" aria-labelledby="notice-title" v-loading="noticesLoading">
+        <div class="portal-card-heading"><h2 id="notice-title">通知公告</h2><RouterLink class="portal-notice-link" to="/notices">全部公告</RouterLink></div>
+        <div v-if="noticesError" class="portal-notice-empty">
+          <p>{{ noticesError }}</p><el-button @click="loadNotices">重新加载</el-button>
+        </div>
+        <div v-else-if="notices.length" class="portal-notice-list">
           <article v-for="notice in notices" :key="notice.id">
             <time>{{ formatDate(notice.publish_time) }}</time>
-            <div><h3>{{ notice.title }}</h3><p>{{ notice.content }}</p></div>
+            <div><h3><RouterLink :to="`/notices?notice_id=${notice.id}`">{{ notice.title }}</RouterLink></h3><p>{{ notice.content }}</p><RouterLink class="portal-notice-link" :to="`/notices?notice_id=${notice.id}`">阅读全文</RouterLink></div>
           </article>
         </div>
-        <div v-else class="portal-notice-empty">当前没有新的系统公告</div>
+        <div v-else-if="!noticesLoading" class="portal-notice-empty">当前没有新的系统公告</div>
       </aside>
     </section>
   </div>

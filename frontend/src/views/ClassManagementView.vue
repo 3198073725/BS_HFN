@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import api from '../api/client'
+import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 
 
@@ -12,8 +13,10 @@ const route = useRoute()
 const isTeacher = computed(() => auth.user?.role === 'TEACHER')
 const classrooms = ref([])
 const loading = ref(false)
+const loadError = ref('')
 const saving = ref(false)
 const dialogVisible = ref(false)
+const restoreClassFocus = useDialogFocus(dialogVisible)
 const editingClassId = ref(null)
 const formRef = ref(null)
 const addingClassId = ref(null)
@@ -90,6 +93,16 @@ watch(selectedClassId, (classId) => {
   void loadClassStatistics(classId)
 })
 
+function navigateClassList(event, index) {
+  const last = filteredClassrooms.value.length - 1
+  const targets = { ArrowDown: Math.min(index + 1, last), ArrowUp: Math.max(index - 1, 0), Home: 0, End: last }
+  if (!(event.key in targets)) return
+  event.preventDefault()
+  const target = targets[event.key]
+  selectedClassId.value = filteredClassrooms.value[target].id
+  event.currentTarget.parentElement.querySelectorAll('[role="option"]')[target]?.focus()
+}
+
 function formatDate(value) {
   if (!value) return '—'
   return new Intl.DateTimeFormat('zh-CN', {
@@ -102,6 +115,7 @@ function formatDate(value) {
 async function loadClasses() {
   const requestId = ++requestSequence
   loading.value = true
+  loadError.value = ''
   try {
     const [response, courseResponse, resetResponse, joinResponse] = await Promise.all([
       api.get('/classes'),
@@ -125,6 +139,7 @@ async function loadClasses() {
     }
   } catch (error) {
     if (requestId === requestSequence) {
+      loadError.value = error.message || '班级信息加载失败'
       ElMessage.error(error.message || '班级信息加载失败')
     }
   } finally {
@@ -455,6 +470,10 @@ onBeforeUnmount(() => {
       <el-button v-if="isTeacher" type="primary" @click="openCreateDialog">＋ 创建班级</el-button>
     </div>
 
+    <el-result v-if="loadError" icon="error" title="班级信息加载失败" :sub-title="loadError">
+      <template #extra><el-button @click="loadClasses">重新加载</el-button></template>
+    </el-result>
+    <template v-else>
     <div v-if="isTeacher" class="classroom-overview" aria-label="班级概览">
       <article>
         <span>我管理的班级</span>
@@ -535,6 +554,9 @@ onBeforeUnmount(() => {
             type="button"
             role="option"
             :aria-selected="classroom.id === selectedClassroom?.id"
+            :tabindex="classroom.id === selectedClassroom?.id ? 0 : -1"
+            :title="classroom.name"
+            @keydown="navigateClassList($event, index)"
             @click="selectedClassId = classroom.id"
           >
             <span>{{ String(index + 1).padStart(2, '0') }}</span>
@@ -603,7 +625,7 @@ onBeforeUnmount(() => {
           <div class="classroom-progress-heading">
             <div>
               <strong>教学进展</strong>
-              <small>按当前班级名册和已关联课程统计</small>
+              <small>按当前名册与关联课程统计，含未发布/下线课程；下线保留历史进展</small>
             </div>
             <el-button text :disabled="statisticsLoading" @click="loadClassStatistics(classroom.id)">刷新</el-button>
           </div>
@@ -865,9 +887,11 @@ onBeforeUnmount(() => {
       <el-empty :description="isTeacher ? '还没有班级，先创建第一个教学班吧' : '你目前还没有加入任何班级'" />
       <el-button v-if="isTeacher" type="primary" @click="openCreateDialog">创建第一个班级</el-button>
     </div>
+    </template>
 
     <el-dialog
       v-model="dialogVisible"
+      @close-auto-focus="restoreClassFocus"
       :title="editingClassId ? '编辑班级' : '创建班级'"
       width="min(520px, calc(100vw - 28px))"
       :close-on-click-modal="!saving"

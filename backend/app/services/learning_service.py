@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
@@ -5,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.constants import CourseStatus, LearningStatus, VideoStatus
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
-from app.models import Chapter, Course, CourseStudent, Favorite, LearningRecord, Video, VideoNote
+from app.models import Chapter, Course, CourseStudent, Favorite, LearningRecord, LearningProgressReceipt, User, Video, VideoNote
 from .course_service import serialize_course
 
 
@@ -18,6 +21,10 @@ class LearningPermissionDenied(PermissionError):
 
 
 class LearningConflict(ValueError):
+    pass
+
+
+class LearningUnavailable(ValueError):
     pass
 
 
@@ -162,14 +169,26 @@ def get_progress(student_id: int, video_id: int) -> dict:
     return serialize_progress(record)
 
 
-def update_progress(student_id: int, video_id: int, current_time: float, watch_delta: int) -> dict:
-    video = get_student_video(student_id, video_id)
+def update_progress(student_id: int, video_id: int, current_time: float, watch_delta: int, request_id: str | None = None) -> dict:
+    # Lock the stable parent even before the student's first learning row exists.
+    db.session.scalar(db.select(User).where(User.id == student_id).with_for_update())
+    video = get_student_video(student_id, video_id, preserve_pending=True)
     normalized_time = _checked_video_time(video, current_time)
+    payload_hash = hashlib.sha256(json.dumps([video_id, float(current_time), int(watch_delta)]).encode()).hexdigest()
+    if request_id:
+        receipt = db.session.scalar(db.select(LearningProgressReceipt).where(
+            LearningProgressReceipt.student_id == student_id,
+            LearningProgressReceipt.request_id == request_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if receipt is not None:
+            if receipt.payload_hash != payload_hash:
+                raise LearningConflict("进度请求编号已用于其他内容，请勿修改已排队记录")
+            return receipt.response
     record = db.session.scalar(
         db.select(LearningRecord).where(
             LearningRecord.student_id == student_id,
             LearningRecord.video_id == video_id,
-        ).with_for_update()
+        ).with_for_update().execution_options(populate_existing=True)
     )
     if record is None:
         record = LearningRecord(student_id=student_id, video_id=video_id)
@@ -185,11 +204,16 @@ def update_progress(student_id: int, video_id: int, current_time: float, watch_d
     )
     record.last_watch_time = _now()
     try:
+        db.session.flush()
+        response = serialize_progress(record)
+        if request_id:
+            db.session.add(LearningProgressReceipt(student_id=student_id, video_id=video_id,
+                request_id=request_id, payload_hash=payload_hash, response=response))
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()
         raise LearningConflict("学习进度更新冲突，请重试") from exc
-    return serialize_progress(record)
+    return response
 
 
 def list_notes(student_id: int, video_id: int) -> list[dict]:
@@ -233,17 +257,16 @@ def delete_note(student_id: int, note_id: int) -> None:
     db.session.commit()
 
 
-def get_student_video(student_id: int, video_id: int) -> Video:
+def get_student_video(student_id: int, video_id: int, *, preserve_pending: bool = False) -> Video:
     video = db.session.scalar(
         db.select(Video)
         .options(joinedload(Video.chapter).joinedload(Chapter.course))
         .where(Video.id == video_id)
     )
-    if (
-        video is None
-        or video.status != VideoStatus.READY.value
-        or video.chapter.course.status != CourseStatus.PUBLISHED.value
-    ):
+    if video is None:
+        raise LearningNotFound("视频已删除或替换，旧进度无法补传")
+    unavailable = video.status != VideoStatus.READY.value or video.chapter.course.status != CourseStatus.PUBLISHED.value
+    if unavailable and not preserve_pending:
         raise LearningNotFound("视频不存在或暂不可学习")
     joined = db.session.scalar(
         db.select(CourseStudent.id).where(
@@ -254,6 +277,8 @@ def get_student_video(student_id: int, video_id: int) -> Video:
     )
     if joined is None:
         raise LearningPermissionDenied("请先加入课程")
+    if unavailable:
+        raise LearningUnavailable("视频或课程暂不可学习，已缓存进度将在恢复后补传")
     return video
 
 

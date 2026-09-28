@@ -5,6 +5,7 @@ from app.services.learning_service import (
     LearningConflict,
     LearningNotFound,
     LearningPermissionDenied,
+    LearningUnavailable,
     add_favorite,
     create_note,
     delete_note,
@@ -89,7 +90,7 @@ def save_video_progress(video_id: int):
         return error(str(exc), 400)
     return _handle(
         lambda: success(
-            update_progress(_student_id(), video_id, data["current_time"], data["watch_delta"]),
+            update_progress(_student_id(), video_id, data["current_time"], data["watch_delta"], data["request_id"]),
             "学习进度已保存",
         )
     )
@@ -144,6 +145,8 @@ def _student_id() -> int:
 def _handle(action):
     try:
         return action()
+    except LearningUnavailable as exc:
+        return error(str(exc), 423)
     except LearningNotFound as exc:
         return error(str(exc), 404)
     except LearningPermissionDenied as exc:

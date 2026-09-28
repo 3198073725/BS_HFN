@@ -21,6 +21,7 @@ from app.services.course_service import (
     delete_draft_course,
     get_visible_course,
     list_categories,
+    list_published_course_teachers,
     list_published_courses,
     list_teacher_courses,
     update_chapter,
@@ -37,16 +38,28 @@ def categories():
     return success(list_categories())
 
 
+@courses_bp.get("/teachers")
+def published_course_teachers():
+    return success(list_published_course_teachers())
+
+
 @courses_bp.get("")
 def published_courses():
     raw_category = request.args.get("category_id")
+    raw_teacher = request.args.get("teacher_id")
+    keyword = str(request.args.get("keyword") or "").strip()
     try:
         category_id = int(raw_category) if raw_category else None
+        teacher_id = int(raw_teacher) if raw_teacher else None
     except ValueError:
-        return error("课程分类参数不正确", 400)
+        return error("课程筛选参数不正确", 400)
     if category_id is not None and category_id <= 0:
         return error("课程分类参数不正确", 400)
-    return success(list_published_courses(category_id))
+    if teacher_id is not None and teacher_id <= 0:
+        return error("授课教师参数不正确", 400)
+    if len(keyword) > 100:
+        return error("课程关键词不能超过100位", 400)
+    return success(list_published_courses(category_id, teacher_id, keyword or None))
 
 
 @courses_bp.get("/mine")

@@ -16,6 +16,7 @@ backend/.e2e-media/
 
 # Environment and local runtime data
 .env
+账号密码.txt
 *.log
 backend/logs/*
 !backend/logs/.gitkeep

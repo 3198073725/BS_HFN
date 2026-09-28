@@ -165,9 +165,12 @@ test('访问令牌损坏时使用刷新令牌恢复请求', async ({ page }) => 
   await page.getByRole('link', { name: '我的学习', exact: true }).click()
   await expect(page).toHaveURL('/learning')
   await expect(page.getByRole('heading', { name: '我的学习', exact: true })).toBeVisible()
-  const refreshedAccessToken = await page.evaluate(() => localStorage.getItem('access_token'))
-  expect(refreshedAccessToken).not.toBe('invalid-token')
-  expect(refreshedAccessToken).toBeTruthy()
+  // The heading renders before requests finish; wait for the actual refreshed session.
+  await expect.poll(() => page.evaluate(() => {
+    const token = localStorage.getItem('access_token')
+    return Boolean(token && token !== 'invalid-token')
+  })).toBe(true)
+  await expect(page.locator('.learning-course-card').first()).toBeVisible()
 })
 
 
@@ -621,7 +624,7 @@ test('我的学习使用统一的卡片与操作控件尺寸', async ({ page }) 
   expect(desktopTabWidth).toBeLessThan(360)
   await expectStandardControlSizes(page)
 
-  await page.getByRole('button', { name: /我的收藏/ }).click()
+  await page.getByRole('tab', { name: /我的收藏/ }).click()
   const emptyState = page.locator('.learning-empty')
   await expect(emptyState).toBeVisible()
   const emptyMetrics = await emptyState.evaluate((element) => ({
@@ -633,7 +636,7 @@ test('我的学习使用统一的卡片与操作控件尺寸', async ({ page }) 
 
   includeFavorite = true
   await page.reload()
-  await page.getByRole('button', { name: /我的收藏/ }).click()
+  await page.getByRole('tab', { name: /我的收藏/ }).click()
   const favoriteCard = page.locator('.favorite-card').first()
   await expect(favoriteCard).toBeVisible()
   const favoriteMetrics = await favoriteCard.evaluate((element) => ({
@@ -676,7 +679,16 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
   const refreshLabel = page.getByRole('button', { name: '刷新', exact: true }).locator('span')
   await expect(refreshLabel).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(refreshLabel).toHaveCSS('padding-left', '0px')
+  const pendingVideo = page.getByRole('row').filter({ hasText: '端测等待转码视频' })
+  await pendingVideo.getByRole('button', { name: '终止转码', exact: true }).click()
+  const cancelDialog = page.getByRole('dialog', { name: '终止转码任务' })
+  await expect(cancelDialog).toContainText('原始视频文件会保留')
+  await cancelDialog.getByRole('button', { name: '确认终止', exact: true }).click()
+  await expect(pendingVideo.getByText('已终止', { exact: true })).toBeVisible()
+  await expect(pendingVideo.getByRole('button', { name: '重新转码', exact: true })).toBeVisible()
+  await expect(pendingVideo.getByRole('button', { name: '清理', exact: true })).toBeVisible()
   const failedVideo = page.getByRole('row').filter({ hasText: '端测失败转码视频' })
+  await failedVideo.locator('summary').filter({ hasText: '查看错误原因' }).click()
   await expect(failedVideo.getByText('端到端模拟：转码进程异常退出')).toBeVisible()
   await failedVideo.getByRole('button', { name: '重新转码', exact: true }).click()
   const retryDialog = page.getByRole('dialog', { name: '重新转码' })
@@ -693,6 +705,8 @@ test('管理员可以进入系统后台，角色路由不会泄露', async ({ pa
   const retryAudit = page.getByRole('row').filter({ hasText: '重新处理视频' })
   await expect(retryAudit.getByText('重新转码', { exact: true })).toBeVisible()
   await expect(retryAudit).toContainText('e2e_admin')
+  const cancelAudit = page.getByRole('row').filter({ hasText: '终止视频转码' })
+  await expect(cancelAudit.getByText('终止转码', { exact: true })).toBeVisible()
   await expectStandardControlSizes(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: /视频处理/ }).click()
@@ -759,7 +773,8 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
   await courseRow.getByRole('button', { name: '添加章节' }).click()
   await page.getByPlaceholder('例如：第一章 课程导学').fill('第一章 自动化导学')
   await page.getByRole('button', { name: '保存章节', exact: true }).click()
-  await expect(page.getByText('章节创建成功')).toBeVisible()
+  await expect(page.getByText('章节创建成功').last()).toBeVisible()
+  await page.getByRole('dialog', { name: '编辑章节' }).getByRole('button', { name: '关闭', exact: true }).click()
 
   courseRow = page.getByRole('row').filter({ hasText: courseName })
   await courseRow.getByRole('button', { name: '发布课程' }).click()
@@ -789,8 +804,11 @@ test('教师发布课程后学生可以浏览并加入', async ({ page }) => {
 
   await page.getByRole('link', { name: '我的学习', exact: true }).click()
   await expect(page.getByText(courseName, { exact: true })).toBeVisible()
-  await expect(page.locator('.learning-course-card').filter({ hasText: courseName }).locator('.learning-card-mark'))
-    .toHaveClass(/has-image/)
+  const learningCover = page.locator('.learning-course-card').filter({ hasText: courseName }).getByRole('img', { name: `${courseName}封面`, exact: true })
+  await expect(learningCover).toBeVisible()
+  await expect(learningCover).toHaveAttribute('src', /course_covers/)
+  await expect.poll(() => learningCover.evaluate((image) => image.naturalWidth)).toBeGreaterThan(0)
+  await expect(learningCover).toHaveCSS('object-fit', 'contain')
 })
 
 
@@ -819,6 +837,7 @@ test('教师可以编辑课程章节并完成下线与重新发布', async ({ pa
   dialog = page.getByRole('dialog', { name: '添加章节' })
   await dialog.getByPlaceholder('例如：第一章 课程导学').fill('生命周期章节')
   await dialog.getByRole('button', { name: '保存章节', exact: true }).click()
+  await page.getByRole('dialog', { name: '编辑章节' }).getByRole('button', { name: '关闭', exact: true }).click()
   await courseRow.locator('.el-table__expand-icon').click()
 
   const chapterRow = page.locator('.chapter-row').filter({ hasText: '生命周期章节' })
@@ -827,6 +846,7 @@ test('教师可以编辑课程章节并完成下线与重新发布', async ({ pa
   await dialog.getByPlaceholder('例如：第一章 课程导学').fill('生命周期章节已编辑')
   await dialog.getByRole('button', { name: '保存章节', exact: true }).click()
   await expect(page.getByText('章节信息已更新')).toBeVisible()
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
 
   courseRow = page.getByRole('row').filter({ hasText: '课程生命周期已编辑' })
   await courseRow.getByRole('button', { name: '发布课程', exact: true }).click()
@@ -845,7 +865,8 @@ test('教师可以编辑课程章节并完成下线与重新发布', async ({ pa
   dialog = page.getByRole('dialog', { name: '添加章节' })
   await dialog.getByPlaceholder('例如：第一章 课程导学').fill('发布中新增章节')
   await dialog.getByRole('button', { name: '保存章节', exact: true }).click()
-  await expect(page.getByText('章节创建成功')).toBeVisible()
+  await expect(page.getByText('章节创建成功').last()).toBeVisible()
+  await page.getByRole('dialog', { name: '编辑章节' }).getByRole('button', { name: '关闭', exact: true }).click()
 
   courseRow = page.getByRole('row').filter({ hasText: '课程生命周期发布维护版' })
   await courseRow.getByRole('button', { name: '下线', exact: true }).click()
@@ -930,8 +951,12 @@ test('学生提交作业后教师可以批改并回传成绩', async ({ page }) 
   await page.getByRole('link', { name: '课程作业', exact: true }).click()
   homeworkCard = page.locator('.homework-card').filter({ hasText: homeworkTitle })
   await expect(homeworkCard.getByText('88 分', { exact: true })).toBeVisible()
-  await expect(homeworkCard.getByText('教师评语：完成良好', { exact: true })).toBeVisible()
-  await expect(homeworkCard.getByRole('button', { name: '已批改 · 不可修改', exact: true })).toBeDisabled()
+  await homeworkCard.getByRole('button', { name: '查看教师评语', exact: true }).click()
+  const commentDialog = page.getByRole('dialog', { name: `${homeworkTitle} · 教师评语` })
+  await expect(commentDialog.getByText('完成良好', { exact: true })).toBeVisible()
+  await commentDialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(homeworkCard.locator('.submission-result-summary')).toContainText('已批改 · 不可修改')
+  await expect(homeworkCard.locator('.homework-actions')).toHaveCount(0)
 })
 
 
@@ -984,7 +1009,7 @@ test('附件试卷无需在线题目即可发布提交和教师批改', async ({
   await page.getByRole('link', { name: '测验管理', exact: true }).click()
   await page.getByRole('button', { name: '＋ 创建测验' }).click()
   const createDialog = page.getByRole('dialog', { name: '创建测验草稿' })
-  await createDialog.getByText('附件试卷（教师批改）', { exact: true }).click()
+  await createDialog.locator('label.el-radio').filter({ hasText: '附件试卷' }).click()
   await createDialog.getByText('请选择课程', { exact: true }).click()
   await page.getByRole('option', { name: '端测基础课程', exact: true }).click()
   await createDialog.getByPlaceholder('例如：第一章基础测验').fill('附件试卷直接发布')
@@ -1046,7 +1071,7 @@ test('附件试卷无需在线题目即可发布提交和教师批改', async ({
   await expect(take.getByRole('button', { name: '提交测验', exact: true })).toHaveCount(0)
 })
 
-test('测验附件上传失败可以重试且不重复创建草稿', async ({ page }) => {
+test('附件试卷上传失败可以重试且不重复创建草稿', async ({ page }) => {
   await login(page, 'e2e_teacher')
   await page.getByRole('link', { name: '测验管理', exact: true }).click()
   let createRequests = 0
@@ -1060,29 +1085,27 @@ test('测验附件上传失败可以重试且不重复创建草稿', async ({ pa
   }))
   await page.getByRole('button', { name: '＋ 创建测验' }).click()
   const dialog = page.getByRole('dialog', { name: '创建测验草稿' })
+  await dialog.locator('label.el-radio').filter({ hasText: '附件试卷' }).click()
   await dialog.getByText('请选择课程', { exact: true }).click()
   await page.getByRole('option', { name: '端测基础课程', exact: true }).click()
   await dialog.getByPlaceholder('例如：第一章基础测验').fill('测验附件失败重试')
   await dialog.locator('input[type="file"]').setInputFiles({
     name: 'reference.txt', mimeType: 'text/plain', buffer: Buffer.from('reference'),
   })
-  await dialog.getByRole('button', { name: '保存并添加试题', exact: true }).click()
+  await dialog.getByRole('button', { name: '保存并发布', exact: true }).click()
   await expect(page.getByText(/测验草稿已保存，但附件处理失败/)).toBeVisible()
   await expect(dialog.getByPlaceholder('例如：第一章基础测验')).toBeDisabled()
   expect(createRequests).toBe(1)
   await page.unroute(attachmentRoute)
   await dialog.getByRole('button', { name: '重试附件处理', exact: true }).click()
-  const manager = page.getByRole('dialog', { name: '测验附件失败重试 · 试题管理' })
-  await expect(manager).toBeVisible()
+  const publishConfirm = page.getByRole('dialog', { name: '发布测验' })
+  await expect(publishConfirm).toBeVisible()
+  await publishConfirm.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(page.getByText('测验已发布')).toBeVisible()
   expect(createRequests).toBe(1)
-  await manager.getByRole('button', { name: '稍后继续', exact: true }).click()
   const card = page.locator('.exam-card').filter({ hasText: '测验附件失败重试' })
-  await card.getByRole('button', { name: '编辑信息', exact: true }).click()
-  const editDialog = page.getByRole('dialog', { name: '编辑测验草稿' })
-  await expect(editDialog.getByRole('button', { name: '查看现有附件', exact: true })).toBeVisible()
-  await editDialog.getByRole('button', { name: '移除附件', exact: true }).click()
-  await editDialog.getByRole('button', { name: '保存修改', exact: true }).click()
-  await expect(card.getByRole('button', { name: '测验附件', exact: true })).toHaveCount(0)
+  await expect(card.getByText('附件试卷 · 教师批改', { exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: '测验附件', exact: true })).toBeVisible()
 })
 
 test('学生提交测验后教师可以查看自动评分结果', async ({ page }, testInfo) => {
@@ -1096,9 +1119,7 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   await page.getByRole('option', { name: '端测基础课程', exact: true }).click()
   await createDialog.getByPlaceholder('例如：第一章基础测验').fill(examTitle)
   await createDialog.getByPlaceholder('填写作答要求…').fill('请选择正确答案。')
-  await createDialog.locator('input[type="file"]').setInputFiles({
-    name: '测验参考资料.txt', mimeType: 'text/plain', buffer: Buffer.from('Exam attachment reference'),
-  })
+  await expect(createDialog.locator('.teaching-attachment-field')).toHaveCount(0)
   await createDialog.getByRole('button', { name: '保存并添加试题', exact: true }).click()
   await expect(page.getByText('测验草稿已创建，请继续添加试题')).toBeVisible()
 
@@ -1172,13 +1193,7 @@ test('学生提交测验后教师可以查看自动评分结果', async ({ page 
   await login(page, 'e2e_student')
   await page.getByRole('link', { name: '在线测验', exact: true }).click()
   let examCard = page.locator('.exam-card').filter({ hasText: examTitle })
-  await examCard.getByRole('button', { name: '测验附件', exact: true }).click()
-  const preview = page.getByRole('dialog', { name: '测验参考资料.txt', exact: true })
-  await expect(preview.locator('iframe')).toBeVisible()
-  const attachmentDownload = page.waitForEvent('download')
-  await preview.getByRole('button', { name: '下载附件', exact: true }).click()
-  expect((await attachmentDownload).suggestedFilename()).toBe('测验参考资料.txt')
-  await preview.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(examCard.getByRole('button', { name: '测验附件', exact: true })).toHaveCount(0)
   await examCard.getByRole('button', { name: '开始测验', exact: true }).click()
   const takeDialog = page.getByRole('dialog', { name: examTitle })
   const answerSaved = page.waitForResponse((response) => (
@@ -1214,7 +1229,12 @@ test('网络故障时显示中文提示且页面保持可用', async ({ page }) 
   await page.getByRole('link', { name: '课程作业', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: '课程作业', exact: true })).toBeVisible()
-  await expect(page.getByText('网络连接失败，请检查网络或服务状态')).toBeVisible()
+  await expect(page.locator('.el-result__subtitle')).toHaveText('网络连接失败，请检查网络或服务状态')
+  await expect(page.locator('.homework-grid')).toHaveCount(0)
+  await page.unroute('**/api/homeworks')
+  await page.getByRole('button', { name: '重新加载', exact: true }).click()
+  await expect(page.locator('.el-result')).toHaveCount(0)
+  await expect(page.locator('.homework-grid')).toBeVisible()
 })
 
 
@@ -1276,7 +1296,7 @@ test('教师上传视频时拒绝错误格式并完成真实 MP4 转码', async 
   const chapterRow = page.locator('.chapter-row').filter({ hasText: '上传测试章节' })
   await chapterRow.getByRole('button', { name: '上传视频', exact: true }).click()
 
-  const dialog = page.getByRole('dialog', { name: '上传视频' })
+  const dialog = page.getByRole('dialog', { name: '编辑章节' })
   await dialog.getByPlaceholder('请输入视频标题').fill('浏览器上传视频')
   await dialog.locator('input[type="file"]').setInputFiles({
     name: '错误格式.txt',
@@ -1297,12 +1317,14 @@ test('教师上传视频时拒绝错误格式并完成真实 MP4 转码', async 
   await dialog.getByRole('button', { name: '上传并处理', exact: true }).click()
   expect((await uploadedResponse).status()).toBe(201)
   await expect(page.getByText('视频处理完成')).toBeVisible()
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
   await courseRow.getByRole('button', { name: '展开当前行' }).click()
   await expect(page.getByText('浏览器上传视频 · 可播放', { exact: true })).toBeVisible()
 
-  let videoRow = page.locator('.video-management-row').filter({ hasText: '浏览器上传视频' })
+  await chapterRow.getByRole('button', { name: '编辑', exact: true }).click()
+  let manageDialog = page.getByRole('dialog', { name: '编辑章节' })
+  let videoRow = manageDialog.locator('.chapter-editor-video').filter({ hasText: '浏览器上传视频' })
   await videoRow.getByRole('button', { name: '编辑视频', exact: true }).click()
-  let manageDialog = page.getByRole('dialog', { name: '编辑视频资料' })
   await manageDialog.getByPlaceholder('请输入视频标题').fill('浏览器更新视频')
   const editedResponse = page.waitForResponse((response) =>
     /\/api\/videos\/\d+$/.test(new URL(response.url()).pathname) && response.request().method() === 'PUT',
@@ -1310,14 +1332,11 @@ test('教师上传视频时拒绝错误格式并完成真实 MP4 转码', async 
   await manageDialog.getByRole('button', { name: '保存修改', exact: true }).click()
   expect((await editedResponse).status()).toBe(200)
   await expect(page.getByText('视频资料已更新')).toBeVisible()
-  if (await courseRow.getByRole('button', { name: '展开当前行' }).isVisible()) {
-    await courseRow.getByRole('button', { name: '展开当前行' }).click()
-  }
-  await expect(page.getByText('浏览器更新视频 · 可播放', { exact: true })).toBeVisible()
+  await expect(manageDialog.locator('.chapter-editor-video').filter({ hasText: '浏览器更新视频' })).toHaveCount(1)
+  await expect(manageDialog.locator('.chapter-video-form')).toHaveCount(0)
 
-  videoRow = page.locator('.video-management-row').filter({ hasText: '浏览器更新视频' })
+  videoRow = manageDialog.locator('.chapter-editor-video').filter({ hasText: '浏览器更新视频' })
   await videoRow.getByRole('button', { name: '替换文件', exact: true }).click()
-  manageDialog = page.getByRole('dialog', { name: '替换视频文件' })
   await manageDialog.locator('input[type="file"]').setInputFiles(uploadFixture)
   const replacedResponse = page.waitForResponse((response) =>
     /\/api\/videos\/\d+\/replace$/.test(new URL(response.url()).pathname),
@@ -1327,12 +1346,9 @@ test('教师上传视频时拒绝错误格式并完成真实 MP4 转码', async 
     .getByRole('button', { name: '确认替换', exact: true }).click()
   expect((await replacedResponse).status()).toBe(201)
   await expect(page.getByText('视频替换完成')).toBeVisible()
-  if (await courseRow.getByRole('button', { name: '展开当前行' }).isVisible()) {
-    await courseRow.getByRole('button', { name: '展开当前行' }).click()
-  }
-  await expect(page.getByText('浏览器更新视频 · 可播放', { exact: true })).toBeVisible()
+  await expect(manageDialog.locator('.chapter-video-form')).toHaveCount(0)
 
-  videoRow = page.locator('.video-management-row').filter({ hasText: '浏览器更新视频' })
+  videoRow = manageDialog.locator('.chapter-editor-video').filter({ hasText: '浏览器更新视频' })
   const deletedResponse = page.waitForResponse((response) =>
     /\/api\/videos\/\d+$/.test(new URL(response.url()).pathname) && response.request().method() === 'DELETE',
   )
@@ -1371,7 +1387,7 @@ test('长课程文本在移动端卡片内换行且业务页面无横向溢出',
 })
 
 
-test('大量课程使用分页且移动端分页器不产生横向溢出', async ({ page }) => {
+test('大量课程每页固定九门、课程区不独立滚动且移动端分页器不溢出', async ({ page }) => {
   await page.route('**/api/courses', async (route) => {
     const response = await route.fetch()
     const payload = await response.json()
@@ -1390,9 +1406,13 @@ test('大量课程使用分页且移动端分页器不产生横向溢出', async
 
   await page.goto('/courses')
   await expect(page.locator('.course-card')).toHaveCount(9)
-  await expect(page.getByLabel('课程列表分页')).toBeVisible()
-  await page.getByLabel('课程列表分页').getByText('2', { exact: true }).click()
-  await expect(page.getByRole('link', { name: '端测分页课程 10', exact: true })).toBeVisible()
+  const pager = page.getByLabel('课程列表分页')
+  await expect(pager).toBeVisible()
+  await expect.poll(() => page.locator('.course-grid').evaluate((element) => getComputedStyle(element).overflowY)).toBe('visible')
+  expect(await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true)
+  await pager.getByText('3', { exact: true }).click()
+  await expect(page.getByRole('link', { name: '端测分页课程 19', exact: true })).toBeVisible()
+  await expect(page.locator('.course-card')).toHaveCount(7)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expectNoHorizontalOverflow(page)

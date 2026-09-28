@@ -1,5 +1,10 @@
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
+
+
+CancelCheck = Callable[[], None]
 
 
 def transcode_video(
@@ -7,6 +12,8 @@ def transcode_video(
     output_path: Path,
     ffmpeg_bin: str = "ffmpeg",
     timeout: int = 3600,
+    *,
+    cancel_check: CancelCheck | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -22,14 +29,7 @@ def transcode_video(
         "+faststart",
         str(output_path),
     ]
-    subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-        errors="replace",
-        timeout=timeout,
-    )
+    _run_command(command, timeout, cancel_check)
     return output_path
 
 
@@ -38,6 +38,8 @@ def generate_hls(
     output_dir: Path,
     ffmpeg_bin: str = "ffmpeg",
     timeout: int = 3600,
+    *,
+    cancel_check: CancelCheck | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     playlist = output_dir / "index.m3u8"
@@ -59,14 +61,7 @@ def generate_hls(
         str(segment_pattern),
         str(playlist),
     ]
-    subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-        errors="replace",
-        timeout=timeout,
-    )
+    _run_command(command, timeout, cancel_check)
     return playlist
 
 
@@ -76,6 +71,8 @@ def generate_cover(
     ffmpeg_bin: str = "ffmpeg",
     at_seconds: float = 1.0,
     timeout: int = 120,
+    *,
+    cancel_check: CancelCheck | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -89,12 +86,56 @@ def generate_cover(
         "1",
         str(output_path),
     ]
-    subprocess.run(
+    _run_command(command, timeout, cancel_check)
+    return output_path
+
+
+def _run_command(command: list[str], timeout: int, cancel_check: CancelCheck | None) -> None:
+    """Run FFmpeg while allowing a database-backed cancellation checkpoint.
+
+    Celery's Windows ``solo`` pool cannot reliably interrupt a running task via
+    remote control. Polling here lets a Flask delete/cancel request stop the
+    actual FFmpeg child instead of only changing the page state.
+    """
+    process = subprocess.Popen(
         command,
-        check=True,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         errors="replace",
-        timeout=timeout,
     )
-    return output_path
+    started_at = time.monotonic()
+    try:
+        while True:
+            if cancel_check is not None:
+                cancel_check()
+            elapsed = time.monotonic() - started_at
+            remaining = timeout - elapsed
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                stdout, stderr = process.communicate(timeout=min(0.5, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        _terminate_process(process)
+        raise
+    if process.returncode:
+        raise subprocess.CalledProcessError(
+            process.returncode,
+            command,
+            output=stdout,
+            stderr=stderr,
+        )
+
+
+def _terminate_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()

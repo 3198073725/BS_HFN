@@ -2,8 +2,10 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api/client'
+import { useDialogFocus } from '../utils/dialogFocus'
 
 const visible = ref(false)
+const restorePreviewFocus = useDialogFocus(visible)
 const loading = ref(false)
 const url = ref('')
 const name = ref('')
@@ -53,7 +55,7 @@ onBeforeUnmount(clear)
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="name" width="min(920px, 96vw)" align-center append-to-body @close="clear">
+  <el-dialog v-model="visible" :title="name" width="min(920px, 96vw)" align-center append-to-body @close="clear" @close-auto-focus="restorePreviewFocus">
     <div v-loading="loading" class="attachment-preview">
       <img v-if="url && kind === 'image'" :src="url" :alt="name" />
       <iframe v-else-if="url && kind === 'document'" :src="url" :title="name"></iframe>

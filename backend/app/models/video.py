@@ -32,6 +32,7 @@ class Video(IdMixin, TimestampMixin, db.Model):
     file_size = db.Column(db.BigInteger)
     status = db.Column(db.String(20), nullable=False, default="PENDING", server_default="PENDING")
     process_step = db.Column(db.String(30))
+    task_id = db.Column(db.String(50), index=True)
     error_message = db.Column(db.Text)
     sort_order = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 

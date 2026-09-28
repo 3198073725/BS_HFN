@@ -158,6 +158,7 @@ def prepare_video_retry(video_id: int) -> Video:
     clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
     video.status = VideoStatus.PENDING.value
     video.process_step = "QUEUED"
+    video.task_id = None
     video.error_message = None
     video.processed_file = None
     video.hls_path = None
@@ -166,10 +167,34 @@ def prepare_video_retry(video_id: int) -> Video:
     return video
 
 
+def cancel_video_processing(video_id: int) -> tuple[Video, str | None]:
+    video = get_admin_video(video_id)
+    if video.status not in {
+        VideoStatus.UPLOADING.value,
+        VideoStatus.PENDING.value,
+        VideoStatus.PROCESSING.value,
+    }:
+        raise AdminConflict("只有等待中或处理中的视频任务可以终止")
+    task_id = video.task_id
+    video.status = VideoStatus.CANCELLED.value
+    video.process_step = "CANCELLED"
+    video.task_id = None
+    video.error_message = "管理员已终止转码任务"
+    video.processed_file = None
+    video.hls_path = None
+    video.cover = None
+    db.session.commit()
+    try:
+        clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
+    except (OSError, ValueError):
+        current_app.logger.exception("终止视频 %s 后清理转码产物失败", video.id)
+    return video, task_id
+
+
 def delete_failed_video(video_id: int) -> None:
     video = get_admin_video(video_id)
-    if video.status != VideoStatus.FAILED.value:
-        raise AdminConflict("只有失败的视频任务可以清理")
+    if video.status not in {VideoStatus.FAILED.value, VideoStatus.CANCELLED.value}:
+        raise AdminConflict("只有失败或已终止的视频任务可以清理")
     original_file = video.original_file
     db.session.delete(video)
     db.session.commit()
@@ -200,7 +225,12 @@ def serialize_admin_video(video: Video) -> dict:
         "updated_at": iso_utc(video.updated_at),
         "original_exists": original_exists,
         "retryable": original_exists and _video_retryable(video),
-        "removable": video.status == VideoStatus.FAILED.value,
+        "cancellable": video.status in {
+            VideoStatus.UPLOADING.value,
+            VideoStatus.PENDING.value,
+            VideoStatus.PROCESSING.value,
+        },
+        "removable": video.status in {VideoStatus.FAILED.value, VideoStatus.CANCELLED.value},
     }
 
 
@@ -412,7 +442,7 @@ def serialize_admin_category(category: CourseCategory) -> dict:
 
 
 def _video_retryable(video: Video) -> bool:
-    if video.status == VideoStatus.FAILED.value:
+    if video.status in {VideoStatus.FAILED.value, VideoStatus.CANCELLED.value}:
         return True
     if video.status not in {VideoStatus.PENDING.value, VideoStatus.PROCESSING.value}:
         return False

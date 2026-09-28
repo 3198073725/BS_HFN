@@ -25,7 +25,15 @@ def validate_homework(payload: dict, partial: bool = False) -> dict:
 
 
 def validate_submission(payload: dict) -> str:
-    return _text(payload.get("content"), "作业内容", 20000)
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise ValidationError("请提供文字类型的作业内容")
+    content = content.strip()
+    if len(content) > 20000:
+        raise ValidationError("作业内容不能超过20000位")
+    # Empty text is permitted only if an attachment already exists. The service
+    # checks that invariant under the submission lock, not a client-side flag.
+    return content
 
 
 def validate_grade(payload: dict) -> tuple[Decimal, str | None]:

@@ -76,7 +76,7 @@ def answer_question(question_id: int, teacher_id: int, content: str) -> dict:
     if question.answer is not None:
         raise QuestionConflict("该问题已经回答")
     answer = Answer(question_id=question.id, teacher_id=teacher_id, content=content)
-    question.status = QuestionStatus.ANSWERED.value
+    _claim_open_question(question, QuestionStatus.ANSWERED.value, waiting_only=True)
     db.session.add(answer)
     queue_notification(
         question.student_id,
@@ -103,6 +103,7 @@ def update_answer(question_id: int, teacher_id: int, content: str) -> dict:
         raise QuestionNotFound("回答不存在")
     if question.answer.teacher_id != teacher_id:
         raise QuestionPermissionDenied("不能修改其他教师的回答")
+    _claim_open_question(question, QuestionStatus.ANSWERED.value)
     question.answer.content = content
     queue_notification(
         question.student_id,
@@ -121,9 +122,19 @@ def close_question(question_id: int, user_id: int, role: str) -> dict:
     _ensure_question_access(question, user_id, role)
     if question.status == QuestionStatus.CLOSED.value:
         raise QuestionConflict("问题已经关闭")
-    question.status = QuestionStatus.CLOSED.value
+    _claim_open_question(question, QuestionStatus.CLOSED.value)
     db.session.commit()
     return serialize_question(question)
+
+
+def _claim_open_question(question: Question, status: str, *, waiting_only: bool = False) -> None:
+    # A conditional UPDATE locks the same parent for answering/editing/closing.
+    # Checking an ORM snapshot alone lets a late answer resurrect a closed row.
+    condition = Question.status == QuestionStatus.WAITING.value if waiting_only else Question.status != QuestionStatus.CLOSED.value
+    result = db.session.execute(db.update(Question).where(Question.id == question.id, condition).values(status=status))
+    if result.rowcount != 1:
+        db.session.rollback()
+        raise QuestionConflict("问题状态已变化，请刷新后重试")
 
 
 def serialize_question(question: Question) -> dict:

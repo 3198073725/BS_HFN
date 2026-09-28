@@ -1,4 +1,57 @@
 /* All dialogs stay centered in the viewport, including short and nested ones. */
+.task-full-description {
+  margin: 12px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  color: var(--ink-600);
+  font-size: 14px;
+}
+
+.task-requirements {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.task-requirements > summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+
+.question-board > .el-result {
+  grid-column: 1 / -1;
+}
+
+.portal-notice-link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  color: var(--primary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.public-notice-items > article {
+  padding: 22px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.public-notice-list time { color: var(--ink-500); font-size: 12px; }
+.public-notice-list h2 { margin: 10px 0; font-size: 18px; }
+.public-notice-list article > p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  color: var(--ink-600);
+  font-size: 14px;
+}
+
 .el-overlay-dialog,
 .is-message-box .el-overlay-message-box {
   display: flex;
@@ -57,6 +110,34 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   overflow-wrap: anywhere;
+}
+
+/* Confirmation dialogs use one restrained hierarchy across every role. */
+.el-message-box__btns .el-button:not(.is-disabled) {
+  border-color: #c7cdd3 !important;
+  background: #fff !important;
+  color: #46515b !important;
+  box-shadow: none !important;
+}
+
+.el-message-box__btns .el-button:not(.is-disabled):hover,
+.el-message-box__btns .el-button:not(.is-disabled):focus {
+  border-color: #8d969f !important;
+  background: #f3f4f5 !important;
+  color: #252b31 !important;
+}
+
+.el-message-box__btns .el-button--primary:not(.is-disabled) {
+  border-color: #414950 !important;
+  background: #414950 !important;
+  color: #fff !important;
+}
+
+.el-message-box__btns .el-button--primary:not(.is-disabled):hover,
+.el-message-box__btns .el-button--primary:not(.is-disabled):focus {
+  border-color: #2d3338 !important;
+  background: #2d3338 !important;
+  color: #fff !important;
 }
 
 /* Dense question panes scroll independently inside the fixed dialog. */

@@ -1,14 +1,19 @@
 <script setup>
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import api from '../api/client'
 
 
 const categories = ref([])
+const teachers = ref([])
 const courses = ref([])
 const categoryId = ref(null)
+const teacherId = ref(null)
+const keywordInput = ref('')
+const keyword = ref('')
 const loading = ref(false)
+const loadError = ref('')
 const currentPage = ref(1)
 const pageSize = 9
 let requestSequence = 0
@@ -17,31 +22,68 @@ const pagedCourses = computed(() => {
   const start = (currentPage.value - 1) * pageSize
   return courses.value.slice(start, start + pageSize)
 })
+const hasActiveFilters = computed(() => Boolean(categoryId.value || teacherId.value || keyword.value))
 
 async function load() {
   const requestId = ++requestSequence
   const selectedCategoryId = categoryId.value
+  const selectedTeacherId = teacherId.value
+  const selectedKeyword = keyword.value
   loading.value = true
+  loadError.value = ''
   try {
-    const [categoryResponse, courseResponse] = await Promise.all([
+    const params = {}
+    if (selectedCategoryId) params.category_id = selectedCategoryId
+    if (selectedTeacherId) params.teacher_id = selectedTeacherId
+    if (selectedKeyword) params.keyword = selectedKeyword
+    const [categoryResponse, teacherResponse, courseResponse] = await Promise.all([
       api.get('/courses/categories'),
-      api.get('/courses', { params: selectedCategoryId ? { category_id: selectedCategoryId } : {} }),
+      api.get('/courses/teachers'),
+      api.get('/courses', { params }),
     ])
     if (requestId !== requestSequence) return
     categories.value = categoryResponse.data
+    teachers.value = teacherResponse.data
     courses.value = courseResponse.data
+    currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(courses.value.length / pageSize)))
   } catch (error) {
-    if (requestId === requestSequence) ElMessage.error(error.message || '课程加载失败')
+    if (requestId === requestSequence) {
+      loadError.value = error.message || '课程加载失败'
+      ElMessage.error(loadError.value)
+    }
   } finally {
     if (requestId === requestSequence) loading.value = false
   }
 }
 
-watch(categoryId, () => {
+function applyKeyword() {
+  const nextKeyword = keywordInput.value.trim()
+  if (keyword.value === nextKeyword) {
+    currentPage.value = 1
+    load()
+    return
+  }
+  keyword.value = nextKeyword
+  currentPage.value = 1
+  load()
+}
+
+function resetFilters() {
+  const selectionChanged = categoryId.value !== null || teacherId.value !== null
+  categoryId.value = null
+  teacherId.value = null
+  keywordInput.value = ''
+  keyword.value = ''
+  currentPage.value = 1
+  if (!selectionChanged) load()
+}
+
+watch([categoryId, teacherId], () => {
   currentPage.value = 1
   load()
 })
 onMounted(load)
+onBeforeUnmount(() => { requestSequence += 1 })
 </script>
 
 <template>
@@ -50,21 +92,64 @@ onMounted(load)
       <div>
         <p class="eyebrow">课程资源</p>
         <h1>发现适合你的课程</h1>
-        <p>浏览已发布课程，按分类快速筛选学习内容。</p>
+        <p>按课程名称、课程分类和授课老师查找公开课程。</p>
       </div>
-      <div class="filter-control">
+    </div>
+
+    <div class="course-filter-panel" aria-label="课程筛选条件">
+      <div class="course-filter-field">
         <span>课程分类</span>
-        <el-select v-model="categoryId" clearable placeholder="全部分类">
+        <el-select
+          v-model="categoryId"
+          clearable
+          placeholder="全部分类"
+          aria-label="课程分类"
+          popper-class="course-filter-dropdown"
+        >
           <el-option v-for="item in categories" :key="item.id" :label="item.name" :value="item.id" />
         </el-select>
       </div>
+      <div class="course-filter-field">
+        <span>授课老师</span>
+        <el-select
+          v-model="teacherId"
+          clearable
+          filterable
+          placeholder="全部老师"
+          aria-label="授课老师"
+          popper-class="course-filter-dropdown"
+        >
+          <el-option v-for="item in teachers" :key="item.id" :label="item.name" :value="item.id" />
+        </el-select>
+      </div>
+      <div class="course-filter-field course-keyword-field">
+        <span>课程关键词</span>
+        <el-input
+          v-model="keywordInput"
+          clearable
+          maxlength="100"
+          placeholder="搜索课程名称或简介"
+          aria-label="课程关键词"
+          @clear="applyKeyword"
+          @keyup.enter="applyKeyword"
+        />
+      </div>
+      <div class="course-filter-actions">
+        <el-button type="primary" :loading="loading" @click="applyKeyword">查询</el-button>
+        <el-button :disabled="!hasActiveFilters && !keywordInput" @click="resetFilters">重置</el-button>
+      </div>
     </div>
 
+    <el-result v-if="loadError" icon="error" title="课程列表加载失败" :sub-title="loadError">
+      <template #extra><el-button @click="load">重新加载</el-button></template>
+    </el-result>
+    <template v-else>
     <div class="course-result-meta">
-      <span>{{ loading ? '正在加载课程…' : `共 ${courses.length} 门课程` }}</span>
+      <span>{{ loading ? '正在加载课程…' : `${hasActiveFilters ? '当前条件下' : ''}共 ${courses.length} 门课程` }}</span>
       <i></i>
     </div>
 
+    <div class="course-pagination-shell">
     <div class="course-grid" v-loading="loading">
       <article
         v-for="(course, index) in pagedCourses"
@@ -101,7 +186,7 @@ onMounted(load)
       <el-empty
         v-if="!loading && !courses.length"
         class="surface-card course-empty"
-        description="该分类下暂无已发布课程"
+        :description="hasActiveFilters ? '没有符合当前筛选条件的课程' : '暂无已发布课程'"
       />
     </div>
     <el-pagination
@@ -114,5 +199,7 @@ onMounted(load)
       :total="courses.length"
       aria-label="课程列表分页"
     />
+    </div>
+    </template>
   </section>
 </template>

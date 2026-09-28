@@ -1,4 +1,5 @@
 import math
+import re
 
 
 class ValidationError(ValueError):
@@ -16,7 +17,10 @@ def validate_progress(payload: dict) -> dict:
         raise ValidationError("本次观看时长必须是整数") from exc
     if watch_delta < 0 or watch_delta > 60:
         raise ValidationError("本次观看时长必须在0到60秒之间")
-    return {"current_time": current_time, "watch_delta": watch_delta}
+    request_id = payload.get("request_id")
+    if request_id is not None and (not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id)):
+        raise ValidationError("进度请求编号须为1到100位字母、数字或安全分隔符")
+    return {"current_time": current_time, "watch_delta": watch_delta, "request_id": request_id}
 
 
 def validate_note(payload: dict, partial: bool = False) -> dict:

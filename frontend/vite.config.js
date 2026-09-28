@@ -13,6 +13,8 @@ export default defineConfig({
         manualChunks(id) {
           const moduleId = id.replaceAll('\\', '/')
           if (moduleId.includes('/node_modules/hls.js/')) return 'hls'
+          if (moduleId.includes('/node_modules/zrender/')) return 'chart-renderer'
+          if (moduleId.includes('/node_modules/echarts/')) return 'echarts'
           if (
             moduleId.includes('/node_modules/vue/') ||
             moduleId.includes('/node_modules/@vue/') ||

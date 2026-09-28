@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 
 import api from '../api/client'
 import VideoPlayer from '../components/VideoPlayer.vue'
+import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 import { appendProgress, flushProgress, readProgressQueue as readStoredProgressQueue } from '../utils/progressQueue'
 
@@ -30,6 +31,7 @@ const noteForm = reactive({ content: '' })
 const questionForm = reactive({ title: '', content: '' })
 const learningState = reactive({ joined: false, favorited: false })
 const classDialogVisible = ref(false)
+const restoreClassFocus = useDialogFocus(classDialogVisible)
 const classOptions = ref([])
 const classOptionsLoading = ref(false)
 const classOptionsLoaded = ref(false)
@@ -48,6 +50,10 @@ let courseRequestSequence = 0
 let courseStateRequestSequence = 0
 let classOptionsRequestSequence = 0
 let learningRequestSequence = 0
+let progressRetryTimer = null
+let progressRetryDelay = 1000
+let replayingProgress = false
+let disposed = false
 
 async function loadCourse() {
   const requestId = ++courseRequestSequence
@@ -256,27 +262,23 @@ async function saveProgress(force = false) {
   if (force && watchDelta < 1 && Math.abs(currentTime.value - startTime.value) < 0.5) return
 
   const savedVideoId = selectedVideo.value.id
+  const context = learningRequestSequence
+  const key = progressQueueKey()
+  const payload = { video_id: savedVideoId, current_time: currentTime.value,
+    watch_duration_delta: watchDelta, request_id: crypto.randomUUID() }
   savingProgress.value = true
   lastSaveAt = Date.now()
   try {
-    const response = await api.put(`/learning/videos/${savedVideoId}/progress`, {
-      current_time: currentTime.value,
-      watch_duration_delta: watchDelta,
-    })
-    if (selectedVideo.value?.id === savedVideoId) progress.value = response.data
-    pendingWatchDuration = Math.max(0, pendingWatchDuration - watchDelta)
+    // Write ahead: even a successful server write with a lost response can be
+    // replayed safely using the exact same durable request ID and payload.
+    await queueProgress(payload, key)
+    if (context === learningRequestSequence) pendingWatchDuration = Math.max(0, pendingWatchDuration - watchDelta)
+    // The save lock covers durable enqueue only, never the whole network replay;
+    // further watching can be cached while an earlier replay is still pending.
+    if (key === progressQueueKey() && navigator.onLine) void flushProgressQueue()
+    else if (force) ElMessage.warning('网络不可用，学习进度已保存在本机，恢复连接后会自动补传')
   } catch (error) {
-    if (isConnectionError(error)) {
-      queueProgress({
-        video_id: savedVideoId,
-        current_time: currentTime.value,
-        watch_duration_delta: watchDelta,
-      })
-      pendingWatchDuration = Math.max(0, pendingWatchDuration - watchDelta)
-      if (force) ElMessage.warning('网络不可用，学习进度已保存在本机，恢复连接后会自动补传')
-    } else if (force) {
-      ElMessage.error(error.message || '学习进度保存失败')
-    }
+    if (force) ElMessage.error(`学习进度缓存或补传失败，未保存的观看时长仍保留：${error.message || '请检查本机存储及网络'}`)
   } finally {
     savingProgress.value = false
   }
@@ -290,20 +292,61 @@ function readProgressQueue() {
   return readStoredProgressQueue(localStorage, progressQueueKey())
 }
 
-function queueProgress(payload) {
-  queuedProgressCount.value = appendProgress(localStorage, progressQueueKey(), payload)
+async function queueProgress(payload, key = progressQueueKey()) {
+  const count = await appendProgress(localStorage, key, payload)
+  if (key === progressQueueKey()) queuedProgressCount.value = count
+}
+
+function updateQueuedProgress(event) {
+  if (event.key === progressQueueKey()) queuedProgressCount.value = readProgressQueue().length
 }
 
 async function flushProgressQueue() {
-  if (!isStudent.value || !navigator.onLine) return
+  if (replayingProgress) return
+  replayingProgress = true
+  try { await replayProgressQueue() } finally { replayingProgress = false }
+}
+
+async function replayProgressQueue() {
+  if (disposed || !isStudent.value || !navigator.onLine) return
+  clearTimeout(progressRetryTimer)
   const key = progressQueueKey()
-  const sent = await flushProgress(localStorage, key, (item) =>
-    api.put(`/learning/videos/${item.video_id}/progress`, {
+  const context = learningRequestSequence
+  let sent
+  let discarded = 0
+  try {
+    sent = await flushProgress(localStorage, key, async (item) => {
+      if (key !== progressQueueKey() || disposed) throw new Error('学习会话已切换')
+      await api.put(`/learning/videos/${item.video_id}/progress`, {
         current_time: item.current_time,
         watch_duration_delta: item.watch_duration_delta,
-    }), isConnectionError)
+        request_id: item.request_id,
+      })
+    }, isConnectionError, () => { discarded += 1 })
+  } catch (error) {
+    if (!disposed) ElMessage.error(`无法读取或保存本机进度队列：${error.message || '请检查浏览器存储'}`)
+    return
+  }
+  if (disposed || key !== progressQueueKey()) return
   queuedProgressCount.value = readProgressQueue().length
-  if (sent) ElMessage.success(`已补传 ${sent} 条离线学习进度`)
+  if (discarded) ElMessage.warning(`有 ${discarded} 条旧进度无法补传（视频已删除、替换、权限变化或记录无效），已移出队列`)
+  if (sent && context === learningRequestSequence && selectedVideo.value) {
+    const videoId = selectedVideo.value.id
+    try {
+      // A duplicate receipt returns its original snapshot. Read current state so
+      // retrying an old acknowledgement never rewinds the displayed progress.
+      const response = await api.get(`/learning/videos/${videoId}/progress`)
+      if (!disposed && key === progressQueueKey() && context === learningRequestSequence && selectedVideo.value?.id === videoId) progress.value = response.data
+    } catch { /* The writes remain acknowledged; keep the last known display. */ }
+  }
+  if (disposed || key !== progressQueueKey()) return
+  if (sent && sent > 1) ElMessage.success(`已补传 ${sent} 条学习进度`)
+  if (queuedProgressCount.value && navigator.onLine) {
+    progressRetryTimer = setTimeout(() => { void flushProgressQueue() }, progressRetryDelay)
+    progressRetryDelay = Math.min(progressRetryDelay * 2, 30000)
+  } else {
+    progressRetryDelay = 1000
+  }
 }
 
 function isConnectionError(error) {
@@ -312,23 +355,27 @@ function isConnectionError(error) {
 }
 
 async function createNote() {
+  if (actionLoading.value || !selectedVideo.value) return
   const content = noteForm.content.trim()
   if (!content) {
     ElMessage.warning('请输入笔记内容')
     return
   }
   actionLoading.value = 'note'
+  const videoId = selectedVideo.value.id
+  const requestId = learningRequestSequence
   try {
-    const response = await api.post(`/learning/videos/${selectedVideo.value.id}/notes`, {
+    const response = await api.post(`/learning/videos/${videoId}/notes`, {
       video_time: currentTime.value,
       content,
     })
+    if (requestId !== learningRequestSequence || selectedVideo.value?.id !== videoId) return
     notes.value.push(response.data)
     notes.value.sort((left, right) => left.video_time - right.video_time)
     noteForm.content = ''
     ElMessage.success('笔记已记录')
   } catch (error) {
-    ElMessage.error(error.message || '笔记保存失败')
+    if (requestId === learningRequestSequence && selectedVideo.value?.id === videoId) ElMessage.error(error.message || '笔记保存失败')
   } finally {
     actionLoading.value = ''
   }
@@ -346,6 +393,7 @@ async function removeNote(note) {
 }
 
 async function createQuestion() {
+  if (actionLoading.value || !selectedVideo.value) return
   const title = questionForm.title.trim()
   const content = questionForm.content.trim()
   if (!title || !content) {
@@ -353,18 +401,21 @@ async function createQuestion() {
     return
   }
   actionLoading.value = 'question'
+  const videoId = selectedVideo.value.id
+  const requestId = learningRequestSequence
   try {
     const response = await api.post('/questions', {
-      video_id: selectedVideo.value.id,
+      video_id: videoId,
       video_time: currentTime.value,
       title,
       content,
     })
+    if (requestId !== learningRequestSequence || selectedVideo.value?.id !== videoId) return
     questions.value.unshift(response.data)
     Object.assign(questionForm, { title: '', content: '' })
     ElMessage.success('问题已提交给授课教师')
   } catch (error) {
-    ElMessage.error(error.message || '问题提交失败')
+    if (requestId === learningRequestSequence && selectedVideo.value?.id === videoId) ElMessage.error(error.message || '问题提交失败')
   } finally {
     actionLoading.value = ''
   }
@@ -408,18 +459,22 @@ watch(() => route.params.id, async (nextId, previousId) => {
 onMounted(() => {
   queuedProgressCount.value = readProgressQueue().length
   window.addEventListener('online', flushProgressQueue)
+  window.addEventListener('storage', updateQueuedProgress)
   window.addEventListener('focus', refreshClassState)
   window.addEventListener('online', refreshClassState)
   document.addEventListener('visibilitychange', refreshClassState)
   void loadCourse().then(flushProgressQueue)
 })
 onBeforeUnmount(() => {
+  disposed = true
+  clearTimeout(progressRetryTimer)
   courseRequestSequence += 1
   courseStateRequestSequence += 1
   classOptionsRequestSequence += 1
   learningRequestSequence += 1
   void saveProgress(true)
   window.removeEventListener('online', flushProgressQueue)
+  window.removeEventListener('storage', updateQueuedProgress)
   window.removeEventListener('focus', refreshClassState)
   window.removeEventListener('online', refreshClassState)
   document.removeEventListener('visibilitychange', refreshClassState)
@@ -504,7 +559,7 @@ onBeforeUnmount(() => {
               <span v-if="progress" class="progress-chip">
                 {{ progress.status === 'COMPLETED' ? '已完成' : `${progress.progress}%` }}
               </span>
-              <span v-if="queuedProgressCount" class="offline-progress-chip">{{ queuedProgressCount }} 条进度待补传</span>
+              <span v-if="queuedProgressCount" class="offline-progress-chip">{{ queuedProgressCount }} 条进度待补传{{ queuedProgressCount > 200 ? '，积压较多，请保持联网' : '' }}</span>
               <span v-if="selectedVideo" class="playing-status"><i></i> 可播放</span>
             </div>
           </div>
@@ -588,6 +643,7 @@ onBeforeUnmount(() => {
               v-model="noteForm.content"
               type="textarea"
               :rows="3"
+              :disabled="Boolean(actionLoading)"
               maxlength="2000"
               show-word-limit
               placeholder="写下此处的重点、公式或思考…"
@@ -614,7 +670,7 @@ onBeforeUnmount(() => {
               <p class="eyebrow">课程提问</p>
               <h3>在 {{ formatTime(currentTime) }} 向教师提问</h3>
             </div>
-            <el-input v-model="questionForm.title" maxlength="200" placeholder="用一句话概括问题" />
+            <el-input v-model="questionForm.title" :disabled="Boolean(actionLoading)" maxlength="200" placeholder="用一句话概括问题" />
             <el-input
               v-model="questionForm.content"
               type="textarea"
@@ -622,6 +678,7 @@ onBeforeUnmount(() => {
               maxlength="5000"
               show-word-limit
               placeholder="说明你不理解的地方，便于教师准确回答…"
+              :disabled="Boolean(actionLoading)"
             />
             <el-button type="primary" :loading="actionLoading === 'question'" @click="createQuestion">
               提交问题
@@ -660,6 +717,7 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="classDialogVisible"
+      @close-auto-focus="restoreClassFocus"
       title="选择课程班级"
       width="min(560px, calc(100vw - 28px))"
       class="course-class-dialog"

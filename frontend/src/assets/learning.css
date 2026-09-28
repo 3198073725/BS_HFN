@@ -453,6 +453,10 @@
   gap: 16px;
 }
 
+.learning-pagination-shell {
+  --stable-page-body-height: 888px;
+}
+
 .learning-course-card {
   display: grid;
   min-width: 0;
@@ -580,6 +584,15 @@
   gap: 13px;
 }
 
+.teacher-question-list {
+  display: grid;
+  gap: 13px;
+}
+
+.question-pagination-shell {
+  --stable-page-body-height: 1851px;
+}
+
 .teacher-question-card {
   padding: 23px 25px;
   border: 1px solid var(--line);
@@ -678,6 +691,10 @@
   .learning-course-grid {
     grid-template-columns: 1fr;
   }
+
+  .learning-pagination-shell {
+    --stable-page-body-height: 1792px;
+  }
 }
 
 .homework-summary {
@@ -718,8 +735,21 @@
   gap: 14px;
 }
 
+.homework-pagination-shell {
+  --stable-page-body-height: 1108px;
+}
+
+.homework-pagination-shell.has-pagination > .homework-grid {
+  height: auto;
+  min-height: var(--stable-page-body-height);
+  overflow-y: visible;
+  overscroll-behavior: auto;
+  scrollbar-gutter: auto;
+}
+
 .homework-card {
   display: flex;
+  min-width: 0;
   min-height: 270px;
   padding: 23px;
   border: 1px solid var(--line);
@@ -768,6 +798,12 @@
   background: #eef0f4;
 }
 
+.homework-state.state-ended,
+.exam-state.state-ended {
+  color: #72798b;
+  background: #eef0f4;
+}
+
 .homework-card h2 {
   margin: 18px 0 8px;
   color: var(--ink-900);
@@ -776,14 +812,22 @@
 
 .homework-card > p {
   display: -webkit-box;
-  margin: 0 0 18px;
+  min-height: 42px;
+  margin: 0 0 10px;
   overflow: hidden;
   color: var(--ink-600);
   font-size: 11px;
   line-height: 1.75;
   white-space: pre-wrap;
+  flex: 0 0 auto;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
+}
+
+.homework-requirement-button {
+  min-height: 30px;
+  margin: 0 auto 2px;
+  flex: 0 0 auto;
 }
 
 .homework-meta {
@@ -803,11 +847,92 @@
   color: #7e8491;
 }
 
+.homework-attachment-row {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  padding-top: 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+}
+
+.homework-attachment-row .homework-attachment,
+.homework-attachment-row .attachment-text-button {
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.homework-attachment-row .student-submission-attachment {
+  margin-left: auto;
+  text-align: right;
+}
+
 .submission-result {
   margin-top: 13px;
   padding: 12px 14px;
   border-radius: 11px;
   background: #f6f8fc;
+  flex: 0 0 auto;
+}
+
+.submission-result-summary,
+.submission-result-actions {
+  min-width: 0;
+}
+
+.submission-result-summary {
+  flex-wrap: nowrap;
+}
+
+.submission-result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.submission-action-button {
+  min-height: 32px;
+  padding: 5px 13px;
+  border: 1px solid #9eb2c1;
+  border-radius: 6px;
+  background: #fff;
+  color: #28577f;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.submission-action-button:hover,
+.submission-action-button:focus-visible {
+  border-color: #28577f;
+  background: #edf3f7;
+  color: #1f496a;
+}
+
+@media (max-width: 620px) {
+  .submission-result-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .submission-result-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 .submission-result span,
@@ -821,14 +946,41 @@
   font-size: 15px;
 }
 
-.submission-result p {
-  margin: 8px 0 0;
-  line-height: 1.6;
+.teacher-comment-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.teacher-comment-button:hover {
+  text-decoration: underline;
+}
+
+.teacher-comment-content {
+  min-height: 88px;
+  padding: 16px 18px;
+  border: 1px solid #dbe2e8;
+  border-radius: 8px;
+  background: #f7f9fa;
+  color: var(--ink-700);
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .homework-actions {
   margin-top: auto;
   padding-top: 16px;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   justify-content: flex-start;
 }
 
@@ -859,6 +1011,18 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
   gap: 14px;
+}
+
+.homework-form-row.single-column {
+  grid-template-columns: 180px;
+}
+
+.field-help {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-500);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .grade-panel {
@@ -907,6 +1071,10 @@
   .grade-form-row {
     grid-template-columns: 1fr;
   }
+
+  .homework-pagination-shell {
+    --stable-page-body-height: 2230px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -949,7 +1117,8 @@
   }
 
   .hero-small-button {
-    flex: 1;
+    flex: 0 1 auto;
+    white-space: nowrap;
   }
 
   .note-item {
@@ -991,6 +1160,18 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.exam-pagination-shell {
+  --stable-page-body-height: 1108px;
+}
+
+.exam-pagination-shell.has-pagination > .exam-grid {
+  height: auto;
+  min-height: var(--stable-page-body-height);
+  overflow-y: visible;
+  overscroll-behavior: auto;
+  scrollbar-gutter: auto;
 }
 
 .exam-card {
@@ -1043,6 +1224,11 @@
 .exam-state.state-closed {
   color: #72798b;
   background: #eef0f4;
+}
+
+.exam-state.state-not-started {
+  color: #4c608b;
+  background: #eef2fb;
 }
 
 .exam-card h2 {
@@ -1418,6 +1604,10 @@
   .question-manager-layout,
   .answer-options {
     grid-template-columns: 1fr;
+  }
+
+  .exam-pagination-shell {
+    --stable-page-body-height: 2230px;
   }
 
   .score-check {
@@ -2401,6 +2591,14 @@
 
 .notification-list { overflow: hidden; }
 
+.notification-items {
+  min-width: 0;
+}
+
+.notification-pagination-shell {
+  --stable-page-body-height: 1750px;
+}
+
 .notification-item {
   display: flex;
   width: 100%;
@@ -2893,7 +3091,7 @@
 .classroom-progress-overview {
   display: grid;
   margin-top: 10px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -3259,6 +3457,7 @@
 /* Business component rhythm: readable labels, predictable controls and compact cards. */
 .hero-small-button {
   min-height: 40px;
+  white-space: nowrap;
   padding: 0 16px;
   font-size: 13px;
 }
@@ -3747,6 +3946,10 @@
   color: #444;
 }
 
+.video-summary-grid .summary-tone-cancelled {
+  color: #555;
+}
+
 .video-summary-grid .summary-tone-ready,
 .video-summary-grid .summary-tone-processing,
 .video-summary-grid .summary-tone-pending {
@@ -3769,6 +3972,18 @@
 .admin-primary-cell,
 .video-step-cell {
   min-width: 0;
+}
+
+.admin-primary-cell > .overflow-text:first-child {
+  color: #333;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-primary-cell > .overflow-text + .overflow-text {
+  margin-top: 4px;
+  color: #777;
+  font-size: 11px;
 }
 
 .admin-primary-cell strong,
@@ -3836,6 +4051,7 @@
 }
 
 .operation-state.state-failed,
+.operation-state.state-cancelled,
 .file-presence.missing {
   border-color: #999;
   border-style: dashed;
@@ -4270,4 +4486,69 @@
   .exam-card:hover {
     transform: none;
   }
+}
+
+.statistics-page > .dialog-tip {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  color: var(--ink-600);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* Keep dense media rows compact, but make unabridged diagnostics accessible. */
+.admin-cell-details {
+  margin-top: 6px;
+  color: var(--ink-600);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.admin-cell-details summary {
+  cursor: pointer;
+}
+
+.admin-cell-details summary:focus-visible,
+.classroom-list > button:focus-visible {
+  outline: 2px solid var(--ink-600);
+  outline-offset: -2px;
+}
+
+.admin-cell-details > div {
+  max-height: 160px;
+  margin-top: 6px;
+  padding: 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #f7f8f9;
+}
+
+.teacher-question-card h2,
+.teacher-question-top > div,
+.teacher-question-footer > span,
+.teacher-question-card .question-content,
+.teacher-question-card .teacher-answer p,
+.answer-dialog-context,
+.notification-copy strong,
+.notification-copy p,
+.notification-copy i {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.teacher-question-top > div {
+  flex-wrap: wrap;
+}
+
+.teacher-question-top > .question-status {
+  flex-shrink: 0;
+}
+
+.answer-dialog-context p,
+.notification-copy p {
+  white-space: pre-wrap;
 }

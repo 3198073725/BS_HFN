@@ -241,7 +241,7 @@ def create_e2e_app():
         )
         db.session.add(upload_chapter)
         db.session.flush()
-        db.session.add(
+        db.session.add_all([
             Video(
                 chapter_id=upload_chapter.id,
                 title="端测失败转码视频",
@@ -252,8 +252,18 @@ def create_e2e_app():
                 process_step="TRANSCODING",
                 error_message="端到端模拟：转码进程异常退出",
                 sort_order=1,
-            )
-        )
+            ),
+            Video(
+                chapter_id=upload_chapter.id,
+                title="端测等待转码视频",
+                original_name="e2e-pending-cancel.mp4",
+                original_file="videos/original/e2e-failed-retry.mp4",
+                file_size=failed_original.stat().st_size,
+                status=VideoStatus.PENDING.value,
+                process_step="QUEUED",
+                sort_order=2,
+            ),
+        ])
         db.session.commit()
     return app
 

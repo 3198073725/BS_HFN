@@ -119,7 +119,8 @@ def reset_password(username: str, verification: str, new_password: str) -> str:
 
 
 def set_user_password(user_id: int, new_password: str, reviewer_id: int | None = None) -> User:
-    user = db.session.get(User, user_id)
+    from app.services.review_guard import lock_student
+    user = lock_student(user_id)
     if user is None:
         raise AuthenticationError("用户不存在")
     if check_password_hash(user.password_hash, new_password):

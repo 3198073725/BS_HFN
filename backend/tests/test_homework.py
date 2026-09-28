@@ -276,10 +276,61 @@ def test_homework_past_deadline_cannot_publish_or_submit(app, client):
         homework = db.session.get(Homework, homework_id)
         homework.status = "PUBLISHED"
         db.session.commit()
+    student_item = client.get("/api/homeworks", headers=bearer(student)).get_json()["data"][0]
+    assert student_item["availability"] == "ENDED"
+    assert student_item["is_expired"] is True
+    assert student_item["can_submit"] is False
+    teacher_item = client.get("/api/homeworks/manage", headers=bearer(teacher)).get_json()["data"][0]
+    assert teacher_item["availability"] == "ENDED"
     assert client.put(
         f"/api/homeworks/{homework_id}/submission",
         headers=bearer(student),
         json={"content": "已过截止时间"},
+    ).status_code == 409
+    assert client.post(
+        f"/api/homeworks/{homework_id}/submission/attachment",
+        headers=bearer(student),
+        data={"attachment": (BytesIO(b"late"), "late.txt")},
+        content_type="multipart/form-data",
+    ).status_code == 409
+
+
+def test_existing_homework_submission_cannot_be_modified_after_deadline(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    created = client.post(
+        "/api/homeworks",
+        headers=bearer(teacher),
+        json={
+            "course_id": context["course_id"],
+            "title": "截止后锁定已有提交",
+            "description": "先提交，再跨过截止时间",
+            "deadline": future,
+        },
+    ).get_json()["data"]
+    homework_id = created["id"]
+    assert client.post(f"/api/homeworks/{homework_id}/publish", headers=bearer(teacher)).status_code == 200
+    assert client.put(
+        f"/api/homeworks/{homework_id}/submission",
+        headers=bearer(student),
+        json={"content": "截止前提交"},
+    ).status_code == 200
+
+    with app.app_context():
+        homework = db.session.get(Homework, homework_id)
+        homework.deadline = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
+        db.session.commit()
+
+    item = client.get("/api/homeworks", headers=bearer(student)).get_json()["data"][0]
+    assert item["availability"] == "ENDED"
+    assert item["can_submit"] is False
+    assert item["submission"]["content"] == "截止前提交"
+    assert client.put(
+        f"/api/homeworks/{homework_id}/submission",
+        headers=bearer(student),
+        json={"content": "截止后修改"},
     ).status_code == 409
 
 
@@ -309,3 +360,35 @@ def test_deleting_draft_homework_removes_attachment_directory(app, client):
     assert client.delete(f"/api/homeworks/{homework_id}", headers=bearer(teacher)).status_code == 200
     assert not homework_dir.exists()
     assert client.delete(f"/api/homeworks/{homework_id}", headers=bearer(teacher)).status_code == 404
+
+
+def test_clear_submission_text_requires_attachment_and_keeps_grade_lock(app, client):
+    context = create_context(app)
+    teacher = login(client, context["teacher"])
+    student = login(client, context["student"])
+    created = client.post("/api/homeworks", headers=bearer(teacher), json={
+        "course_id": context["course_id"], "title": "清空正文测试", "description": "支持附件答卷",
+    })
+    homework_id = created.get_json()["data"]["id"]
+    assert client.post(f"/api/homeworks/{homework_id}/publish", headers=bearer(teacher)).status_code == 200
+    endpoint = f"/api/homeworks/{homework_id}/submission"
+    assert client.put(endpoint, headers=bearer(student), json={}).status_code == 400
+    assert client.put(endpoint, headers=bearer(student), json={"content": ""}).status_code == 409
+    saved = client.put(endpoint, headers=bearer(student), json={"content": "旧正文"})
+    submission_id = saved.get_json()["data"]["id"]
+    assert client.put(endpoint, headers=bearer(student), json={"content": " "}).status_code == 409
+    assert client.get(f"/api/homeworks/{homework_id}", headers=bearer(student)).get_json()["data"]["submission"]["content"] == "旧正文"
+    attached = client.post(endpoint + "/attachment", headers=bearer(student),
+        data={"attachment": (BytesIO(b"answer"), "answer.txt")}, content_type="multipart/form-data")
+    attachment = attached.get_json()["data"]["attachment"]
+    cleared = client.put(endpoint, headers=bearer(student), json={"content": " "})
+    assert cleared.status_code == 200
+    assert cleared.get_json()["data"]["content"] == ""
+    assert cleared.get_json()["data"]["attachment"] == attachment
+    assert cleared.get_json()["data"]["id"] == submission_id
+    assert client.put(f"/api/homeworks/submissions/{submission_id}/grade", headers=bearer(teacher),
+        json={"score": 95, "teacher_comment": "已锁定"}).status_code == 200
+    assert client.put(endpoint, headers=bearer(student), json={"content": ""}).status_code == 409
+    record = client.get(f"/api/homeworks/{homework_id}", headers=bearer(student)).get_json()["data"]["submission"]
+    assert record["score"] == 95
+    assert record["teacher_comment"] == "已锁定"

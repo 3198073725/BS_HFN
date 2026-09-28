@@ -3,36 +3,62 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
+import OverflowText from '../components/OverflowText.vue'
+import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 
 
 const auth = useAuthStore()
 const isTeacher = computed(() => auth.user?.role === 'TEACHER')
 const loading = ref(false)
+const loadError = ref('')
+const submissionsLoading = ref(false)
+const submissionsError = ref('')
+const requirementsDialog = ref(false)
+const requirementsHomework = ref(null)
 const homeworks = ref([])
 const courses = ref([])
 const createDialog = ref(false)
 const submissionDialog = ref(false)
 const gradeDialog = ref(false)
 const previewDialog = ref(false)
+const teacherCommentDialog = ref(false)
+const restoreRequirementsFocus = useDialogFocus(requirementsDialog)
+const restoreCreateFocus = useDialogFocus(createDialog)
+const restoreSubmissionFocus = useDialogFocus(submissionDialog)
+const restoreGradeFocus = useDialogFocus(gradeDialog)
+const restorePreviewFocus = useDialogFocus(previewDialog)
+const restoreTeacherCommentFocus = useDialogFocus(teacherCommentDialog)
 const previewLoading = ref(false)
 const previewUrl = ref('')
 const previewName = ref('')
 const previewKind = ref('unsupported')
 const selectedHomework = ref(null)
 const selectedSubmission = ref(null)
+const commentHomework = ref(null)
 const homeworkAttachment = ref(null)
 const submissionAttachment = ref(null)
 const submissions = ref([])
 const saving = ref(false)
 const currentPage = ref(1)
 const pageSize = 6
+const filterCourse = ref('')
+const filterStatus = ref('')
+const keywordInput = ref('')
+const keyword = ref('')
 const homeworkFormRef = ref(null)
 const pendingHomeworkId = ref(null)
 const editingHomeworkId = ref(null)
 const existingTeacherAttachment = ref(null)
+const deadlineMode = ref('UNLIMITED')
 const submissionContentSaved = ref(null)
+const now = ref(Date.now())
+const selectedHomeworkOpen = computed(() => (
+  Boolean(selectedHomework.value) && isHomeworkOpen(selectedHomework.value)
+))
+let deadlineTicker = null
 let previewRequestSequence = 0
+let submissionsRequestSequence = 0
 const homeworkForm = reactive({
   course_id: null,
   title: '',
@@ -51,13 +77,53 @@ const homeworkRules = {
   description: [{ required: true, message: '请输入作业要求', trigger: 'blur' }],
 }
 
+const homeworkCourseOptions = computed(() => {
+  const options = new Map()
+  homeworks.value.forEach((item) => options.set(courseFilterKey(item), item.course_name || '未命名课程'))
+  return [...options].map(([value, label]) => ({ value, label }))
+})
+const filteredHomeworks = computed(() => {
+  const query = keyword.value.toLocaleLowerCase()
+  return homeworks.value.filter((item) => (
+    (!filterCourse.value || courseFilterKey(item) === filterCourse.value)
+    && (!filterStatus.value || homeworkLifecycle(item) === filterStatus.value)
+    && (!query || `${item.title || ''} ${item.description || ''} ${item.course_name || ''}`.toLocaleLowerCase().includes(query))
+  ))
+})
+const hasActiveFilters = computed(() => Boolean(filterCourse.value || filterStatus.value || keyword.value))
 const pagedHomeworks = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  return homeworks.value.slice(start, start + pageSize)
+  return filteredHomeworks.value.slice(start, start + pageSize)
 })
+
+function courseFilterKey(item) {
+  return item.course_id == null ? `name:${item.course_name || ''}` : `id:${item.course_id}`
+}
+
+function homeworkLifecycle(homework) {
+  if (homework.status === 'DRAFT') return 'DRAFT'
+  if (homework.status === 'CLOSED') return 'CLOSED'
+  const deadline = parseUtc(homework.deadline)
+  if (homework.availability === 'ENDED' || (deadline && deadline.getTime() <= now.value)) return 'ENDED'
+  return 'OPEN'
+}
+
+function applyFilters() {
+  keyword.value = keywordInput.value.trim()
+  currentPage.value = 1
+}
+
+function resetFilters() {
+  filterCourse.value = ''
+  filterStatus.value = ''
+  keywordInput.value = ''
+  keyword.value = ''
+  currentPage.value = 1
+}
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     if (isTeacher.value) {
       const [homeworkResponse, courseResponse] = await Promise.all([
@@ -71,6 +137,7 @@ async function load() {
       homeworks.value = response.data
     }
   } catch (error) {
+    loadError.value = error.message || '作业列表加载失败'
     ElMessage.error(error.message || '作业列表加载失败')
   } finally {
     loading.value = false
@@ -81,6 +148,7 @@ function openHomework(homework = null) {
   editingHomeworkId.value = homework?.id || null
   pendingHomeworkId.value = null
   existingTeacherAttachment.value = homework?.attachment ? homework : null
+  deadlineMode.value = homework?.deadline ? 'LIMITED' : 'UNLIMITED'
   Object.assign(homeworkForm, {
     course_id: homework?.course_id || null,
     title: homework?.title || '',
@@ -107,9 +175,17 @@ async function saveHomework() {
   let committedAction = ''
   try {
     if (!pendingHomeworkId.value) {
+      const payload = {
+        ...homeworkForm,
+        deadline: deadlineMode.value === 'LIMITED' ? homeworkForm.deadline : null,
+      }
+      if (deadlineMode.value === 'LIMITED' && !payload.deadline) {
+        ElMessage.warning('请选择作业截止时间，或改为不限时作业')
+        return
+      }
       const response = editingHomeworkId.value
-        ? await api.put(`/homeworks/${editingHomeworkId.value}`, homeworkForm)
-        : await api.post('/homeworks', homeworkForm)
+        ? await api.put(`/homeworks/${editingHomeworkId.value}`, payload)
+        : await api.post('/homeworks', payload)
       pendingHomeworkId.value = response.data.id
       committedAction = editingHomeworkId.value ? 'updated' : 'created'
       if (!editingHomeworkId.value) currentPage.value = 1
@@ -169,6 +245,7 @@ async function deleteHomework(homework) {
 }
 
 function openSubmission(homework) {
+  if (saving.value) return
   if (homework.submission?.status === 'GRADED') {
     ElMessage.warning('作业已批改，不能再修改内容或附件')
     return
@@ -182,34 +259,48 @@ function openSubmission(homework) {
 
 async function submitHomework() {
   if (saving.value || selectedHomework.value?.submission?.status === 'GRADED') return
+  if (!selectedHomeworkOpen.value) {
+    ElMessage.warning('作业已截止或关闭，不能继续提交')
+    return
+  }
   const content = submissionForm.content.trim()
-  if (!content && !submissionAttachment.value) {
+  if (!content && !submissionAttachment.value && !selectedHomework.value?.submission?.attachment) {
     ElMessage.warning('请输入作业内容或选择附件')
     return
   }
   saving.value = true
+  const homeworkId = selectedHomework.value.id
+  const attachment = submissionAttachment.value
   try {
     let submission = selectedHomework.value.submission
     if (content && content !== submissionContentSaved.value) {
-      const response = await api.put(`/homeworks/${selectedHomework.value.id}/submission`, { content })
+      const response = await api.put(`/homeworks/${homeworkId}/submission`, { content })
       submission = response.data
       submissionContentSaved.value = content
       updateSelectedSubmission(submission)
     }
-    if (submissionAttachment.value) {
+    if (attachment) {
       const attachmentData = new FormData()
-      attachmentData.append('attachment', submissionAttachment.value)
+      attachmentData.append('attachment', attachment)
       try {
         const response = await api.post(
-          `/homeworks/${selectedHomework.value.id}/submission/attachment`,
+          `/homeworks/${homeworkId}/submission/attachment`,
           attachmentData,
         )
         submission = response.data
+        updateSelectedSubmission(submission)
       } catch (error) {
         const prefix = submissionContentSaved.value ? '作业内容已保存' : '作业内容未发生变化'
         ElMessage.warning(`${prefix}，但附件上传失败：${error.message || '请检查文件后重试'}`)
         return
       }
+    }
+    // Upload first when switching to attachment-only, so clearing text never
+    // leaves a submission with neither an answer nor an attachment.
+    if (!content && submission?.attachment && submission.content) {
+      const response = await api.put(`/homeworks/${homeworkId}/submission`, { content: '' })
+      submission = response.data
+      submissionContentSaved.value = ''
     }
     updateSelectedSubmission(submission)
     submissionDialog.value = false
@@ -222,30 +313,59 @@ async function submitHomework() {
 }
 
 async function openSubmissions(homework) {
+  if (saving.value) return
+  clearGradeContext()
+  const requestId = ++submissionsRequestSequence
   selectedHomework.value = homework
+  gradeDialog.value = true
+  submissionsLoading.value = true
   try {
     const response = await api.get(`/homeworks/${homework.id}/submissions`)
+    if (requestId !== submissionsRequestSequence || !gradeDialog.value || selectedHomework.value?.id !== homework.id) return
     submissions.value = response.data
-    gradeDialog.value = true
   } catch (error) {
+    if (requestId !== submissionsRequestSequence) return
+    submissionsError.value = error.message || '学生提交记录加载失败'
     ElMessage.error(error.message || '学生提交记录加载失败')
+  } finally {
+    if (requestId === submissionsRequestSequence) submissionsLoading.value = false
   }
 }
 
+function clearGradeContext() {
+  submissionsRequestSequence += 1
+  submissionsLoading.value = false
+  submissionsError.value = ''
+  submissions.value = []
+  selectedSubmission.value = null
+  Object.assign(gradeForm, { score: 0, teacher_comment: '' })
+}
+
 function selectForGrade(submission) {
+  if (saving.value) return
   selectedSubmission.value = submission
   gradeForm.score = submission.score ?? 0
   gradeForm.teacher_comment = submission.teacher_comment || ''
 }
 
 async function gradeSubmission() {
-  if (!selectedSubmission.value) return
+  if (saving.value || !selectedSubmission.value || !selectedHomework.value) return
+  const submission = selectedSubmission.value
+  if (!submissions.value.some((item) => item.id === submission.id)
+    || (submission.homework_id != null && submission.homework_id !== selectedHomework.value.id)) {
+    ElMessage.warning('提交记录已切换，请重新选择学生')
+    clearGradeContext()
+    return
+  }
+  const requestId = submissionsRequestSequence
+  const payload = { ...gradeForm }
   saving.value = true
   try {
     const response = await api.put(
-      `/homeworks/submissions/${selectedSubmission.value.id}/grade`,
-      gradeForm,
+      `/homeworks/submissions/${submission.id}/grade`,
+      payload,
     )
+    if (requestId !== submissionsRequestSequence) return
     const index = submissions.value.findIndex((item) => item.id === response.data.id)
     if (index >= 0) submissions.value[index] = response.data
     selectedSubmission.value = null
@@ -271,6 +391,7 @@ function updateSelectedSubmission(submission) {
 function resetHomeworkForm() {
   pendingHomeworkId.value = null
   editingHomeworkId.value = null
+  deadlineMode.value = 'UNLIMITED'
   Object.assign(homeworkForm, {
     course_id: null,
     title: '',
@@ -293,7 +414,7 @@ function statusLabel(status) {
 
 function submissionLabel(submission) {
   if (!submission) return '待提交'
-  return submission.status === 'GRADED' ? '已批改' : '已提交'
+  return submission.status === 'GRADED' ? '已批改 · 不可修改' : '已提交'
 }
 
 function parseUtc(value) {
@@ -306,6 +427,7 @@ function formatDate(value) {
   const date = parseUtc(value)
   if (!date || Number.isNaN(date.getTime())) return '长期有效'
   return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -317,7 +439,42 @@ function deadlineTone(homework) {
   if (homework.status === 'CLOSED') return 'closed'
   const deadline = parseUtc(homework.deadline)
   if (!deadline) return 'normal'
-  return deadline.getTime() < Date.now() ? 'overdue' : 'normal'
+  return deadline.getTime() <= now.value ? 'overdue' : 'normal'
+}
+
+function isHomeworkOpen(homework) {
+  return homework.status === 'PUBLISHED'
+    && homework.availability !== 'CLOSED'
+    && homework.availability !== 'ENDED'
+    && homework.can_submit !== false
+    && deadlineTone(homework) !== 'overdue'
+}
+
+function canEditSubmission(homework) {
+  return homework.submission?.status !== 'GRADED' && isHomeworkOpen(homework)
+}
+
+function homeworkStateClass(homework) {
+  if (homework.status === 'PUBLISHED' && !isHomeworkOpen(homework)) return 'ended'
+  return homework.status.toLowerCase()
+}
+
+function homeworkStateLabel(homework) {
+  return homework.status === 'PUBLISHED' && !isHomeworkOpen(homework) ? '已截止' : statusLabel(homework.status)
+}
+
+function homeworkDeadlineLabel(homework) {
+  return homework.deadline ? `截止 · ${formatDate(homework.deadline)}` : '长期有效'
+}
+
+function openRequirements(homework) {
+  requirementsHomework.value = homework
+  requirementsDialog.value = true
+}
+
+function openTeacherComment(homework) {
+  commentHomework.value = homework
+  teacherCommentDialog.value = true
 }
 
 function selectHomeworkAttachment(event) {
@@ -381,11 +538,15 @@ function clearPreview() {
   previewKind.value = 'unsupported'
 }
 
-watch(() => homeworks.value.length, (total) => {
+watch([filterCourse, filterStatus], () => { currentPage.value = 1 })
+watch(() => filteredHomeworks.value.length, (total) => {
   currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
 })
-onMounted(load)
-onBeforeUnmount(clearPreview)
+onMounted(() => {
+  void load()
+  deadlineTicker = window.setInterval(() => { now.value = Date.now() }, 1000)
+})
+onBeforeUnmount(() => { window.clearInterval(deadlineTicker); clearPreview(); clearGradeContext() })
 </script>
 
 <template>
@@ -401,61 +562,114 @@ onBeforeUnmount(clearPreview)
       </el-button>
     </div>
 
+    <el-result v-if="loadError" icon="error" title="作业列表加载失败" :sub-title="loadError">
+      <template #extra><el-button @click="load">重新加载</el-button></template>
+    </el-result>
+    <template v-else>
+    <div class="course-filter-panel task-filter-panel" aria-label="作业筛选条件">
+      <div class="course-filter-field">
+        <span>所属课程</span>
+        <el-select v-model="filterCourse" clearable placeholder="全部课程" aria-label="作业所属课程" popper-class="course-filter-dropdown">
+          <el-option v-for="item in homeworkCourseOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </div>
+      <div class="course-filter-field">
+        <span>作业状态</span>
+        <el-select v-model="filterStatus" clearable placeholder="全部状态" aria-label="作业状态" popper-class="course-filter-dropdown">
+          <el-option label="进行中" value="OPEN" />
+          <el-option label="已截止" value="ENDED" />
+          <el-option label="已关闭" value="CLOSED" />
+          <el-option v-if="isTeacher" label="草稿" value="DRAFT" />
+        </el-select>
+      </div>
+      <div class="course-filter-field course-keyword-field">
+        <span>作业关键词</span>
+        <el-input v-model="keywordInput" clearable maxlength="100" placeholder="搜索作业名称、要求或课程" aria-label="作业关键词" @clear="applyFilters" @keyup.enter="applyFilters" />
+      </div>
+      <div class="course-filter-actions">
+        <el-button type="primary" @click="applyFilters">查询</el-button>
+        <el-button :disabled="!hasActiveFilters && !keywordInput" @click="resetFilters">重置</el-button>
+      </div>
+    </div>
+    <div class="course-result-meta">
+      <span>{{ hasActiveFilters ? `当前条件下共 ${filteredHomeworks.length} 项作业` : `共 ${filteredHomeworks.length} 项作业` }}</span><i></i>
+    </div>
     <div class="homework-summary">
       <article>
         <span>{{ isTeacher ? '全部作业' : '课程任务' }}</span>
-        <strong>{{ homeworks.length }}</strong>
+        <strong>{{ filteredHomeworks.length }}</strong>
       </article>
       <article>
         <span>{{ isTeacher ? '进行中' : '待完成' }}</span>
-        <strong>{{ homeworks.filter((item) => item.status === 'PUBLISHED' && (isTeacher || !item.submission)).length }}</strong>
+        <strong>{{ filteredHomeworks.filter((item) => isHomeworkOpen(item) && (isTeacher || !item.submission)).length }}</strong>
       </article>
       <article>
-        <span>{{ isTeacher ? '已关闭' : '已批改' }}</span>
-        <strong>{{ homeworks.filter((item) => isTeacher ? item.status === 'CLOSED' : item.submission?.status === 'GRADED').length }}</strong>
+        <span>{{ isTeacher ? '已结束' : '已批改' }}</span>
+        <strong>{{ filteredHomeworks.filter((item) => isTeacher ? !isHomeworkOpen(item) && item.status !== 'DRAFT' : item.submission?.status === 'GRADED').length }}</strong>
       </article>
     </div>
 
-    <div class="homework-grid">
+    <div
+      class="stable-pagination-shell homework-pagination-shell"
+      :class="{ 'has-pagination': filteredHomeworks.length > pageSize }"
+    >
+    <div class="homework-grid stable-pagination-body">
       <article v-for="homework in pagedHomeworks" :key="homework.id" class="homework-card">
         <div class="homework-card-top">
           <span>{{ homework.course_name }}</span>
-          <i :class="`homework-state state-${homework.status.toLowerCase()}`">
-            {{ statusLabel(homework.status) }}
+          <i :class="`homework-state state-${homeworkStateClass(homework)}`">
+            {{ homeworkStateLabel(homework) }}
           </i>
         </div>
         <h2>{{ homework.title }}</h2>
         <p>{{ homework.description }}</p>
+        <el-button class="homework-requirement-button" link @click="openRequirements(homework)">查看完整要求</el-button>
         <div class="homework-meta">
-          <span :class="deadlineTone(homework)">截止 · {{ formatDate(homework.deadline) }}</span>
+          <span :class="deadlineTone(homework)">{{ homeworkDeadlineLabel(homework) }}</span>
           <span>满分 · {{ homework.total_score }}</span>
         </div>
-        <button
-          v-if="homework.attachment"
-          class="homework-attachment"
-          type="button"
-          @click="openAttachment(homework)"
+        <div
+          v-if="homework.attachment || (!isTeacher && homework.submission?.attachment)"
+          class="homework-attachment-row"
         >
-          在线预览教师附件
-        </button>
-
-        <div v-if="!isTeacher" class="submission-result">
-          <div>
-            <span>{{ submissionLabel(homework.submission) }}</span>
-            <strong v-if="homework.submission?.score !== null && homework.submission?.score !== undefined">
-              {{ homework.submission.score }} 分
-            </strong>
-          </div>
-          <p v-if="homework.submission?.teacher_comment">教师评语：{{ homework.submission.teacher_comment }}</p>
           <button
-            v-if="homework.submission?.attachment"
+            v-if="homework.attachment"
+            class="homework-attachment"
             type="button"
-            class="attachment-text-button"
+            @click="openAttachment(homework)"
+          >在线预览教师附件</button>
+          <button
+            v-if="!isTeacher && homework.submission?.attachment"
+            type="button"
+            class="attachment-text-button student-submission-attachment"
             @click="openAttachment(homework, homework.submission)"
           >在线预览我的提交附件</button>
         </div>
 
-        <div class="homework-actions">
+        <div v-if="!isTeacher" class="submission-result">
+          <div class="submission-result-summary">
+            <span>{{ submissionLabel(homework.submission) }}</span>
+            <div class="submission-result-actions">
+              <button
+                v-if="homework.submission?.teacher_comment"
+                type="button"
+                class="teacher-comment-button"
+                @click="openTeacherComment(homework)"
+              >查看教师评语</button>
+              <strong v-if="homework.submission?.score !== null && homework.submission?.score !== undefined">
+                {{ homework.submission.score }} 分
+              </strong>
+              <button
+                v-if="canEditSubmission(homework)"
+                type="button"
+                class="submission-action-button"
+                @click="openSubmission(homework)"
+              >{{ homework.submission ? '修改提交' : '提交作业' }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="isTeacher" class="homework-actions">
           <template v-if="isTeacher">
             <el-button
               v-if="homework.status === 'DRAFT'"
@@ -489,35 +703,48 @@ onBeforeUnmount(clearPreview)
               查看提交（{{ homework.submission_count }}）
             </el-button>
           </template>
-          <el-button
-            v-else
-            type="primary"
-            :disabled="homework.submission?.status === 'GRADED' || homework.status !== 'PUBLISHED' || deadlineTone(homework) === 'overdue'"
-            @click="openSubmission(homework)"
-          >
-            {{ homework.submission?.status === 'GRADED' ? '已批改 · 不可修改' : homework.submission ? '修改提交' : '提交作业' }}
-          </el-button>
         </div>
       </article>
       <el-empty
-        v-if="!loading && !homeworks.length"
+        v-if="!loading && !filteredHomeworks.length"
         class="surface-card homework-empty"
-        :description="isTeacher ? '还没有作业，先创建一份草稿吧' : '当前没有需要完成的课程作业'"
+        :description="hasActiveFilters ? '没有符合当前筛选条件的作业' : isTeacher ? '还没有作业，先创建一份草稿吧' : '当前没有需要完成的课程作业'"
       />
+    </div>
       <el-pagination
-        v-if="homeworks.length > pageSize"
+        v-if="filteredHomeworks.length > pageSize"
         v-model:current-page="currentPage"
         class="collection-pagination"
         background
         layout="prev, pager, next"
         :page-size="pageSize"
-        :total="homeworks.length"
+        :total="filteredHomeworks.length"
         aria-label="作业列表分页"
       />
     </div>
+    </template>
+
+    <el-dialog v-model="requirementsDialog" :title="`${requirementsHomework?.title || ''} · 作业要求`" width="min(680px, 94vw)" @close-auto-focus="restoreRequirementsFocus">
+      <p class="task-full-description">{{ requirementsHomework?.description }}</p>
+      <template #footer><el-button @click="requirementsDialog = false">关闭</el-button></template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="teacherCommentDialog"
+      :title="`${commentHomework?.title || ''} · 教师评语`"
+      width="min(560px, 94vw)"
+      @close-auto-focus="restoreTeacherCommentFocus"
+      @closed="commentHomework = null"
+    >
+      <div class="teacher-comment-content">
+        {{ commentHomework?.submission?.teacher_comment || '教师暂未填写评语。' }}
+      </div>
+      <template #footer><el-button @click="teacherCommentDialog = false">关闭</el-button></template>
+    </el-dialog>
 
     <el-dialog
       v-model="createDialog"
+      @close-auto-focus="restoreCreateFocus"
       :title="editingHomeworkId ? '编辑作业草稿' : '创建作业草稿'"
       width="min(620px, 94vw)"
       :close-on-click-modal="!saving"
@@ -532,7 +759,7 @@ onBeforeUnmount(clearPreview)
         ref="homeworkFormRef"
         :model="homeworkForm"
         :rules="homeworkRules"
-        :disabled="Boolean(pendingHomeworkId)"
+        :disabled="saving || Boolean(pendingHomeworkId)"
         label-position="top"
       >
         <el-form-item label="所属课程" prop="course_id">
@@ -558,12 +785,19 @@ onBeforeUnmount(clearPreview)
             placeholder="说明完成要求、提交格式与评分要点…"
           />
         </el-form-item>
-        <div class="homework-form-row">
-          <el-form-item label="截止时间">
+        <el-form-item label="提交期限">
+          <el-radio-group v-model="deadlineMode" aria-label="作业提交期限">
+            <el-radio-button value="UNLIMITED">不限时</el-radio-button>
+            <el-radio-button value="LIMITED">指定截止时间</el-radio-button>
+          </el-radio-group>
+          <small class="field-help">不限时作业发布后会一直开放，直到教师手动关闭。</small>
+        </el-form-item>
+        <div class="homework-form-row" :class="{ 'single-column': deadlineMode === 'UNLIMITED' }">
+          <el-form-item v-if="deadlineMode === 'LIMITED'" label="截止时间" required>
             <el-date-picker
               v-model="homeworkForm.deadline"
               type="datetime"
-              placeholder="不设置则长期有效"
+              placeholder="请选择截止时间"
               style="width: 100%"
             />
           </el-form-item>
@@ -590,6 +824,7 @@ onBeforeUnmount(clearPreview)
 
     <el-dialog
       v-model="submissionDialog"
+      @close-auto-focus="restoreSubmissionFocus"
       :title="selectedHomework?.title"
       width="min(640px, 94vw)"
       :close-on-click-modal="!saving"
@@ -597,30 +832,45 @@ onBeforeUnmount(clearPreview)
       :show-close="!saving"
       @closed="resetSubmissionDialog"
     >
-      <p class="dialog-tip">在作业开放且未截止、未批改时可以修改提交；教师批改后，内容和附件均不可再修改。</p>
+      <p class="dialog-tip" :class="{ 'deadline-ended-tip': !selectedHomeworkOpen }">
+        {{ selectedHomeworkOpen
+          ? '在作业开放且未截止、未批改时可以修改提交；教师批改后，内容和附件均不可再修改。'
+          : '作业已截止或关闭，当前内容仅供查看，不能继续提交。' }}
+      </p>
+      <details class="task-requirements">
+        <summary>查看完整作业要求</summary>
+        <p class="task-full-description">{{ selectedHomework?.description }}</p>
+      </details>
       <el-input
         v-model="submissionForm.content"
         type="textarea"
         :rows="9"
+        :disabled="saving || !selectedHomeworkOpen"
         maxlength="20000"
         show-word-limit
         placeholder="请输入作业答案或总结…"
       />
       <label class="file-picker compact-file-picker submission-file-picker">
-        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.jpg,.jpeg,.png" @change="selectSubmissionAttachment" />
+        <input type="file" :disabled="saving || !selectedHomeworkOpen" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.jpg,.jpeg,.png" @change="selectSubmissionAttachment" />
         <span>选择提交附件</span>
         <strong>{{ submissionAttachment?.name || '可只提交附件，最大 50MB' }}</strong>
       </label>
       <template #footer>
         <el-button :disabled="saving" @click="submissionDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitHomework">确认提交</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!selectedHomeworkOpen" @click="submitHomework">
+          {{ selectedHomeworkOpen ? '确认提交' : '已截止' }}
+        </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="gradeDialog" :title="`${selectedHomework?.title || ''} · 提交记录`" width="min(900px, 96vw)">
-      <el-table :data="submissions" max-height="360">
-        <el-table-column prop="student_name" label="学生" width="130" />
-        <el-table-column prop="content" label="提交内容" min-width="260" show-overflow-tooltip />
+    <el-dialog v-model="gradeDialog" :title="`${selectedHomework?.title || ''} · 提交记录`" width="min(900px, 96vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @close="clearGradeContext" @close-auto-focus="restoreGradeFocus">
+      <div v-loading="submissionsLoading">
+      <el-result v-if="submissionsError" icon="error" title="提交记录加载失败" :sub-title="submissionsError">
+        <template #extra><el-button @click="openSubmissions(selectedHomework)">重新加载</el-button></template>
+      </el-result>
+      <el-table v-else :data="submissions" max-height="360">
+        <el-table-column prop="student_name" label="学生" width="130"><template #default="scope"><OverflowText :text="scope.row.student_name" label="查看学生姓名全文" /></template></el-table-column>
+        <el-table-column prop="content" label="提交内容" min-width="260"><template #default="scope"><OverflowText :text="scope.row.content" label="查看提交内容全文" /></template></el-table-column>
         <el-table-column label="提交时间" width="150">
           <template #default="scope">{{ formatDate(scope.row.submit_time) }}</template>
         </el-table-column>
@@ -630,11 +880,12 @@ onBeforeUnmount(clearPreview)
         <el-table-column label="操作" width="155">
           <template #default="scope">
             <el-button v-if="scope.row.attachment" link @click="openAttachment(selectedHomework, scope.row)">预览附件</el-button>
-            <el-button link type="primary" @click="selectForGrade(scope.row)">批改</el-button>
+            <el-button link type="primary" :disabled="saving" @click="selectForGrade(scope.row)">批改</el-button>
           </template>
         </el-table-column>
         <template #empty><el-empty description="还没有学生提交" :image-size="64" /></template>
       </el-table>
+      </div>
       <div v-if="selectedSubmission" class="grade-panel">
         <div>
           <strong>正在批改：{{ selectedSubmission.student_name }}</strong>
@@ -643,17 +894,18 @@ onBeforeUnmount(clearPreview)
         <p>{{ selectedSubmission.content }}</p>
         <div class="grade-form-row">
           <el-input-number
+            :disabled="saving"
             v-model="gradeForm.score"
             :min="0"
             :max="selectedHomework.total_score"
             :precision="2"
           />
-          <el-input v-model="gradeForm.teacher_comment" maxlength="10000" placeholder="填写教师评语（可选）" />
+          <el-input v-model="gradeForm.teacher_comment" :disabled="saving" maxlength="10000" placeholder="填写教师评语（可选）" />
           <el-button type="primary" :loading="saving" @click="gradeSubmission">保存批改</el-button>
         </div>
       </div>
     </el-dialog>
-    <el-dialog v-model="previewDialog" :title="previewName" width="min(920px, 96vw)" @close="clearPreview">
+    <el-dialog v-model="previewDialog" :title="previewName" width="min(920px, 96vw)" @close="clearPreview" @close-auto-focus="restorePreviewFocus">
       <div v-loading="previewLoading" class="attachment-preview">
         <img v-if="previewUrl && previewKind === 'image'" :src="previewUrl" :alt="previewName" />
         <iframe v-else-if="previewUrl && previewKind === 'document'" :src="previewUrl" :title="previewName"></iframe>

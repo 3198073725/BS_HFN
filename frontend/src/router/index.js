@@ -15,6 +15,7 @@ const LearningCenterView = () => import('../views/LearningCenterView.vue')
 const LoginView = () => import('../views/LoginView.vue')
 const NotFoundView = () => import('../views/NotFoundView.vue')
 const NotificationCenterView = () => import('../views/NotificationCenterView.vue')
+const NoticeListView = () => import('../views/NoticeListView.vue')
 const ProfileView = () => import('../views/ProfileView.vue')
 const RegisterView = () => import('../views/RegisterView.vue')
 const StatisticsView = () => import('../views/StatisticsView.vue')
@@ -32,6 +33,7 @@ const router = createRouter({
       component: DefaultLayout,
       children: [
         { path: '', name: 'home', component: HomeView },
+        { path: 'notices', name: 'notices', component: NoticeListView },
         { path: 'courses', name: 'courses', component: CourseListView },
         { path: 'courses/:id', name: 'course-detail', component: CourseDetailView },
         { path: 'users/:id', name: 'user-profile', component: ProfileView },

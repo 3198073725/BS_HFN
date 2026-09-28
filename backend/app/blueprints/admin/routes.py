@@ -9,6 +9,7 @@ from app.services.audit_service import list_admin_audit_logs, record_admin_actio
 from app.services.admin_service import (
     AdminConflict,
     AdminNotFound,
+    cancel_video_processing,
     change_admin_category_status,
     change_admin_course_status,
     change_user_status,
@@ -25,7 +26,7 @@ from app.services.admin_service import (
     serialize_admin_video,
     update_admin_category,
 )
-from app.services.video_processing_service import mark_video_failed, process_video_sync
+from app.services.video_processing_service import enqueue_video_processing, mark_video_failed, process_video_sync
 from app.utils import error, json_body, roles_required, success
 from app.blueprints.auth.schemas import ValidationError as AuthValidationError, validate_new_password
 from app.blueprints.auth.schemas import ValidationError, validate_managed_user
@@ -138,10 +139,8 @@ def retry_video(video_id: int):
     try:
         video = prepare_video_retry(video_id)
         if current_app.config["VIDEO_PROCESSING_ASYNC"]:
-            from app.tasks.video_tasks import process_video
-
             try:
-                process_video.delay(video.id)
+                video = enqueue_video_processing(video.id)
             except OperationalError:
                 current_app.logger.exception("管理员重新投递视频 %s 失败", video.id)
                 failed = mark_video_failed(video.id, "后台任务队列暂不可用", "QUEUE")
@@ -188,6 +187,39 @@ def retry_video(video_id: int):
         return error(str(exc), 409)
 
 
+@admin_bp.post("/videos/<int:video_id>/cancel")
+@roles_required(UserRole.ADMIN)
+def cancel_video(video_id: int):
+    try:
+        video, task_id = cancel_video_processing(video_id)
+    except AdminNotFound as exc:
+        return error(str(exc), 404)
+    except AdminConflict as exc:
+        return error(str(exc), 409)
+
+    revoke_sent = False
+    if task_id and current_app.extensions.get("celery") is not None:
+        try:
+            current_app.extensions["celery"].control.revoke(
+                task_id,
+                terminate=True,
+                signal="SIGTERM",
+            )
+            revoke_sent = True
+        except Exception:
+            current_app.logger.exception("撤销视频转码任务 %s 失败", task_id)
+
+    _record_audit(
+        "VIDEO_CANCEL",
+        "VIDEO",
+        video.id,
+        f"终止视频转码：{video.title}",
+        {"task_id": task_id, "revoke_sent": revoke_sent},
+    )
+    message = "转码任务已终止" if revoke_sent else "任务已标记终止，处理进程将在终止检查点退出"
+    return success(serialize_admin_video(get_admin_video(video.id)), message)
+
+
 @admin_bp.delete("/videos/<int:video_id>")
 @roles_required(UserRole.ADMIN)
 def remove_failed_video(video_id: int):
@@ -199,8 +231,8 @@ def remove_failed_video(video_id: int):
         return error(str(exc), 404)
     except AdminConflict as exc:
         return error(str(exc), 409)
-    _record_audit("VIDEO_DELETE", "VIDEO", video_id, f"清理失败视频任务：{title}")
-    return success(message="失败的视频任务及文件已清理")
+    _record_audit("VIDEO_DELETE", "VIDEO", video_id, f"清理视频任务：{title}")
+    return success(message="视频任务及相关文件已清理")
 
 
 @admin_bp.get("/courses")

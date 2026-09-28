@@ -1,6 +1,8 @@
 import io
 import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +11,7 @@ from kombu.exceptions import OperationalError
 from werkzeug.datastructures import FileStorage
 from werkzeug.security import generate_password_hash
 
-from app.constants import CourseStatus, UserRole
+from app.constants import CourseStatus, UserRole, VideoStatus
 from app.extensions import db
 from app.models import (
     Chapter,
@@ -22,6 +24,7 @@ from app.models import (
     VideoNote,
 )
 from app.services import generate_cover, generate_hls, probe_video, transcode_video
+from app.services.ffmpeg_service import _run_command
 from app.services.file_service import save_original_video
 from app.services.video_processing_service import process_video_sync
 
@@ -164,15 +167,17 @@ def test_async_upload_commits_before_enqueuing(app, client, monkeypatch):
 
     queued_ids = []
 
-    def enqueue(video_id):
+    def enqueue(*, args, task_id):
+        video_id = args[0]
         persisted = db.session.get(Video, video_id)
         assert persisted is not None
         assert persisted.status == "PENDING"
+        assert persisted.task_id == task_id
         queued_ids.append(video_id)
 
     monkeypatch.setattr(
         "app.tasks.video_tasks.process_video",
-        SimpleNamespace(delay=enqueue),
+        SimpleNamespace(apply_async=enqueue),
     )
 
     login = client.post(
@@ -244,12 +249,12 @@ def test_async_enqueue_failure_is_persisted(app, client, monkeypatch):
         db.session.commit()
         chapter_id = chapter.id
 
-    def fail_enqueue(_video_id):
+    def fail_enqueue(*, args, task_id):
         raise OperationalError("broker offline")
 
     monkeypatch.setattr(
         "app.tasks.video_tasks.process_video",
-        SimpleNamespace(delay=fail_enqueue),
+        SimpleNamespace(apply_async=fail_enqueue),
     )
     token = client.post(
         "/api/auth/login",
@@ -285,6 +290,25 @@ def test_video_file_validation_preserves_chinese_name_and_rejects_empty(tmp_path
             FileStorage(stream=io.BytesIO(b""), filename="empty.mp4"),
             tmp_path,
         )
+
+
+def test_ffmpeg_runner_terminates_child_when_cancelled():
+    checks = 0
+
+    def cancel_after_first_poll():
+        nonlocal checks
+        checks += 1
+        if checks >= 2:
+            raise RuntimeError("cancelled")
+
+    started_at = time.monotonic()
+    with pytest.raises(RuntimeError, match="cancelled"):
+        _run_command(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            timeout=30,
+            cancel_check=cancel_after_first_poll,
+        )
+    assert time.monotonic() - started_at < 5
 
 
 def test_video_upload_rejects_unsupported_file_as_bad_request(app, client):
@@ -392,10 +416,62 @@ def test_failed_processing_cleans_generated_files(app, monkeypatch):
         assert not cover_path.exists()
 
 
+def test_cancelled_task_cannot_restart_and_overwrite_terminal_state(app, monkeypatch):
+    with app.app_context():
+        teacher = User(username="cancel_guard_teacher", password_hash="hash", real_name="终止保护教师", teacher_no="TCG001", role=UserRole.TEACHER.value)
+        category = CourseCategory(name="终止保护课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="终止保护")
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="终止保护章节")
+        db.session.add(chapter)
+        db.session.flush()
+        video = Video(
+            chapter_id=chapter.id,
+            title="已终止视频",
+            original_file="videos/original/cancelled.mp4",
+            status=VideoStatus.CANCELLED.value,
+            process_step="CANCELLED",
+            error_message="管理员已终止转码任务",
+        )
+        db.session.add(video)
+        db.session.commit()
+
+        monkeypatch.setattr(
+            "app.services.video_processing_service.probe_video",
+            lambda *_args, **_kwargs: pytest.fail("已终止任务不应再次读取媒体信息"),
+        )
+        result = process_video_sync(video.id, expected_task_id="obsolete-task")
+        assert result.status == VideoStatus.CANCELLED.value
+        assert result.process_step == "CANCELLED"
+        assert result.error_message == "管理员已终止转码任务"
+
+        replacement = Video(
+            chapter_id=chapter.id,
+            title="已被新任务替换的视频",
+            original_file="videos/original/replacement.mp4",
+            status=VideoStatus.PENDING.value,
+            process_step="QUEUED",
+            task_id="new-task",
+        )
+        db.session.add(replacement)
+        db.session.commit()
+        partial = Path(app.config["MEDIA_ROOT"]) / "videos" / "processed" / str(replacement.id) / "partial.mp4"
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"new task output")
+
+        superseded = process_video_sync(replacement.id, expected_task_id="obsolete-task")
+        assert superseded.status == VideoStatus.PENDING.value
+        assert superseded.task_id == "new-task"
+        assert partial.is_file()
+
+
 def test_celery_task_marks_pending_before_retry(monkeypatch):
     from app.tasks import video_tasks
 
-    def fail_processing(_video_id, *, raise_on_error=False):
+    def fail_processing(_video_id, *, raise_on_error=False, expected_task_id=None):
         raise video_tasks.VideoProcessingError("transcode failed")
 
     pending = []
@@ -546,7 +622,7 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
     queued_ids = []
     monkeypatch.setattr(
         "app.tasks.video_tasks.process_video",
-        SimpleNamespace(delay=lambda video_id: queued_ids.append(video_id)),
+        SimpleNamespace(apply_async=lambda *, args, task_id: queued_ids.append(args[0])),
     )
 
     edited = client.put(
@@ -571,6 +647,20 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
     assert retried.status_code == 202
     assert retried.get_json()["data"]["status"] == "PENDING"
     assert queued_ids == [ids["failed"]]
+    with app.app_context():
+        pending_task_id = db.session.get(Video, ids["failed"]).task_id
+    revoked = []
+    app.extensions["celery"] = type("FakeCelery", (), {
+        "control": type("FakeControl", (), {
+            "revoke": staticmethod(lambda task_id, **kwargs: revoked.append((task_id, kwargs))),
+        })(),
+    })()
+    deleted_pending = client.delete(f"/api/videos/{ids['failed']}", headers=headers)
+    assert deleted_pending.status_code == 200
+    assert deleted_pending.get_json()["message"] == "转码任务已终止，视频及相关学习数据已删除"
+    assert revoked == [(pending_task_id, {"terminate": True, "signal": "SIGTERM"})]
+    with app.app_context():
+        assert db.session.get(Video, ids["failed"]) is None
     assert client.post(
         f"/api/videos/{ids['published']}/retry",
         headers=headers,
@@ -635,3 +725,48 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
     with app.app_context():
         assert db.session.get(Video, replacement["id"]) is None
         assert not new_original.exists()
+
+
+def test_deleted_video_task_cleans_files_created_before_next_checkpoint(app, monkeypatch):
+    with app.app_context():
+        teacher = User(username="deleted_task_teacher", password_hash="hash", real_name="删除任务教师", teacher_no="TDT001", role=UserRole.TEACHER.value)
+        category = CourseCategory(name="删除任务课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="删除中的转码")
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="删除任务章节")
+        db.session.add(chapter)
+        db.session.flush()
+        original_rel = "videos/original/delete-during-processing.mp4"
+        original = Path(app.config["MEDIA_ROOT"]) / original_rel
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(b"source")
+        video = Video(
+            chapter_id=chapter.id,
+            title="转码中删除",
+            original_file=original_rel,
+            status=VideoStatus.PENDING.value,
+            task_id="deleted-task",
+        )
+        db.session.add(video)
+        db.session.commit()
+        video_id = video.id
+
+        monkeypatch.setattr("app.services.video_processing_service.probe_video", lambda *_args: {})
+        monkeypatch.setattr("app.services.video_processing_service._apply_metadata", lambda *_args: None)
+
+        def delete_while_transcoding(_input, output, _ffmpeg, *, cancel_check=None):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"partial output")
+            db.session.execute(db.delete(Video).where(Video.id == video_id))
+            db.session.commit()
+            cancel_check()
+            return output
+
+        monkeypatch.setattr("app.services.video_processing_service.transcode_video", delete_while_transcoding)
+        result = process_video_sync(video_id, expected_task_id="deleted-task")
+
+        assert result is None
+        assert not (Path(app.config["MEDIA_ROOT"]) / "videos" / "processed" / str(video_id)).exists()

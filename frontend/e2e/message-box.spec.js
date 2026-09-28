@@ -11,6 +11,13 @@ for (const viewport of [{ width: 2048, height: 950 }, { width: 390, height: 844 
       await page.locator(`#${id}`).click()
       await expectCompactMessageBox(page, box, { width: id === 'custom' ? 480 : 420 })
       if (id === 'prompt') await box.getByPlaceholder('说明内容').fill('测试输入')
+      if (id === 'neutral') {
+        await page.evaluate(() => document.activeElement?.blur())
+        const buttons = box.locator('.el-message-box__btns button')
+        await expect(buttons.nth(0)).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+        await expect(buttons.nth(1)).toHaveCSS('background-color', 'rgb(65, 73, 80)')
+        await expect(buttons.nth(1)).toHaveCSS('color', 'rgb(255, 255, 255)')
+      }
       if (id === 'confirm') await page.screenshot({ path: testInfo.outputPath('compact-confirmation.png') })
       await box.getByRole('button', { name: '取消', exact: true }).click()
       await expect(box).toBeHidden()

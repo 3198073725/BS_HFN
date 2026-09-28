@@ -8,6 +8,7 @@ from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
 from app.models import PasswordResetRequest, TeachingClass, TeachingClassStudent, User
 from app.services.notification_service import queue_notification
+from app.services.review_guard import claim_pending, lock_student
 
 
 RESET_REQUEST_TTL = timedelta(hours=24)
@@ -26,11 +27,13 @@ class PasswordResetRequestConflict(ValueError):
 
 
 def submit_student_password_reset(student: User, new_password: str) -> PasswordResetRequest:
+    student = lock_student(student.id)
     teacher_classes = db.session.execute(
         db.select(TeachingClass.teacher_id, TeachingClass.id, TeachingClass.name)
         .join(TeachingClassStudent, TeachingClassStudent.class_id == TeachingClass.id)
         .where(TeachingClassStudent.student_id == student.id)
         .order_by(TeachingClass.id)
+        .with_for_update()
     ).all()
     if not teacher_classes:
         raise PasswordResetRequestConflict("账号尚未加入班级，请联系管理员重置密码")
@@ -43,12 +46,15 @@ def submit_student_password_reset(student: User, new_password: str) -> PasswordR
             PasswordResetRequest.status == PasswordResetStatus.PENDING.value,
         )
         .order_by(PasswordResetRequest.created_at.desc(), PasswordResetRequest.id.desc())
+        .with_for_update().execution_options(populate_existing=True)
     )
     if pending is not None and pending.expires_at <= now:
         pending.status = PasswordResetStatus.EXPIRED.value
         pending.reviewed_at = now
         pending = None
 
+    if pending is not None:
+        raise PasswordResetRequestConflict("已有待审批的密码重置申请，请等待教师处理，不要重复提交")
     password_hash = generate_password_hash(new_password)
     if pending is None:
         pending = PasswordResetRequest(
@@ -59,13 +65,6 @@ def submit_student_password_reset(student: User, new_password: str) -> PasswordR
         )
         db.session.add(pending)
         db.session.flush()
-    else:
-        pending.requested_password_hash = password_hash
-        pending.expires_at = now + RESET_REQUEST_TTL
-        pending.created_at = now
-        pending.reviewer_id = None
-        pending.reviewed_at = None
-
     classes_by_teacher: dict[int, list[tuple[int, str]]] = {}
     for teacher_id, class_id, class_name in teacher_classes:
         classes_by_teacher.setdefault(teacher_id, []).append((class_id, class_name))
@@ -106,10 +105,17 @@ def list_teacher_password_reset_requests(teacher_id: int) -> list[dict]:
 
 
 def review_student_password_reset(request_id: int, teacher_id: int, action: str) -> dict:
+    if action not in (PasswordResetStatus.APPROVED.value, PasswordResetStatus.REJECTED.value):
+        raise PasswordResetRequestConflict("不支持的审批操作")
+    student_id = db.session.scalar(db.select(PasswordResetRequest.student_id).where(PasswordResetRequest.id == request_id))
+    if student_id is None:
+        raise PasswordResetRequestNotFound("密码重置申请不存在")
+    lock_student(student_id)
     reset_request = db.session.scalar(
         db.select(PasswordResetRequest)
         .options(joinedload(PasswordResetRequest.student))
         .where(PasswordResetRequest.id == request_id)
+        .with_for_update().execution_options(populate_existing=True)
     )
     if reset_request is None:
         raise PasswordResetRequestNotFound("密码重置申请不存在")
@@ -120,16 +126,21 @@ def review_student_password_reset(request_id: int, teacher_id: int, action: str)
 
     now = utc_now()
     if reset_request.expires_at <= now:
-        reset_request.status = PasswordResetStatus.EXPIRED.value
-        reset_request.reviewed_at = now
+        claim_pending(reset_request, {"status": PasswordResetStatus.EXPIRED.value, "reviewed_at": now},
+            PasswordResetRequestConflict, "该密码重置申请已处理")
         db.session.commit()
         raise PasswordResetRequestConflict("该密码重置申请已过期，请让学生重新提交")
     if not reset_request.student.status:
         raise PasswordResetRequestConflict("学生账号已被禁用，不能重置密码")
 
     approved = action == PasswordResetStatus.APPROVED.value
+    claim_pending(reset_request, {"status": action, "reviewer_id": teacher_id, "reviewed_at": now},
+        PasswordResetRequestConflict, "该密码重置申请已处理")
     if approved:
         reset_request.student.password_hash = reset_request.requested_password_hash
+        # Legacy data may contain multiple pending requests from old races.
+        # A successful password change makes all other requests obsolete.
+        cancel_pending_password_resets(reset_request.student_id, teacher_id)
     reset_request.status = (
         PasswordResetStatus.APPROVED.value if approved else PasswordResetStatus.REJECTED.value
     )
@@ -152,11 +163,13 @@ def review_student_password_reset(request_id: int, teacher_id: int, action: str)
 
 
 def cancel_pending_password_resets(student_id: int, reviewer_id: int | None = None) -> int:
+    lock_student(student_id)
     pending = db.session.scalars(
         db.select(PasswordResetRequest).where(
             PasswordResetRequest.student_id == student_id,
             PasswordResetRequest.status == PasswordResetStatus.PENDING.value,
         )
+        .with_for_update().execution_options(populate_existing=True)
     ).all()
     now = utc_now()
     for item in pending:
@@ -190,5 +203,6 @@ def _teacher_class_rows(student_id: int, teacher_id: int) -> list[TeachingClass]
             TeachingClass.teacher_id == teacher_id,
             TeachingClassStudent.student_id == student_id,
         )
+        .with_for_update()
         .order_by(TeachingClass.id)
     ).all()

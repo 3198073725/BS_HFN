@@ -20,7 +20,7 @@ def verify():
         "defense_admin": ["/admin/users", "/admin/videos", "/admin/courses", "/admin/classes", "/admin/categories", "/admin/audit-logs", "/notices/manage", "/statistics"],
         "defense_teacher": ["/classes", "/classes/join-requests", "/classes/password-reset-requests", "/courses/mine", "/questions", "/homeworks/manage", "/exams/manage", "/statistics/courses"],
         "defense_student01": ["/learning/courses", "/learning/favorites", "/classes", "/classes/join-requests/mine", f"/courses/{course_id}/classes", "/homeworks", "/exams", "/statistics"],
-        "defense_new_student": ["/learning/courses", "/classes", "/classes/join-requests/mine", f"/courses/{course_id}/classes", "/homeworks", "/exams"],
+        "defense_student29": ["/learning/courses", "/classes", "/classes/join-requests/mine", f"/courses/{course_id}/classes", "/homeworks", "/exams"],
     }
     for username, _name, _bio in TEACHERS[1:]:
         role_paths[username] = ["/classes", "/courses/mine", "/homeworks/manage", "/exams/manage"]
@@ -46,14 +46,14 @@ def verify():
             assert "email" not in profile and "phone" not in profile
             assert client.get("/api/admin/users", headers=headers).status_code == 403
             checks += 2
-        if username == "defense_new_student":
+        if username == "defense_student29":
             assert client.get("/api/learning/courses", headers=headers).get_json()["data"] == []
         result = client.post("/api/auth/logout", headers=headers, json={"refresh_token": session["refresh_token"]})
         assert result.status_code == 200
-    for username in ("defense_student29", "defense_student30"):
+    for username in ("defense_student30",):
         assert client.post("/api/auth/login", json={"account": username, "password": os.getenv("DEFENSE_DEMO_PASSWORD") or DEMO_PASSWORD}).status_code == 401
         checks += 1
-    print(json.dumps({"api_checks_passed": checks, "accounts_tested": len(role_paths), "disabled_accounts_rejected": 2}, ensure_ascii=False, indent=2))
+    print(json.dumps({"api_checks_passed": checks, "accounts_tested": len(role_paths), "disabled_accounts_rejected": 1}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

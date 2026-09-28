@@ -106,6 +106,10 @@ def get_teacher_class_statistics(class_id: int, teacher_id: int) -> dict:
 
 
 def _student_overview(student_id: int) -> dict:
+    published_joined_courses = _count(db.select(func.count(CourseStudent.id))
+        .join(Course, Course.id == CourseStudent.course_id).where(
+            CourseStudent.student_id == student_id, CourseStudent.status.is_(True),
+            Course.status == CourseStatus.PUBLISHED.value))
     joined_courses = _count(
         db.select(func.count(CourseStudent.id)).where(
             CourseStudent.student_id == student_id,
@@ -150,6 +154,7 @@ def _student_overview(student_id: int) -> dict:
     return {
         "role": UserRole.STUDENT.value,
         "joined_courses": joined_courses,
+        "published_joined_courses": published_joined_courses,
         "learned_videos": int(learning[0] or 0),
         "completed_videos": int(learning[1] or 0),
         "average_video_progress": _round(learning[2]),
@@ -289,13 +294,17 @@ def _course_statistics(course: Course) -> dict:
         )
         .select_from(HomeworkSubmission)
         .join(Homework, Homework.id == HomeworkSubmission.homework_id)
-        .where(Homework.course_id == course.id)
+        .where(Homework.course_id == course.id,
+            HomeworkSubmission.student_id.in_(active_student_ids),
+            Homework.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)))
     ).one()
     exam = db.session.execute(
         db.select(func.count(ExamRecord.id), func.avg(_exam_score_percent()))
         .select_from(ExamRecord)
         .join(Exam, Exam.id == ExamRecord.exam_id)
-        .where(Exam.course_id == course.id, ExamRecord.status.in_(("SUBMITTED", "GRADED")))
+        .where(Exam.course_id == course.id, ExamRecord.student_id.in_(active_student_ids),
+            Exam.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)),
+            ExamRecord.status.in_(("SUBMITTED", "GRADED")))
     ).one()
     return {
         "course_id": course.id,

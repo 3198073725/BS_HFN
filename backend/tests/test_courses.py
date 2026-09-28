@@ -3,7 +3,7 @@ from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
-from app.constants import UserRole
+from app.constants import UserRole, VideoStatus
 from app.extensions import db
 from app.models import Chapter, Course, CourseCategory, Homework, User, Video
 
@@ -174,6 +174,54 @@ def test_course_chapter_publish_and_permissions(app, client):
     assert republished.get_json()["data"]["name"] == "Python 下线维护版"
 
 
+def test_public_courses_support_combined_category_teacher_and_keyword_filters(app, client):
+    with app.app_context():
+        category_a = CourseCategory(name="编程开发", sort_order=0)
+        category_b = CourseCategory(name="计算机基础", sort_order=1)
+        db.session.add_all([category_a, category_b])
+        db.session.flush()
+        teacher_a = create_user("filter_teacher_a", "Teach123!", UserRole.TEACHER.value, "FT001")
+        teacher_a.real_name = "陈老师"
+        teacher_b = create_user("filter_teacher_b", "Teach123!", UserRole.TEACHER.value, "FT002")
+        teacher_b.real_name = "王老师"
+        db.session.add_all([
+            Course(teacher_id=teacher_a.id, category_id=category_a.id, name="Python 数据分析",
+                   description="使用 pandas 处理数据", status="PUBLISHED"),
+            Course(teacher_id=teacher_b.id, category_id=category_a.id, name="Java Web 开发",
+                   description="后端开发与接口设计", status="PUBLISHED"),
+            Course(teacher_id=teacher_a.id, category_id=category_b.id, name="操作系统基础",
+                   description="进程与内存", status="PUBLISHED"),
+            Course(teacher_id=teacher_b.id, category_id=category_b.id, name="未发布 Python",
+                   description="不应出现在公开筛选中", status="DRAFT"),
+        ])
+        db.session.commit()
+        category_a_id = category_a.id
+        teacher_a_id = teacher_a.id
+        teacher_b_id = teacher_b.id
+
+    teachers = client.get("/api/courses/teachers")
+    assert teachers.status_code == 200
+    assert {item["id"]: item["name"] for item in teachers.get_json()["data"]} == {
+        teacher_a_id: "陈老师",
+        teacher_b_id: "王老师",
+    }
+    by_category = client.get(f"/api/courses?category_id={category_a_id}").get_json()["data"]
+    assert {item["name"] for item in by_category} == {"Python 数据分析", "Java Web 开发"}
+    by_teacher = client.get(f"/api/courses?teacher_id={teacher_b_id}").get_json()["data"]
+    assert [item["name"] for item in by_teacher] == ["Java Web 开发"]
+    by_name = client.get("/api/courses?keyword=Python").get_json()["data"]
+    assert [item["name"] for item in by_name] == ["Python 数据分析"]
+    by_description = client.get("/api/courses?keyword=%E5%90%8E%E7%AB%AF").get_json()["data"]
+    assert [item["name"] for item in by_description] == ["Java Web 开发"]
+    combined = client.get(
+        f"/api/courses?category_id={category_a_id}&teacher_id={teacher_a_id}&keyword=Python"
+    ).get_json()["data"]
+    assert [item["name"] for item in combined] == ["Python 数据分析"]
+    assert client.get("/api/courses?teacher_id=abc").status_code == 400
+    assert client.get("/api/courses?teacher_id=0").status_code == 400
+    assert client.get(f"/api/courses?keyword={'x' * 101}").status_code == 400
+
+
 def test_deleting_chapter_cleans_video_files(app, client):
     with app.app_context():
         category = CourseCategory(name="清理测试分类")
@@ -190,7 +238,9 @@ def test_deleting_chapter_cleans_video_files(app, client):
             chapter_id=chapter.id,
             title="待删除视频",
             original_file="videos/original/delete-me.mp4",
-            status="FAILED",
+            status=VideoStatus.PROCESSING.value,
+            process_step="TRANSCODING",
+            task_id="chapter-delete-task",
         )
         db.session.add(video)
         db.session.commit()
@@ -208,12 +258,19 @@ def test_deleting_chapter_cleans_video_files(app, client):
             path.write_bytes(b"temporary")
 
     teacher_token = login(client, "cleanup_teacher", "Teach123!")
+    revoked = []
+    app.extensions["celery"] = type("FakeCelery", (), {
+        "control": type("FakeControl", (), {
+            "revoke": staticmethod(lambda task_id, **kwargs: revoked.append((task_id, kwargs))),
+        })(),
+    })()
     deleted = client.delete(
         f"/api/courses/{course_id}/chapters/{chapter_id}",
         headers=bearer(teacher_token),
     )
 
     assert deleted.status_code == 200
+    assert revoked == [("chapter-delete-task", {"terminate": True, "signal": "SIGTERM"})]
     with app.app_context():
         assert db.session.get(Video, video_id) is None
     assert not original.exists()

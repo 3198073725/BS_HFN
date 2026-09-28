@@ -187,15 +187,15 @@ function memoryStorage() {
 test('离线补传期间新增记录不丢失，重复触发只运行一次且按用户隔离', async () => {
   const storage = memoryStorage()
   const key = 'user:1'
-  appendProgress(storage, key, { video_id: 1 })
-  appendProgress(storage, 'user:2', { video_id: 99 })
+  await appendProgress(storage, key, { video_id: 1 })
+  await appendProgress(storage, 'user:2', { video_id: 99 })
   let release
   const waiting = new Promise((resolve) => { release = resolve })
   const sent = []
   const send = async (item) => { sent.push(item.video_id); if (item.video_id === 1) await waiting }
   const operation = flushProgress(storage, key, send, () => true)
   expect(flushProgress(storage, key, send, () => true)).toBe(operation)
-  appendProgress(storage, key, { video_id: 2 })
+  await appendProgress(storage, key, { video_id: 2 })
   release()
   expect(await operation).toBe(2)
   expect(sent).toEqual([1, 2])
@@ -209,7 +209,7 @@ test('离线补传失败时保留原记录与期间新增记录，旧队列兼�
   storage.setItem(key, JSON.stringify([{ video_id: 1, queued_at: 1 }]))
   expect(readProgressQueue(storage, key)[0].queue_id).toBeTruthy()
   const operation = flushProgress(storage, key, async () => {
-    appendProgress(storage, key, { video_id: 2 })
+    await appendProgress(storage, key, { video_id: 2 })
     throw new Error('断网')
   }, () => true)
   expect(await operation).toBe(0)

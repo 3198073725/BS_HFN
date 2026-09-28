@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.constants import CourseStatus, VideoStatus
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
-from app.models import Chapter, Course, CourseCategory, Exam, Homework, Video
+from app.models import Chapter, Course, CourseCategory, Exam, Homework, User, Video
 from .file_service import (
     clear_homework_files,
     clear_exam_files,
@@ -14,6 +14,7 @@ from .file_service import (
     remove_media_file,
     save_course_cover,
 )
+from .video_processing_service import revoke_video_processing_task
 
 
 class CourseNotFound(ValueError):
@@ -37,7 +38,22 @@ def list_categories() -> list[dict]:
     return [{"id": item.id, "name": item.name, "description": item.description} for item in categories]
 
 
-def list_published_courses(category_id: int | None = None) -> list[dict]:
+def list_published_course_teachers() -> list[dict]:
+    rows = db.session.execute(
+        db.select(User.id, User.real_name)
+        .join(Course, Course.teacher_id == User.id)
+        .where(Course.status == CourseStatus.PUBLISHED.value)
+        .distinct()
+        .order_by(User.real_name, User.id)
+    ).all()
+    return [{"id": teacher_id, "name": real_name} for teacher_id, real_name in rows]
+
+
+def list_published_courses(
+    category_id: int | None = None,
+    teacher_id: int | None = None,
+    keyword: str | None = None,
+) -> list[dict]:
     statement = (
         db.select(Course)
         .options(selectinload(Course.category), selectinload(Course.teacher))
@@ -46,6 +62,15 @@ def list_published_courses(category_id: int | None = None) -> list[dict]:
     )
     if category_id is not None:
         statement = statement.where(Course.category_id == category_id)
+    if teacher_id is not None:
+        statement = statement.where(Course.teacher_id == teacher_id)
+    if keyword:
+        statement = statement.where(
+            db.or_(
+                Course.name.contains(keyword, autoescape=True),
+                Course.description.contains(keyword, autoescape=True),
+            )
+        )
     return [serialize_course(course) for course in db.session.scalars(statement).all()]
 
 
@@ -113,11 +138,13 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
     course = _owned_course(course_id, teacher_id)
     if course.status != CourseStatus.DRAFT.value:
         raise CourseStateError("只有草稿课程可以删除，已发布课程请下线")
-    video_files = db.session.execute(
-        db.select(Video.id, Video.original_file)
+    videos = db.session.scalars(
+        db.select(Video)
         .join(Chapter, Video.chapter_id == Chapter.id)
         .where(Chapter.course_id == course.id)
     ).all()
+    video_files = [(video.id, video.original_file) for video in videos]
+    _stop_deleted_video_tasks(videos)
     homework_ids = db.session.scalars(
         db.select(Homework.id).where(Homework.course_id == course.id)
     ).all()
@@ -208,9 +235,9 @@ def delete_chapter(course_id: int, chapter_id: int, teacher_id: int) -> None:
     )
     if chapter is None:
         raise CourseNotFound("章节不存在")
-    video_files = db.session.execute(
-        db.select(Video.id, Video.original_file).where(Video.chapter_id == chapter.id)
-    ).all()
+    videos = db.session.scalars(db.select(Video).where(Video.chapter_id == chapter.id)).all()
+    video_files = [(video.id, video.original_file) for video in videos]
+    _stop_deleted_video_tasks(videos)
     db.session.delete(chapter)
     db.session.commit()
     _cleanup_deleted_video_files(video_files)
@@ -297,6 +324,32 @@ def _cleanup_deleted_video_files(video_files) -> None:
             remove_all_video_files(media_root, video_id, original_file)
         except (OSError, ValueError):
             current_app.logger.exception("视频 %s 的媒体文件清理失败", video_id)
+
+
+def _stop_deleted_video_tasks(videos: list[Video]) -> None:
+    active_statuses = {
+        VideoStatus.UPLOADING.value,
+        VideoStatus.PENDING.value,
+        VideoStatus.PROCESSING.value,
+    }
+    task_ids = []
+    changed = False
+    for video in videos:
+        if video.status not in active_statuses:
+            continue
+        if video.task_id:
+            task_ids.append(video.task_id)
+        video.status = VideoStatus.CANCELLED.value
+        video.process_step = "CANCELLED"
+        video.task_id = None
+        video.error_message = "所属章节或课程已删除，转码任务已终止"
+        changed = True
+    if changed:
+        # Publish cancellation before the cascade delete so active workers fail
+        # their next ownership/status checkpoint even if broker revoke is delayed.
+        db.session.commit()
+    for task_id in task_ids:
+        revoke_video_processing_task(task_id)
 
 
 def _cleanup_deleted_homework_files(homework_ids) -> None:

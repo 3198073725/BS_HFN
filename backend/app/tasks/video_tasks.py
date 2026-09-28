@@ -14,9 +14,9 @@ from app.services.video_processing_service import (
     name="video.process",
     max_retries=2,
 )
-def process_video(self, video_id: int) -> None:
+def process_video(self, video_id: int, task_id: str | None = None) -> None:
     try:
-        process_video_sync(video_id, raise_on_error=True)
+        process_video_sync(video_id, raise_on_error=True, expected_task_id=task_id)
     except VideoProcessingError as exc:
         if self.request.retries >= self.max_retries:
             raise

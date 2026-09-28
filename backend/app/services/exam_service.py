@@ -10,7 +10,11 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.constants import CourseStatus, PublishStatus, UserRole
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
-from app.models import Course, CourseStudent, Exam, ExamAnswer, ExamQuestion, ExamRecord
+from app.models import Course, Exam, ExamAnswer, ExamQuestion, ExamRecord
+from app.services.course_task_access_service import (
+    course_task_access_condition,
+    student_can_access_course_tasks,
+)
 from app.services.notification_service import queue_course_notifications, queue_notification
 from app.services.file_service import clear_exam_files, remove_media_file, save_homework_attachment
 
@@ -34,6 +38,8 @@ class ExamAttachmentError(ValueError):
 def attach_exam_file(exam_id: int, teacher_id: int, file) -> dict:
     exam = _teacher_exam(exam_id, teacher_id)
     _require_draft(exam)
+    if exam.exam_type != "ATTACHMENT":
+        raise ExamConflict("在线试题不使用试卷附件，请在试题管理中添加题目")
     root = Path(current_app.config["MEDIA_ROOT"])
     try:
         target = save_homework_attachment(
@@ -58,6 +64,8 @@ def attach_exam_file(exam_id: int, teacher_id: int, file) -> dict:
 def remove_exam_attachment(exam_id: int, teacher_id: int) -> dict:
     exam = _teacher_exam(exam_id, teacher_id)
     _require_draft(exam)
+    if exam.exam_type != "ATTACHMENT":
+        raise ExamConflict("在线试题不使用试卷附件，请在试题管理中添加题目")
     previous = exam.attachment
     exam.attachment = None
     exam.attachment_name = None
@@ -108,10 +116,17 @@ def update_exam(exam_id: int, teacher_id: int, data: dict) -> dict:
         course = _teacher_course(data["course_id"], teacher_id)
         if course.status == CourseStatus.OFFLINE.value:
             raise ExamConflict("下线课程不能设置测验")
+    target_type = data.get("exam_type", exam.exam_type)
+    previous_attachment = exam.attachment if target_type == "ONLINE" else None
     for field, value in data.items():
         setattr(exam, field, value)
+    if target_type == "ONLINE":
+        exam.attachment = None
+        exam.attachment_name = None
     _validate_time_window(exam)
     db.session.commit()
+    if previous_attachment:
+        _remove_exam_attachment(previous_attachment)
     return serialize_exam(_get_exam(exam.id), reveal_answers=True)
 
 
@@ -216,10 +231,8 @@ def list_student_exams(student_id: int) -> list[dict]:
     exams = db.session.scalars(
         _exam_query()
         .join(Course, Course.id == Exam.course_id)
-        .join(CourseStudent, CourseStudent.course_id == Exam.course_id)
         .where(
-            CourseStudent.student_id == student_id,
-            CourseStudent.status.is_(True),
+            course_task_access_condition(Exam.course_id, student_id),
             Exam.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)),
             Course.status == CourseStatus.PUBLISHED.value,
         )
@@ -519,6 +532,7 @@ def serialize_exam(
     reveal_answers: bool = False,
     include_record_count: bool = False,
 ) -> dict:
+    availability = _availability(exam)
     payload = {
         "id": exam.id,
         "course_id": exam.course_id,
@@ -538,7 +552,8 @@ def serialize_exam(
         "published_at": _iso(exam.published_at),
         "created_at": _iso(exam.created_at),
         "updated_at": _iso(exam.updated_at),
-        "availability": _availability(exam),
+        "availability": availability,
+        "is_expired": availability == "ENDED",
         "questions": [
             serialize_question(item, reveal_answer=reveal_answers)
             for item in sorted(exam.questions, key=lambda value: (value.sort_order, value.id))
@@ -701,15 +716,8 @@ def _ensure_student_access(exam: Exam, student_id: int) -> None:
         or exam.course.status != CourseStatus.PUBLISHED.value
     ):
         raise ExamNotFound("测验不存在或尚未发布")
-    joined = db.session.scalar(
-        db.select(CourseStudent.id).where(
-            CourseStudent.course_id == exam.course_id,
-            CourseStudent.student_id == student_id,
-            CourseStudent.status.is_(True),
-        )
-    )
-    if joined is None:
-        raise ExamPermissionDenied("请先加入课程")
+    if not student_can_access_course_tasks(exam.course_id, student_id):
+        raise ExamPermissionDenied("请先通过课程班级审批")
 
 
 def _ensure_can_take(exam: Exam, student_id: int) -> None:
@@ -757,12 +765,14 @@ def _validate_time_window(exam: Exam) -> None:
 def _availability(exam: Exam) -> str:
     if exam.status == PublishStatus.CLOSED.value:
         return "CLOSED"
+    if exam.status == PublishStatus.DRAFT.value:
+        return "DRAFT"
     now = _now()
     if exam.start_time and now < exam.start_time:
         return "NOT_STARTED"
-    if exam.end_time and now > exam.end_time:
+    if exam.end_time and now >= exam.end_time:
         return "ENDED"
-    return "AVAILABLE" if exam.status == PublishStatus.PUBLISHED.value else "DRAFT"
+    return "AVAILABLE"
 
 
 def _iso(value) -> str | None:

@@ -13,6 +13,11 @@ const auth = useAuthStore()
 const loggingOut = ref(false)
 const mainNav = ref(null)
 const unreadCount = ref(0)
+const unreadUnavailable = ref(false)
+let unreadSequence = 0
+let unreadRequest = null
+let unreadTimer = null
+let disposed = false
 const roleLabel = computed(() => ({
   ADMIN: '管理员',
   TEACHER: '教师',
@@ -44,29 +49,54 @@ async function revealActiveNavigation() {
 }
 
 async function loadUnreadCount() {
+  const userId = auth.user?.id
   if (!auth.isAuthenticated) {
+    unreadSequence += 1
     unreadCount.value = 0
+    unreadUnavailable.value = false
     return
   }
+  if (disposed || document.visibilityState === 'hidden' || !navigator.onLine || unreadRequest?.userId === userId) return
+  const ticket = { userId, sequence: ++unreadSequence }
+  unreadRequest = ticket
   try {
     const response = await api.get('/notifications', { params: { page: 1, page_size: 1, unread_only: true } })
+    if (disposed || ticket.sequence !== unreadSequence || auth.user?.id !== userId) return
     unreadCount.value = response.data.unread_count || 0
+    unreadUnavailable.value = false
   } catch {
-    unreadCount.value = 0
+    if (!disposed && ticket.sequence === unreadSequence && auth.user?.id === userId) unreadUnavailable.value = true
+  } finally {
+    if (unreadRequest === ticket) unreadRequest = null
   }
 }
 
 function updateUnreadCount(event) {
+  if (!auth.isAuthenticated) return
+  unreadSequence += 1
   unreadCount.value = Math.max(0, Number(event.detail || 0))
+  unreadUnavailable.value = false
 }
 
-watch(() => route.name, revealActiveNavigation)
-watch(() => auth.user?.id, loadUnreadCount, { immediate: true })
+watch(() => route.name, () => { revealActiveNavigation(); void loadUnreadCount() })
+watch(() => auth.user?.id, () => { unreadCount.value = 0; unreadSequence += 1; void loadUnreadCount() }, { immediate: true })
 onMounted(() => {
   revealActiveNavigation()
   window.addEventListener('bs-hfn:notification-count', updateUnreadCount)
+  window.addEventListener('focus', loadUnreadCount)
+  window.addEventListener('online', loadUnreadCount)
+  document.addEventListener('visibilitychange', loadUnreadCount)
+  unreadTimer = window.setInterval(loadUnreadCount, 30000)
 })
-onBeforeUnmount(() => window.removeEventListener('bs-hfn:notification-count', updateUnreadCount))
+onBeforeUnmount(() => {
+  disposed = true
+  unreadSequence += 1
+  window.clearInterval(unreadTimer)
+  window.removeEventListener('bs-hfn:notification-count', updateUnreadCount)
+  window.removeEventListener('focus', loadUnreadCount)
+  window.removeEventListener('online', loadUnreadCount)
+  document.removeEventListener('visibilitychange', loadUnreadCount)
+})
 </script>
 
 <template>
@@ -96,6 +126,7 @@ onBeforeUnmount(() => window.removeEventListener('bs-hfn:notification-count', up
           <RouterLink
             v-if="auth.isAuthenticated"
             to="/notifications"
+            :title="unreadUnavailable ? '网络异常，未读数量可能尚未更新' : '查看站内消息'"
             :class="{ active: route.name === 'notifications' }"
           >
             消息<span v-if="unreadCount" class="nav-unread-count">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>

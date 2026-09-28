@@ -1,10 +1,10 @@
 # 基于 Web 技术与 FFmpeg 的学生课后辅导系统
 
-本仓库是根据 `docs/BS_HFN.md` 与 `docs/BS_HFN数据库文档.md` 重建并持续扩展的课后辅导系统。目前已完成认证权限、学生密码重置教师审批、班级名册与课程关联、课程详情入班申请与教师审批、用户公开主页与资料编辑、课程视频、FFmpeg/HLS、断网进度补传、学习答疑、教师作业/测验附件上传和预览、附件试卷直接发布与人工批改、批改后提交锁定、测验草稿/自动交卷、站内消息、实时统计和管理员后台的完整答辩版闭环。
+本仓库是根据 `docs/BS_HFN.md` 与 `docs/BS_HFN数据库文档.md` 重建并持续扩展的课后辅导系统。目前已完成认证权限、学生密码重置教师审批、班级名册与课程关联、课程详情入班申请与教师审批、审批后开放班级任务、用户公开主页与资料编辑、课程视频、FFmpeg/HLS、断网进度补传、学习答疑、不限时作业、在线试题自动评分、附件试卷直接发布与人工批改、批改后提交锁定、测验草稿/自动交卷、站内消息、实时统计和管理员后台的完整答辩版闭环。
 
 ## 技术栈
 
-- 前端：Vue 3、Vite、Vue Router、Pinia、Axios、Element Plus、hls.js、Playwright
+- 前端：Vue 3、Vite、Vue Router、Pinia、Axios、Element Plus、ECharts 6、hls.js、Playwright
 - 后端：Python、Flask、Flask-SQLAlchemy、Flask-Migrate、Flask-JWT-Extended
 - 数据与任务：MySQL 8、Redis、Celery
 - 视频处理：FFmpeg、ffprobe、HLS
@@ -30,6 +30,8 @@ docs/      当前需求与数据库设计基线
 ```
 
 ## 本地启动
+
+换到另一台 Windows 电脑时，按 [Windows 换电脑迁移与完整配置手册](docs/WINDOWS_MIGRATION_SETUP.md) 操作。手册区分完整数据库恢复与空库初始化，并覆盖媒体复制、Redis认证依赖、依赖安装、验收和排错；不要只复制Git代码或沿用旧`.venv`。
 
 当前机器的 Python、前端依赖、MySQL 数据库、迁移、Redis 和便携版 FFmpeg 已配置好。
 
@@ -94,7 +96,7 @@ cd E:\BS_HFN\backend
 ..\.venv\Scripts\python.exe -m scripts.verify_async_video
 ```
 
-统计页面使用轻量卡片和表格直接呈现聚合结果，当前不依赖图表库，避免为基础数据展示引入不必要的体积与安全维护成本。
+统计页面已使用 ECharts 6.1.0 按需加载的 SVG 柱状图，并保留数值卡片和表格：学生查看学习进度、得分率与累计记录，教师对比课程表现和发布状态，管理员展开“查看数据图表”查看角色与视频状态分布。图表直接使用现有统计接口，不生成虚构趋势；课程对比每页最多6项，支持完整数值表和容器尺寸变化。数据库当前有26张业务表（不含 Alembic 迁移版本表），论文实现口径见 [论文实现说明](docs/THESIS_IMPLEMENTATION.md)。
 
 接口清单见 `docs/API.md`，后续顺序见 `docs/DEVELOPMENT_PLAN.md`。
 

@@ -4,12 +4,14 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
+import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 
 
 const formRef = ref(null)
 const submitting = ref(false)
 const resetDialog = ref(false)
+const restoreResetFocus = useDialogFocus(resetDialog)
 const resetting = ref(false)
 const form = reactive({ account: '', password: '' })
 const resetForm = reactive({ username: '', verification: '', new_password: '', confirm_password: '' })
@@ -143,7 +145,7 @@ async function resetPassword() {
       </section>
     </section>
 
-    <el-dialog v-model="resetDialog" title="找回密码" width="min(520px, 94vw)" :close-on-click-modal="!resetting">
+    <el-dialog v-model="resetDialog" title="找回密码" width="min(520px, 94vw)" :close-on-click-modal="!resetting" @close-auto-focus="restoreResetFocus">
       <p class="dialog-tip">学生提交后需由所属班级教师同意，新密码才会生效；教师请联系管理员核验身份后代重置。管理员账号请由另一位管理员在系统后台处理。重置生效后需要重新登录。</p>
       <el-form label-position="top" @submit.prevent="resetPassword">
         <el-form-item label="用户名" required>

@@ -1,4 +1,5 @@
 import subprocess
+import uuid
 from fractions import Fraction
 from pathlib import Path
 
@@ -27,6 +28,10 @@ class VideoPermissionDenied(PermissionError):
 
 
 class VideoProcessingError(RuntimeError):
+    pass
+
+
+class VideoProcessingCancelled(RuntimeError):
     pass
 
 
@@ -82,7 +87,29 @@ def create_and_process_video(file, teacher_id: int, data: dict) -> Video:
     return process_video_sync(video.id)
 
 
-def process_video_sync(video_id: int, *, raise_on_error: bool = False) -> Video:
+def enqueue_video_processing(video_id: int) -> Video:
+    video = db.session.get(Video, video_id)
+    if video is None:
+        raise VideoNotFound("视频不存在")
+    if video.status != VideoStatus.PENDING.value:
+        raise VideoStateError("只有等待处理的视频可以加入转码队列")
+    task_id = uuid.uuid4().hex
+    video.task_id = task_id
+    video.process_step = "QUEUED"
+    db.session.commit()
+
+    from app.tasks.video_tasks import process_video
+
+    process_video.apply_async(args=[video.id, task_id], task_id=task_id)
+    return video
+
+
+def process_video_sync(
+    video_id: int,
+    *,
+    raise_on_error: bool = False,
+    expected_task_id: str | None = None,
+) -> Video:
     video = db.session.get(Video, video_id)
     if video is None:
         raise VideoNotFound("视频不存在")
@@ -93,6 +120,7 @@ def process_video_sync(video_id: int, *, raise_on_error: bool = False) -> Video:
     cover_path = media_root / "videos" / "covers" / f"{video.id}.jpg"
 
     try:
+        _assert_processing_current(video.id, expected_task_id)
         clear_generated_video_files(media_root, video.id)
         if not video.original_file:
             raise FileNotFoundError("视频原始文件路径为空")
@@ -103,28 +131,68 @@ def process_video_sync(video_id: int, *, raise_on_error: bool = False) -> Video:
         video.processed_file = None
         video.hls_path = None
         video.cover = None
-        _set_step(video, "PROBING")
+        _set_step(video, "PROBING", expected_task_id)
         metadata = probe_video(original_path, current_app.config["FFPROBE_BIN"])
         _apply_metadata(video, metadata, original_path)
 
-        _set_step(video, "TRANSCODING")
-        transcode_video(original_path, processed_path, current_app.config["FFMPEG_BIN"])
+        _set_step(video, "TRANSCODING", expected_task_id)
+        transcode_video(
+            original_path,
+            processed_path,
+            current_app.config["FFMPEG_BIN"],
+            cancel_check=lambda: _assert_processing_current(video.id, expected_task_id),
+        )
+        _assert_processing_current(video.id, expected_task_id)
         video.processed_file = _relative(processed_path, media_root)
 
-        _set_step(video, "HLS")
-        playlist = generate_hls(processed_path, hls_dir, current_app.config["FFMPEG_BIN"])
+        _set_step(video, "HLS", expected_task_id)
+        playlist = generate_hls(
+            processed_path,
+            hls_dir,
+            current_app.config["FFMPEG_BIN"],
+            cancel_check=lambda: _assert_processing_current(video.id, expected_task_id),
+        )
+        _assert_processing_current(video.id, expected_task_id)
         video.hls_path = _relative(playlist, media_root)
 
-        _set_step(video, "COVER")
-        generate_cover(processed_path, cover_path, current_app.config["FFMPEG_BIN"])
+        _set_step(video, "COVER", expected_task_id)
+        generate_cover(
+            processed_path,
+            cover_path,
+            current_app.config["FFMPEG_BIN"],
+            cancel_check=lambda: _assert_processing_current(video.id, expected_task_id),
+        )
+        _assert_processing_current(video.id, expected_task_id)
         video.cover = _relative(cover_path, media_root)
 
         video.status = VideoStatus.READY.value
         video.process_step = "FINISHED"
+        video.task_id = None
         video.error_message = None
         db.session.commit()
+    except VideoProcessingCancelled:
+        db.session.rollback()
+        status, _task_id = _processing_state(video_id)
+        if status in {None, VideoStatus.CANCELLED.value}:
+            try:
+                clear_generated_video_files(media_root, video_id)
+            except (OSError, ValueError):
+                current_app.logger.exception("视频 %s 的终止残留文件清理失败", video_id)
+        db.session.expire_all()
+        return db.session.get(Video, video_id)
     except Exception as exc:
         db.session.rollback()
+        status, task_id = _processing_state(video_id)
+        if status in {None, VideoStatus.CANCELLED.value}:
+            try:
+                clear_generated_video_files(media_root, video_id)
+            except (OSError, ValueError):
+                current_app.logger.exception("视频 %s 的终止残留文件清理失败", video_id)
+            db.session.expire_all()
+            return db.session.get(Video, video_id)
+        if expected_task_id is not None and task_id != expected_task_id:
+            db.session.expire_all()
+            return db.session.get(Video, video_id)
         try:
             clear_generated_video_files(media_root, video_id)
         except (OSError, ValueError):
@@ -140,8 +208,11 @@ def mark_video_failed(video_id: int, message: str, process_step: str | None = No
     video = db.session.get(Video, video_id)
     if video is None:
         raise VideoNotFound("视频不存在")
+    if video.status == VideoStatus.CANCELLED.value:
+        return video
     video.status = VideoStatus.FAILED.value
     video.process_step = process_step or video.process_step
+    video.task_id = None
     video.error_message = message[:2000]
     video.processed_file = None
     video.hls_path = None
@@ -154,6 +225,8 @@ def mark_video_retry_pending(video_id: int, message: str) -> Video:
     video = db.session.get(Video, video_id)
     if video is None:
         raise VideoNotFound("视频不存在")
+    if video.status == VideoStatus.CANCELLED.value:
+        return video
     video.status = VideoStatus.PENDING.value
     video.process_step = None
     video.error_message = message[:2000]
@@ -189,14 +262,15 @@ def update_video(video_id: int, teacher_id: int, data: dict) -> Video:
 
 def prepare_teacher_retry(video_id: int, teacher_id: int) -> Video:
     video = _owned_video(video_id, teacher_id)
-    if video.status != VideoStatus.FAILED.value:
-        raise VideoStateError("只有处理失败的视频可以重新转码")
+    if video.status not in {VideoStatus.FAILED.value, VideoStatus.CANCELLED.value}:
+        raise VideoStateError("只有处理失败或已终止的视频可以重新转码")
     original_path = _original_path(video)
     if original_path is None or not original_path.is_file():
         raise VideoStateError("原始视频文件已丢失，无法重新转码")
     clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
     video.status = VideoStatus.PENDING.value
     video.process_step = "QUEUED"
+    video.task_id = None
     video.error_message = None
     video.processed_file = None
     video.hls_path = None
@@ -205,9 +279,24 @@ def prepare_teacher_retry(video_id: int, teacher_id: int) -> Video:
     return video
 
 
-def delete_teacher_video(video_id: int, teacher_id: int) -> None:
+def delete_teacher_video(video_id: int, teacher_id: int) -> bool:
     video = _owned_video(video_id, teacher_id)
-    _ensure_content_change_allowed(video)
+    _ensure_course_content_change_allowed(video)
+    was_processing = video.status in {
+        VideoStatus.UPLOADING.value,
+        VideoStatus.PENDING.value,
+        VideoStatus.PROCESSING.value,
+    }
+    task_id = video.task_id if was_processing else None
+    if was_processing:
+        # Commit the terminal state before revoking/deleting so a worker that is
+        # between FFmpeg stages cannot publish READY after the teacher deletes it.
+        video.status = VideoStatus.CANCELLED.value
+        video.process_step = "CANCELLED"
+        video.task_id = None
+        video.error_message = "教师删除视频并终止转码任务"
+        db.session.commit()
+        revoke_video_processing_task(task_id)
     original_file = video.original_file
     db.session.delete(video)
     db.session.commit()
@@ -219,6 +308,7 @@ def delete_teacher_video(video_id: int, teacher_id: int) -> None:
         )
     except (OSError, ValueError):
         current_app.logger.exception("教师删除视频 %s 后清理媒体文件失败", video_id)
+    return was_processing
 
 
 def replace_video(file, video_id: int, teacher_id: int, data: dict) -> Video:
@@ -259,10 +349,31 @@ def replace_video(file, video_id: int, teacher_id: int, data: dict) -> Video:
     return replacement
 
 
-def _set_step(video: Video, step: str) -> None:
+def _set_step(video: Video, step: str, expected_task_id: str | None = None) -> None:
+    _assert_processing_current(video.id, expected_task_id)
     video.status = VideoStatus.PROCESSING.value
     video.process_step = step
     db.session.commit()
+
+
+def _assert_processing_current(video_id: int, expected_task_id: str | None = None) -> None:
+    status, task_id = _processing_state(video_id)
+    if status is None:
+        raise VideoProcessingCancelled("视频任务已不存在")
+    if status == VideoStatus.CANCELLED.value:
+        raise VideoProcessingCancelled("视频转码任务已终止")
+    if expected_task_id is not None and task_id != expected_task_id:
+        raise VideoProcessingCancelled("视频转码任务已被替换")
+
+
+def _processing_state(video_id: int) -> tuple[str | None, str | None]:
+    with db.session.no_autoflush:
+        state = db.session.execute(
+            db.select(Video.status, Video.task_id).where(Video.id == video_id)
+        ).one_or_none()
+    if state is None:
+        return None, None
+    return state[0], state[1]
 
 
 def _owned_video(video_id: int, teacher_id: int) -> Video:
@@ -279,13 +390,32 @@ def _owned_video(video_id: int, teacher_id: int) -> Video:
 
 
 def _ensure_content_change_allowed(video: Video) -> None:
+    _ensure_course_content_change_allowed(video)
+    if video.status in {VideoStatus.PENDING.value, VideoStatus.PROCESSING.value}:
+        raise VideoStateError("视频正在处理，暂时不能删除或替换")
+
+
+def _ensure_course_content_change_allowed(video: Video) -> None:
     if video.chapter.course.status not in {
         CourseStatus.DRAFT.value,
         CourseStatus.OFFLINE.value,
     }:
         raise VideoStateError("课程发布期间不能删除或替换视频，请先下线课程")
-    if video.status in {VideoStatus.PENDING.value, VideoStatus.PROCESSING.value}:
-        raise VideoStateError("视频正在处理，暂时不能删除或替换")
+
+
+def revoke_video_processing_task(task_id: str | None) -> bool:
+    """Best-effort revoke for a queued/running Celery video task."""
+    if not task_id:
+        return False
+    celery = current_app.extensions.get("celery")
+    if celery is None:
+        return False
+    try:
+        celery.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    except Exception:
+        current_app.logger.exception("撤销视频转码任务 %s 失败", task_id)
+        return False
+    return True
 
 
 def _original_path(video: Video) -> Path | None:

@@ -5,6 +5,7 @@ from .course import Course, CourseStudent, Favorite
 from .exam import Exam, ExamAnswer, ExamQuestion, ExamRecord
 from .homework import Homework, HomeworkSubmission
 from .learning import LearningRecord, VideoNote
+from .learning_progress_receipt import LearningProgressReceipt
 from .notice import Notice
 from .notification import Notification
 from .password_reset_request import PasswordResetRequest
@@ -34,6 +35,7 @@ __all__ = [
     "Homework",
     "HomeworkSubmission",
     "LearningRecord",
+    "LearningProgressReceipt",
     "Notice",
     "Notification",
     "PasswordResetRequest",

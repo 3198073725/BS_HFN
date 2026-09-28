@@ -12,6 +12,7 @@ from app.services.video_processing_service import (
     create_video,
     create_and_process_video,
     delete_teacher_video,
+    enqueue_video_processing,
     get_visible_video,
     mark_video_failed,
     prepare_teacher_retry,
@@ -34,10 +35,8 @@ def upload_video():
         data = validate_upload(request.form)
         if current_app.config["VIDEO_PROCESSING_ASYNC"]:
             video = create_video(video_file, int(get_jwt_identity()), data)
-            from app.tasks.video_tasks import process_video
-
             try:
-                process_video.delay(video.id)
+                video = enqueue_video_processing(video.id)
             except OperationalError:
                 current_app.logger.exception("视频 %s 的 Celery 任务投递失败", video.id)
                 video = mark_video_failed(video.id, "后台任务队列暂不可用", "QUEUE")
@@ -135,14 +134,15 @@ def replace_teacher_video(video_id: int):
 @roles_required(UserRole.TEACHER)
 def remove_teacher_video(video_id: int):
     try:
-        delete_teacher_video(video_id, int(get_jwt_identity()))
+        processing_stopped = delete_teacher_video(video_id, int(get_jwt_identity()))
     except VideoNotFound as exc:
         return error(str(exc), 404)
     except VideoPermissionDenied as exc:
         return error(str(exc), 403)
     except VideoStateError as exc:
         return error(str(exc), 409)
-    return success(message="视频及相关学习数据已删除")
+    message = "转码任务已终止，视频及相关学习数据已删除" if processing_stopped else "视频及相关学习数据已删除"
+    return success(message=message)
 
 
 def _visible_video_response(video_id: int):
@@ -164,10 +164,8 @@ def _visible_video_response(video_id: int):
 
 def _start_video_processing(video, queued_message: str, ready_message: str):
     if current_app.config["VIDEO_PROCESSING_ASYNC"]:
-        from app.tasks.video_tasks import process_video
-
         try:
-            process_video.delay(video.id)
+            video = enqueue_video_processing(video.id)
         except OperationalError:
             current_app.logger.exception("视频 %s 的 Celery 任务投递失败", video.id)
             failed = mark_video_failed(video.id, "后台任务队列暂不可用", "QUEUE")

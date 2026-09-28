@@ -25,6 +25,38 @@ from app.models import (
 )
 
 
+def test_statistics_offline_course_is_explicit_and_keeps_history(app, client):
+    context = create_context(app)
+    token = login(client, context['student'])
+    with app.app_context():
+        course = db.session.get(Course, context['course_id'])
+        course.status = CourseStatus.OFFLINE.value
+        db.session.commit()
+    overview = client.get('/api/statistics', headers=bearer(token)).get_json()['data']
+    assert overview['joined_courses'] == 1
+    assert overview['published_joined_courses'] == 0
+    assert overview['watch_duration_seconds'] == 60
+    assert overview['average_homework_percent'] == 80
+    assert overview['average_exam_percent'] == 90
+    assert client.get('/api/learning/courses', headers=bearer(token)).get_json()['data'] == []
+
+
+def test_course_statistics_grades_and_progress_use_same_current_roster(app, client):
+    context = create_context(app)
+    token = login(client, context['teacher'])
+    with app.app_context():
+        link = db.session.scalar(db.select(CourseStudent).where(CourseStudent.course_id == context['course_id']))
+        link.status = False
+        db.session.commit()
+    row = client.get('/api/statistics/courses', headers=bearer(token)).get_json()['data'][0]
+    assert row['student_count'] == 0
+    assert row['average_progress'] == 0
+    assert row['homework_submission_count'] == 0
+    assert row['average_homework_percent'] == 0
+    assert row['exam_submission_count'] == 0
+    assert row['average_exam_percent'] == 0
+
+
 def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
@@ -165,6 +197,7 @@ def create_context(app):
             "teacher": teacher.username,
             "teacher_id": teacher.id,
             "student": student.username,
+            "course_id": course.id,
             "class_id": classroom.id,
         }
 
@@ -394,7 +427,7 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
     assert "ffmpeg" in video_data["runtime"]
 
     app.config["VIDEO_PROCESSING_ASYNC"] = True
-    with patch("app.tasks.video_tasks.process_video.delay") as delay:
+    with patch("app.tasks.video_tasks.process_video.apply_async") as apply_async:
         retried = client.post(
             f"/api/admin/videos/{failed_video_id}/retry",
             headers=bearer(admin),
@@ -402,10 +435,37 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
     assert retried.status_code == 202
     assert retried.get_json()["data"]["status"] == VideoStatus.PENDING.value
     assert retried.get_json()["data"]["process_step"] == "QUEUED"
-    delay.assert_called_once_with(failed_video_id)
+    assert apply_async.call_count == 1
+    assert apply_async.call_args.kwargs["args"][0] == failed_video_id
+    assert apply_async.call_args.kwargs["task_id"]
 
     assert client.post(
         f"/api/admin/videos/{failed_video_id}/retry",
+        headers=bearer(admin),
+    ).status_code == 409
+
+    with app.app_context():
+        queued_video = db.session.get(Video, failed_video_id)
+        queued_task_id = queued_video.task_id
+    revoked = []
+    app.extensions["celery"] = type("FakeCelery", (), {
+        "control": type("FakeControl", (), {
+            "revoke": staticmethod(lambda task_id, **kwargs: revoked.append((task_id, kwargs))),
+        })(),
+    })()
+    cancelled = client.post(
+        f"/api/admin/videos/{failed_video_id}/cancel",
+        headers=bearer(admin),
+    )
+    assert cancelled.status_code == 200
+    cancelled_data = cancelled.get_json()["data"]
+    assert cancelled_data["status"] == VideoStatus.CANCELLED.value
+    assert cancelled_data["process_step"] == "CANCELLED"
+    assert cancelled_data["cancellable"] is False
+    assert cancelled_data["retryable"] is True
+    assert revoked == [(queued_task_id, {"terminate": True, "signal": "SIGTERM"})]
+    assert client.post(
+        f"/api/admin/videos/{failed_video_id}/cancel",
         headers=bearer(admin),
     ).status_code == 409
 
@@ -414,7 +474,7 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
         failed_video.status = VideoStatus.FAILED.value
         db.session.commit()
     with patch(
-        "app.tasks.video_tasks.process_video.delay",
+        "app.tasks.video_tasks.process_video.apply_async",
         side_effect=OperationalError("redis offline"),
     ):
         queue_failed = client.post(
@@ -488,9 +548,10 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
     )
     assert audit_response.status_code == 200
     video_audits = audit_response.get_json()["data"]
-    assert video_audits["pagination"]["total"] == 3
+    assert video_audits["pagination"]["total"] == 4
     assert {item["action"] for item in video_audits["items"]} == {
         "VIDEO_RETRY",
+        "VIDEO_CANCEL",
         "VIDEO_DELETE",
     }
     assert client.get(

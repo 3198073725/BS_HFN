@@ -7,7 +7,11 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.constants import CourseStatus, PublishStatus, UserRole
 from app.datetime_utils import iso_utc, utc_now
 from app.extensions import db
-from app.models import Course, CourseStudent, Homework, HomeworkSubmission
+from app.models import Course, Homework, HomeworkSubmission
+from app.services.course_task_access_service import (
+    course_task_access_condition,
+    student_can_access_course_tasks,
+)
 from app.services.file_service import clear_homework_files, remove_media_file, save_homework_attachment
 from app.services.notification_service import queue_course_notifications, queue_notification
 
@@ -99,10 +103,8 @@ def list_student_homeworks(student_id: int) -> list[dict]:
     homeworks = db.session.scalars(
         _homework_query()
         .join(Course, Course.id == Homework.course_id)
-        .join(CourseStudent, CourseStudent.course_id == Homework.course_id)
         .where(
-            CourseStudent.student_id == student_id,
-            CourseStudent.status.is_(True),
+            course_task_access_condition(Homework.course_id, student_id),
             Homework.status.in_((PublishStatus.PUBLISHED.value, PublishStatus.CLOSED.value)),
             Course.status == CourseStatus.PUBLISHED.value,
         )
@@ -159,7 +161,7 @@ def submit_homework(homework_id: int, student_id: int, content: str) -> dict:
     _ensure_student_access(homework, student_id)
     if homework.status != PublishStatus.PUBLISHED.value:
         raise HomeworkConflict("作业已关闭，不能继续提交")
-    if homework.deadline and _now() > homework.deadline:
+    if _deadline_reached(homework):
         raise HomeworkConflict("作业已超过截止时间")
     submission = db.session.scalar(
         db.select(HomeworkSubmission).where(
@@ -168,6 +170,8 @@ def submit_homework(homework_id: int, student_id: int, content: str) -> dict:
         )
         .with_for_update().execution_options(populate_existing=True)
     )
+    if not content and (submission is None or not submission.attachment):
+        raise HomeworkConflict("没有提交附件时，作业内容不能为空")
     if submission is None:
         submission = HomeworkSubmission(homework_id=homework.id, student_id=student_id)
         db.session.add(submission)
@@ -205,7 +209,7 @@ def attach_submission_file(homework_id: int, student_id: int, file) -> dict:
     _ensure_student_access(homework, student_id)
     if homework.status != PublishStatus.PUBLISHED.value:
         raise HomeworkConflict("作业已关闭，不能继续提交")
-    if homework.deadline and _now() > homework.deadline:
+    if _deadline_reached(homework):
         raise HomeworkConflict("作业已超过截止时间")
     submission = db.session.scalar(
         db.select(HomeworkSubmission).where(
@@ -284,6 +288,15 @@ def serialize_homework(
     student_id: int | None = None,
     include_submission_count: bool = False,
 ) -> dict:
+    expired = _deadline_reached(homework)
+    if homework.status == PublishStatus.CLOSED.value:
+        availability = "CLOSED"
+    elif homework.status == PublishStatus.DRAFT.value:
+        availability = "DRAFT"
+    elif expired:
+        availability = "ENDED"
+    else:
+        availability = "AVAILABLE"
     payload = {
         "id": homework.id,
         "course_id": homework.course_id,
@@ -296,6 +309,9 @@ def serialize_homework(
         "deadline": iso_utc(homework.deadline),
         "total_score": float(homework.total_score),
         "status": homework.status,
+        "availability": availability,
+        "is_expired": expired,
+        "can_submit": availability == "AVAILABLE",
         "published_at": iso_utc(homework.published_at),
         "created_at": iso_utc(homework.created_at),
         "updated_at": iso_utc(homework.updated_at),
@@ -303,6 +319,9 @@ def serialize_homework(
     if student_id is not None:
         submission = next((item for item in homework.submissions if item.student_id == student_id), None)
         payload["submission"] = serialize_submission(submission) if submission else None
+        payload["can_submit"] = availability == "AVAILABLE" and (
+            submission is None or submission.status != "GRADED"
+        )
     if include_submission_count:
         payload["submission_count"] = len(homework.submissions)
     return payload
@@ -361,19 +380,17 @@ def _ensure_student_access(homework: Homework, student_id: int) -> None:
         or homework.course.status != CourseStatus.PUBLISHED.value
     ):
         raise HomeworkNotFound("作业不存在或尚未发布")
-    joined = db.session.scalar(
-        db.select(CourseStudent.id).where(
-            CourseStudent.course_id == homework.course_id,
-            CourseStudent.student_id == student_id,
-            CourseStudent.status.is_(True),
-        )
-    )
-    if joined is None:
-        raise HomeworkPermissionDenied("请先加入课程")
+    if not student_can_access_course_tasks(homework.course_id, student_id):
+        raise HomeworkPermissionDenied("请先通过课程班级审批")
 
 
 def _now():
     return utc_now()
+
+
+def _deadline_reached(homework: Homework) -> bool:
+    """Treat the exact deadline instant as closed for every submission path."""
+    return bool(homework.deadline and _now() >= homework.deadline)
 
 
 def _mark_submitted(submission: HomeworkSubmission) -> None:

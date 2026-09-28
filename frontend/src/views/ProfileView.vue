@@ -14,6 +14,9 @@ const saving = ref(false)
 const avatarSaving = ref(false)
 const errorMessage = ref('')
 const profile = ref(null)
+const coursePage = ref(1)
+const coursePageSize = 6
+const pagedCourses = computed(() => (profile.value?.courses || []).slice((coursePage.value - 1) * coursePageSize, coursePage.value * coursePageSize))
 const fileInput = ref(null)
 const localAvatarUrl = ref('')
 let profileRequestSequence = 0
@@ -36,6 +39,7 @@ async function loadProfile() {
   const ownProfile = isOwnProfile.value
   loading.value = true
   profile.value = null
+  coursePage.value = 1
   errorMessage.value = ''
   clearLocalAvatar()
   try {
@@ -53,12 +57,15 @@ async function loadProfile() {
 }
 
 async function saveProfile() {
+  if (!isOwnProfile.value || saving.value || avatarSaving.value || !auth.user) return
   const realName = form.real_name.trim()
   if (!realName) {
     ElMessage.warning('请输入姓名')
     return
   }
   saving.value = true
+  const requestId = profileRequestSequence
+  const userId = auth.user.id
   try {
     const response = await api.put('/users/me', {
       real_name: realName,
@@ -66,12 +73,15 @@ async function saveProfile() {
       phone: form.phone.trim() || null,
       bio: form.bio.trim() || null,
     })
-    profile.value = response.data
+    if (!auth.isAuthenticated || auth.user?.id !== userId || response.data.id !== userId) return
     auth.updateUser(response.data)
-    fillForm(response.data)
-    ElMessage.success('个人资料已保存')
+    if (requestId === profileRequestSequence && isOwnProfile.value) {
+      profile.value = response.data
+      fillForm(response.data)
+      ElMessage.success('个人资料已保存')
+    }
   } catch (error) {
-    ElMessage.error(error.message || '个人资料保存失败')
+    if (requestId === profileRequestSequence && auth.user?.id === userId) ElMessage.error(error.message || '个人资料保存失败')
   } finally {
     saving.value = false
   }
@@ -84,6 +94,7 @@ function chooseAvatar() {
 async function uploadAvatar(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
+  if (!isOwnProfile.value || saving.value || avatarSaving.value || !auth.user) return
   if (!file) return
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
     ElMessage.warning('头像仅支持 JPG、PNG 或 WebP 格式')
@@ -96,32 +107,46 @@ async function uploadAvatar(event) {
   clearLocalAvatar()
   localAvatarUrl.value = URL.createObjectURL(file)
   avatarSaving.value = true
+  const requestId = profileRequestSequence
+  const userId = auth.user.id
   const body = new FormData()
   body.append('avatar', file)
   try {
     const response = await api.post('/users/me/avatar', body)
-    profile.value = response.data
+    if (!auth.isAuthenticated || auth.user?.id !== userId || response.data.id !== userId) return
     auth.updateUser(response.data)
-    clearLocalAvatar()
-    ElMessage.success('头像已更新')
+    if (requestId === profileRequestSequence && isOwnProfile.value) {
+      profile.value = response.data
+      clearLocalAvatar()
+      ElMessage.success('头像已更新')
+    }
   } catch (error) {
-    clearLocalAvatar()
-    ElMessage.error(error.message || '头像上传失败')
+    if (requestId === profileRequestSequence && auth.user?.id === userId) {
+      clearLocalAvatar()
+      ElMessage.error(error.message || '头像上传失败')
+    }
   } finally {
     avatarSaving.value = false
   }
 }
 
 async function removeAvatar() {
+  if (!isOwnProfile.value || saving.value || avatarSaving.value || !auth.user) return
+  const requestId = profileRequestSequence
+  const userId = auth.user.id
   try {
     await ElMessageBox.confirm('确认移除当前头像？', '移除头像', { type: 'warning' })
+    if (requestId !== profileRequestSequence || auth.user?.id !== userId || saving.value || avatarSaving.value) return
     avatarSaving.value = true
     const response = await api.delete('/users/me/avatar')
-    profile.value = response.data
+    if (!auth.isAuthenticated || auth.user?.id !== userId || response.data.id !== userId) return
     auth.updateUser(response.data)
-    ElMessage.success('头像已移除')
+    if (requestId === profileRequestSequence && isOwnProfile.value) {
+      profile.value = response.data
+      ElMessage.success('头像已移除')
+    }
   } catch (error) {
-    if (error !== 'cancel') ElMessage.error(error.message || '头像移除失败')
+    if (error !== 'cancel' && error !== 'close' && requestId === profileRequestSequence && auth.user?.id === userId) ElMessage.error(error.message || '头像移除失败')
   } finally {
     avatarSaving.value = false
   }
@@ -155,9 +180,9 @@ onBeforeUnmount(() => { profileRequestSequence += 1; clearLocalAvatar() })
           </div>
         </div>
         <div v-if="isOwnProfile" class="profile-avatar-actions">
-          <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" @change="uploadAvatar" />
-          <el-button :loading="avatarSaving" @click="chooseAvatar">更换头像</el-button>
-          <el-button v-if="profile.avatar_url" :disabled="avatarSaving" @click="removeAvatar">移除</el-button>
+          <input ref="fileInput" type="file" :disabled="saving || avatarSaving" accept="image/jpeg,image/png,image/webp" @change="uploadAvatar" />
+          <el-button :loading="avatarSaving" :disabled="saving" @click="chooseAvatar">更换头像</el-button>
+          <el-button v-if="profile.avatar_url" :disabled="saving || avatarSaving" @click="removeAvatar">移除</el-button>
           <small>JPG、PNG 或 WebP，不超过 3MB</small>
         </div>
       </header>
@@ -168,7 +193,7 @@ onBeforeUnmount(() => { profileRequestSequence += 1; clearLocalAvatar() })
             <div><p class="eyebrow">个人资料</p><h2>编辑我的主页</h2></div>
             <small>姓名和简介会展示给其他用户；联系方式仅自己和有权限的管理人员可见。</small>
           </div>
-          <el-form label-position="top" @submit.prevent="saveProfile">
+          <el-form :disabled="saving || avatarSaving" label-position="top" @submit.prevent="saveProfile">
             <div class="profile-form-grid">
               <el-form-item label="姓名" required>
                 <el-input v-model="form.real_name" maxlength="50" placeholder="请输入姓名" />
@@ -216,13 +241,21 @@ onBeforeUnmount(() => { profileRequestSequence += 1; clearLocalAvatar() })
             <div><p class="eyebrow">授课课程</p><h2>已发布课程</h2></div>
             <span>{{ profile.courses.length }} 门</span>
           </div>
-          <div v-if="profile.courses.length" class="profile-course-grid">
-            <RouterLink v-for="item in profile.courses" :key="item.id" :to="`/courses/${item.id}`" class="profile-course-card">
+          <div
+            v-if="profile.courses.length"
+            class="stable-pagination-shell profile-pagination-shell"
+            :class="{ 'has-pagination': profile.courses.length > coursePageSize }"
+          >
+          <div class="profile-course-grid stable-pagination-body">
+            <RouterLink v-for="item in pagedCourses" :key="item.id" :to="`/courses/${item.id}`" class="profile-course-card" :title="item.name">
               <span class="profile-course-cover" :style="item.cover_url ? { backgroundImage: `url(${item.cover_url})` } : {}">
                 <b v-if="!item.cover_url">{{ item.name.slice(0, 1) }}</b>
               </span>
               <span><small>{{ item.category_name || '通识课程' }}</small><strong>{{ item.name }}</strong><p>{{ item.description || '暂无课程简介' }}</p></span>
             </RouterLink>
+          </div>
+          <el-pagination v-if="profile.courses.length > coursePageSize" v-model:current-page="coursePage" class="collection-pagination"
+            background layout="prev, pager, next" :page-size="coursePageSize" :total="profile.courses.length" aria-label="教师主页课程分页" />
           </div>
           <el-empty v-else description="这位教师暂时没有已发布课程" :image-size="72" />
         </div>

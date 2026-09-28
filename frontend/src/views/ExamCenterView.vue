@@ -4,12 +4,17 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import api from '../api/client'
 import TeachingAttachmentPreview from '../components/TeachingAttachmentPreview.vue'
+import OverflowText from '../components/OverflowText.vue'
+import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 
 
 const auth = useAuthStore()
 const isTeacher = computed(() => auth.user?.role === 'TEACHER')
 const loading = ref(false)
+const loadError = ref('')
+const instructionsDialog = ref(false)
+const instructionsExam = ref(null)
 const saving = ref(false)
 const exams = ref([])
 const courses = ref([])
@@ -17,6 +22,11 @@ const createDialog = ref(false)
 const questionDialog = ref(false)
 const takeDialog = ref(false)
 const recordsDialog = ref(false)
+const restoreInstructionsFocus = useDialogFocus(instructionsDialog)
+const restoreCreateFocus = useDialogFocus(createDialog)
+const restoreQuestionFocus = useDialogFocus(questionDialog)
+const restoreTakeFocus = useDialogFocus(takeDialog)
+const restoreRecordsFocus = useDialogFocus(recordsDialog)
 const selectedExam = ref(null)
 const selectedRecord = ref(null)
 const editingExamId = ref(null)
@@ -39,6 +49,12 @@ const answerSaveState = ref('')
 const examFormRef = ref(null)
 const currentPage = ref(1)
 const pageSize = 6
+const now = ref(Date.now())
+const filterCourse = ref('')
+const filterType = ref('')
+const filterStatus = ref('')
+const keywordInput = ref('')
+const keyword = ref('')
 const examForm = reactive({
   exam_type: 'ONLINE',
   course_id: null,
@@ -67,6 +83,7 @@ const examRules = {
 let timer = null
 let answerSaveTimer = null
 let lastChanceSaveRequested = false
+let availabilityTicker = null
 
 const questionScoreTotal = computed(() => (
   selectedExam.value?.questions?.reduce((sum, question) => sum + Number(question.score), 0) || 0
@@ -74,13 +91,49 @@ const questionScoreTotal = computed(() => (
 const scoreMatches = computed(() => (
   Math.abs(questionScoreTotal.value - Number(selectedExam.value?.total_score || 0)) < 0.001
 ))
+const examCourseOptions = computed(() => {
+  const options = new Map()
+  exams.value.forEach((item) => options.set(courseFilterKey(item), item.course_name || '未命名课程'))
+  return [...options].map(([value, label]) => ({ value, label }))
+})
+const filteredExams = computed(() => {
+  const query = keyword.value.toLocaleLowerCase()
+  return exams.value.filter((item) => (
+    (!filterCourse.value || courseFilterKey(item) === filterCourse.value)
+    && (!filterType.value || item.exam_type === filterType.value)
+    && (!filterStatus.value || effectiveAvailability(item) === filterStatus.value)
+    && (!query || `${item.title || ''} ${item.description || ''} ${item.course_name || ''}`.toLocaleLowerCase().includes(query))
+  ))
+})
+const hasActiveFilters = computed(() => Boolean(
+  filterCourse.value || filterType.value || filterStatus.value || keyword.value,
+))
 const pagedExams = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  return exams.value.slice(start, start + pageSize)
+  return filteredExams.value.slice(start, start + pageSize)
 })
+
+function courseFilterKey(item) {
+  return item.course_id == null ? `name:${item.course_name || ''}` : `id:${item.course_id}`
+}
+
+function applyFilters() {
+  keyword.value = keywordInput.value.trim()
+  currentPage.value = 1
+}
+
+function resetFilters() {
+  filterCourse.value = ''
+  filterType.value = ''
+  filterStatus.value = ''
+  keywordInput.value = ''
+  keyword.value = ''
+  currentPage.value = 1
+}
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     if (isTeacher.value) {
       const [examResponse, courseResponse] = await Promise.all([
@@ -94,6 +147,7 @@ async function load() {
       exams.value = response.data
     }
   } catch (error) {
+    loadError.value = error.message || '测验列表加载失败'
     ElMessage.error(error.message || '测验列表加载失败')
   } finally {
     loading.value = false
@@ -120,6 +174,11 @@ function openExamForm(exam = null) {
   createDialog.value = true
 }
 
+function changeExamType(type) {
+  examAttachment.value = null
+  removeAttachment.value = type === 'ONLINE' && Boolean(existingAttachment.value)
+}
+
 async function saveExam(publishPaper = false) {
   if (saving.value) return
   if (!pendingExam.value) {
@@ -130,7 +189,8 @@ async function saveExam(publishPaper = false) {
     ElMessage.warning('结束时间必须晚于开始时间')
     return
   }
-  if (examForm.exam_type === 'ATTACHMENT' && !examAttachment.value && (!existingAttachment.value || removeAttachment.value)) {
+  const usesAttachment = examForm.exam_type === 'ATTACHMENT'
+  if (usesAttachment && !examAttachment.value && (!existingAttachment.value || removeAttachment.value)) {
     ElMessage.warning('附件试卷需要上传试卷文件')
     return
   }
@@ -144,12 +204,12 @@ async function saveExam(publishPaper = false) {
       pendingExam.value = response.data
     }
     try {
-      if (examAttachment.value) {
+      if (usesAttachment && examAttachment.value) {
         const data = new FormData()
         data.append('attachment', examAttachment.value)
         const response = await api.post(`/exams/${pendingExam.value.id}/attachment`, data, { timeout: 60000 })
         pendingExam.value = response.data
-      } else if (removeAttachment.value) {
+      } else if (usesAttachment && removeAttachment.value) {
         const response = await api.delete(`/exams/${pendingExam.value.id}/attachment`)
         pendingExam.value = response.data
       }
@@ -610,6 +670,7 @@ function formatDate(value) {
   const date = parseUtc(value)
   if (!date || Number.isNaN(date.getTime())) return '不限时间'
   return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -636,15 +697,57 @@ function availabilityLabel(status) {
   }[status] || status
 }
 
+function effectiveAvailability(exam) {
+  if (exam.status === 'CLOSED') return 'CLOSED'
+  if (exam.status === 'DRAFT') return 'DRAFT'
+  const startAt = parseUtc(exam.start_time)
+  const endAt = parseUtc(exam.end_time)
+  const recordDeadline = exam.record?.status === 'DOING' ? parseUtc(exam.record.deadline) : null
+  if (startAt && now.value < startAt.getTime()) return 'NOT_STARTED'
+  if ((endAt && now.value >= endAt.getTime())
+    || (recordDeadline && now.value >= recordDeadline.getTime())) return 'ENDED'
+  // A server snapshot can become stale while this page remains open. Respect
+  // states that have no timestamp to recompute, otherwise derive the live state.
+  if (!startAt && exam.availability === 'NOT_STARTED') return 'NOT_STARTED'
+  if (!endAt && !recordDeadline && exam.availability === 'ENDED') return 'ENDED'
+  if (exam.availability === 'CLOSED') return 'CLOSED'
+  return 'AVAILABLE'
+}
+
+function examStateLabel(exam) {
+  const availability = effectiveAvailability(exam)
+  if (availability === 'ENDED') return '已截止'
+  if (availability === 'NOT_STARTED') return '未开始'
+  return statusLabel(exam.status)
+}
+
+function examStateClass(exam) {
+  const availability = effectiveAvailability(exam)
+  if (availability === 'ENDED') return 'ended'
+  if (availability === 'NOT_STARTED') return 'not-started'
+  return exam.status.toLowerCase()
+}
+
+function examActionLabel(exam) {
+  if (exam.record && exam.record.status !== 'DOING') return '查看结果'
+  if (exam.record && effectiveAvailability(exam) === 'ENDED') return '查看结果'
+  return exam.record ? '继续作答' : '开始测验'
+}
+
 function answerLabel(value) {
   return { TRUE: '正确', FALSE: '错误' }[value] || value || '未作答'
 }
 
-watch(() => exams.value.length, (total) => {
+watch([filterCourse, filterType, filterStatus], () => { currentPage.value = 1 })
+watch(() => filteredExams.value.length, (total) => {
   currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize)))
 })
-onMounted(load)
+onMounted(() => {
+  void load()
+  availabilityTicker = window.setInterval(() => { now.value = Date.now() }, 1000)
+})
 onBeforeUnmount(() => {
+  window.clearInterval(availabilityTicker)
   if (answerSaveTimer) window.clearTimeout(answerSaveTimer)
   void saveDraftAnswers()
   stopCountdown()
@@ -664,14 +767,59 @@ onBeforeUnmount(() => {
       </el-button>
     </div>
 
-    <div class="exam-grid">
+    <el-result v-if="loadError" icon="error" title="测验列表加载失败" :sub-title="loadError">
+      <template #extra><el-button @click="load">重新加载</el-button></template>
+    </el-result>
+    <template v-else>
+    <div class="course-filter-panel task-filter-panel exam-task-filter-panel" aria-label="测验筛选条件">
+      <div class="course-filter-field">
+        <span>所属课程</span>
+        <el-select v-model="filterCourse" clearable placeholder="全部课程" aria-label="测验所属课程" popper-class="course-filter-dropdown">
+          <el-option v-for="item in examCourseOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </div>
+      <div class="course-filter-field">
+        <span>测验方式</span>
+        <el-select v-model="filterType" clearable placeholder="全部方式" aria-label="测验方式" popper-class="course-filter-dropdown">
+          <el-option label="在线试题" value="ONLINE" />
+          <el-option label="附件试卷" value="ATTACHMENT" />
+        </el-select>
+      </div>
+      <div class="course-filter-field">
+        <span>测验状态</span>
+        <el-select v-model="filterStatus" clearable placeholder="全部状态" aria-label="测验状态" popper-class="course-filter-dropdown">
+          <el-option label="进行中" value="AVAILABLE" />
+          <el-option label="未开始" value="NOT_STARTED" />
+          <el-option label="已截止" value="ENDED" />
+          <el-option label="已关闭" value="CLOSED" />
+          <el-option v-if="isTeacher" label="草稿" value="DRAFT" />
+        </el-select>
+      </div>
+      <div class="course-filter-field course-keyword-field">
+        <span>测验关键词</span>
+        <el-input v-model="keywordInput" clearable maxlength="100" placeholder="搜索测验名称、说明或课程" aria-label="测验关键词" @clear="applyFilters" @keyup.enter="applyFilters" />
+      </div>
+      <div class="course-filter-actions">
+        <el-button type="primary" @click="applyFilters">查询</el-button>
+        <el-button :disabled="!hasActiveFilters && !keywordInput" @click="resetFilters">重置</el-button>
+      </div>
+    </div>
+    <div class="course-result-meta">
+      <span>{{ hasActiveFilters ? `当前条件下共 ${filteredExams.length} 项测验` : `共 ${filteredExams.length} 项测验` }}</span><i></i>
+    </div>
+    <div
+      class="stable-pagination-shell exam-pagination-shell"
+      :class="{ 'has-pagination': filteredExams.length > pageSize }"
+    >
+    <div class="exam-grid stable-pagination-body">
       <article v-for="exam in pagedExams" :key="exam.id" class="exam-card">
         <div class="exam-card-top">
           <span>{{ exam.course_name }}</span>
-          <i :class="`exam-state state-${exam.status.toLowerCase()}`">{{ statusLabel(exam.status) }}</i>
+          <i :class="`exam-state state-${examStateClass(exam)}`">{{ examStateLabel(exam) }}</i>
         </div>
         <h2>{{ exam.title }}</h2>
         <p>{{ exam.description || '教师暂未填写测验说明。' }}</p>
+        <el-button link @click="instructionsExam = exam; instructionsDialog = true">查看完整说明</el-button>
         <div class="exam-facts">
           <span v-if="exam.exam_type === 'ATTACHMENT'">附件试卷 · 教师批改</span>
           <span v-else><strong>{{ exam.questions.length }}</strong> 题</span>
@@ -708,33 +856,41 @@ onBeforeUnmount(() => {
           <el-button
             v-else
             type="primary"
-            :disabled="!exam.record && exam.availability !== 'AVAILABLE'"
+            :disabled="!exam.record && effectiveAvailability(exam) !== 'AVAILABLE'"
             @click="openExam(exam)"
           >
-            {{ exam.record && exam.record.status !== 'DOING' ? '查看结果' : exam.record ? '继续作答' : '开始测验' }}
+            {{ examActionLabel(exam) }}
           </el-button>
-          <span v-if="!isTeacher && !exam.record">{{ availabilityLabel(exam.availability) }}</span>
+          <span v-if="!isTeacher && !exam.record">{{ availabilityLabel(effectiveAvailability(exam)) }}</span>
         </div>
       </article>
       <el-empty
-        v-if="!loading && !exams.length"
+        v-if="!loading && !filteredExams.length"
         class="surface-card exam-empty"
-        :description="isTeacher ? '还没有测验，先创建一份草稿吧' : '当前没有可参加的课程测验'"
+        :description="hasActiveFilters ? '没有符合当前筛选条件的测验' : isTeacher ? '还没有测验，先创建一份草稿吧' : '当前没有可参加的课程测验'"
       />
+    </div>
       <el-pagination
-        v-if="exams.length > pageSize"
+        v-if="filteredExams.length > pageSize"
         v-model:current-page="currentPage"
         class="collection-pagination"
         background
         layout="prev, pager, next"
         :page-size="pageSize"
-        :total="exams.length"
+        :total="filteredExams.length"
         aria-label="测验列表分页"
       />
     </div>
+    </template>
+
+    <el-dialog v-model="instructionsDialog" :title="`${instructionsExam?.title || ''} · 测验说明`" width="min(680px, 94vw)" @close-auto-focus="restoreInstructionsFocus">
+      <p class="task-full-description">{{ instructionsExam?.description || '教师暂未填写测验说明。' }}</p>
+      <template #footer><el-button @click="instructionsDialog = false">关闭</el-button></template>
+    </el-dialog>
 
     <el-dialog
       v-model="createDialog"
+      @close-auto-focus="restoreCreateFocus"
       :title="editingExamId ? '编辑测验草稿' : '创建测验草稿'"
       width="min(640px, 94vw)"
       :close-on-click-modal="!saving"
@@ -743,12 +899,17 @@ onBeforeUnmount(() => {
       @closed="resetExamForm"
     >
       <p v-if="pendingExam" class="dialog-tip">草稿已保存，请重试附件处理，不会重复创建测验。</p>
-      <el-form ref="examFormRef" :model="examForm" :rules="examRules" :disabled="Boolean(pendingExam)" label-position="top">
+      <el-form ref="examFormRef" :model="examForm" :rules="examRules" :disabled="saving || Boolean(pendingExam)" label-position="top">
         <el-form-item label="测验方式">
-          <el-radio-group v-model="examForm.exam_type">
-            <el-radio value="ONLINE">在线试题（自动评分）</el-radio>
-            <el-radio value="ATTACHMENT">附件试卷（教师批改）</el-radio>
+          <el-radio-group v-model="examForm.exam_type" @change="changeExamType">
+            <el-radio value="ONLINE">在线试题（系统内出题并自动评分）</el-radio>
+            <el-radio value="ATTACHMENT">附件试卷（上传完整试卷并人工批改）</el-radio>
           </el-radio-group>
+          <p class="dialog-tip exam-mode-tip">
+            {{ examForm.exam_type === 'ONLINE'
+              ? '保存基本信息后进入试题管理，逐题添加单选题或判断题；在线试题不上传试卷附件。'
+              : '在下方上传完整试卷文件，学生提交文字或答卷附件，由教师人工批改。' }}
+          </p>
         </el-form-item>
         <el-form-item label="所属课程" prop="course_id">
           <el-select v-model="examForm.course_id" placeholder="请选择课程" style="width: 100%">
@@ -778,8 +939,8 @@ onBeforeUnmount(() => {
           </el-form-item>
         </div>
       </el-form>
-      <div class="teaching-attachment-field">
-        <p>{{ examForm.exam_type === 'ATTACHMENT' ? '试卷附件（必选）' : '测验附件（可选）' }}</p>
+      <div v-if="examForm.exam_type === 'ATTACHMENT'" class="teaching-attachment-field">
+        <p>完整试卷附件（必选）</p>
         <div v-if="existingAttachment && !removeAttachment" class="attachment-existing">
           <el-button @click="previewAttachment(existingAttachment)">查看现有附件</el-button>
           <el-button :disabled="saving" @click="removeAttachment = true; examAttachment = null">移除附件</el-button>
@@ -791,7 +952,7 @@ onBeforeUnmount(() => {
           <strong>{{ examAttachment?.name || '最大 50MB' }}</strong>
         </label>
         <small>支持 PDF、Office 文档、文本、图片和压缩包；PDF、文本及图片可在线预览。发布后附件不可更改。</small>
-        <small v-if="examForm.exam_type === 'ATTACHMENT'">上传文件即为完整试卷，无需录入在线题目；学生提交文字或答卷附件后由教师批改。</small>
+        <small>上传文件即为完整试卷，无需录入在线题目；学生提交文字或答卷附件后由教师批改。</small>
       </div>
       <template #footer>
         <el-button :disabled="saving" @click="createDialog = false">取消</el-button>
@@ -804,6 +965,7 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="questionDialog"
+      @close-auto-focus="restoreQuestionFocus"
       class="question-manager-dialog"
       :title="`${selectedExam?.title || ''} · 试题管理`"
       width="min(1120px, calc(100vw - 32px))"
@@ -882,6 +1044,7 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="takeDialog"
+      @close-auto-focus="restoreTakeFocus"
       :title="selectedExam?.title"
       width="min(860px, 96vw)"
       :close-on-click-modal="Boolean(recordFinished)"
@@ -890,6 +1053,10 @@ onBeforeUnmount(() => {
       @closed="handleTakeClosed"
     >
       <el-button v-if="selectedExam?.attachment" @click="previewAttachment(selectedExam)">查看测验附件</el-button>
+      <details v-if="selectedExam?.description" class="task-requirements">
+        <summary>查看完整测验说明</summary>
+        <p class="task-full-description">{{ selectedExam.description }}</p>
+      </details>
       <div v-if="recordFinished && selectedExam?.exam_type === 'ATTACHMENT'" class="exam-result">
         <h3>{{ selectedRecord.status === 'GRADED' ? '教师已批改' : '已交卷，等待教师批改' }}</h3>
         <p>提交后答卷已锁定，不可修改。得分：{{ selectedRecord.score ?? '待批改' }} / {{ selectedRecord.total_score }}</p>
@@ -957,9 +1124,9 @@ onBeforeUnmount(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="recordsDialog" :title="`${selectedExam?.title || ''} · 成绩记录`" width="min(820px, 96vw)">
+    <el-dialog v-model="recordsDialog" :title="`${selectedExam?.title || ''} · 成绩记录`" width="min(820px, 96vw)" @close-auto-focus="restoreRecordsFocus">
       <el-table :data="records" max-height="440">
-        <el-table-column prop="student_name" label="学生" min-width="130" />
+        <el-table-column prop="student_name" label="学生" min-width="130"><template #default="scope"><OverflowText :text="scope.row.student_name" label="查看学生姓名全文" /></template></el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="scope">{{ scope.row.status === 'GRADED' ? '已批改' : scope.row.status === 'SUBMITTED' ? '已交卷' : '作答中' }}</template>
         </el-table-column>
