@@ -9,6 +9,8 @@ from app.services.video_processing_service import (
     VideoPermissionDenied,
     VideoFileValidationError,
     VideoStateError,
+    VideoUploadCancelled,
+    cancel_pending_video_upload,
     create_video,
     create_and_process_video,
     delete_teacher_video,
@@ -22,7 +24,13 @@ from app.services.video_processing_service import (
 )
 from app.utils import error, json_body, roles_required, success
 from . import videos_bp
-from .schemas import ValidationError, validate_replacement, validate_update, validate_upload
+from .schemas import (
+    ValidationError,
+    validate_replacement,
+    validate_update,
+    validate_upload,
+    validate_upload_token,
+)
 
 
 @videos_bp.post("/upload")
@@ -36,7 +44,7 @@ def upload_video():
         if current_app.config["VIDEO_PROCESSING_ASYNC"]:
             video = create_video(video_file, int(get_jwt_identity()), data)
             try:
-                video = enqueue_video_processing(video.id)
+                video = enqueue_video_processing(video.id, data.get("upload_token"))
             except OperationalError:
                 current_app.logger.exception("视频 %s 的 Celery 任务投递失败", video.id)
                 video = mark_video_failed(video.id, "后台任务队列暂不可用", "QUEUE")
@@ -51,6 +59,8 @@ def upload_video():
         return error(str(exc), 403)
     except VideoFileValidationError as exc:
         return error(str(exc), 400)
+    except VideoUploadCancelled as exc:
+        return error(str(exc), 409)
     except ValueError as exc:
         return error(str(exc), 409)
     if current_app.config["VIDEO_PROCESSING_ASYNC"]:
@@ -58,6 +68,22 @@ def upload_video():
     if video.status == "READY":
         return success(video.to_dict(), "视频上传完成", 201)
     return error("视频处理失败", 422, video.to_dict())
+
+
+@videos_bp.post("/uploads/<upload_token>/cancel")
+@roles_required(UserRole.TEACHER)
+def cancel_upload(upload_token: str):
+    try:
+        token = validate_upload_token(upload_token, required=True)
+        removed = cancel_pending_video_upload(token, int(get_jwt_identity()))
+    except ValidationError as exc:
+        return error(str(exc), 400)
+    except VideoPermissionDenied as exc:
+        return error(str(exc), 403)
+    except VideoStateError as exc:
+        return error(str(exc), 409)
+    message = "上传和后台处理任务已取消，视频已删除" if removed else "取消指令已记录，上传连接正在终止"
+    return success({"upload_token": token, "removed": removed}, message)
 
 
 @videos_bp.get("/<int:video_id>")
@@ -125,6 +151,8 @@ def replace_teacher_video(video_id: int):
         return error(str(exc), 403)
     except VideoFileValidationError as exc:
         return error(str(exc), 400)
+    except VideoUploadCancelled as exc:
+        return error(str(exc), 409)
     except VideoStateError as exc:
         return error(str(exc), 409)
     return _start_video_processing(video, "替换视频已提交后台处理", "视频替换完成")

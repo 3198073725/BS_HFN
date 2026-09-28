@@ -26,6 +26,7 @@ backend/media/videos/original/*
 backend/media/videos/processed/*
 backend/media/videos/hls/*
 backend/media/videos/covers/*
+backend/media/videos/upload_control/
 backend/media/homework/*
 backend/media/exams/*
 !backend/media/**/.gitkeep

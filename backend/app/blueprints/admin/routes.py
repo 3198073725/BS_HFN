@@ -26,7 +26,12 @@ from app.services.admin_service import (
     serialize_admin_video,
     update_admin_category,
 )
-from app.services.video_processing_service import enqueue_video_processing, mark_video_failed, process_video_sync
+from app.services.video_processing_service import (
+    enqueue_video_processing,
+    mark_video_failed,
+    process_video_sync,
+    revoke_video_processing_task,
+)
 from app.utils import error, json_body, roles_required, success
 from app.blueprints.auth.schemas import ValidationError as AuthValidationError, validate_new_password
 from app.blueprints.auth.schemas import ValidationError, validate_managed_user
@@ -197,17 +202,7 @@ def cancel_video(video_id: int):
     except AdminConflict as exc:
         return error(str(exc), 409)
 
-    revoke_sent = False
-    if task_id and current_app.extensions.get("celery") is not None:
-        try:
-            current_app.extensions["celery"].control.revoke(
-                task_id,
-                terminate=True,
-                signal="SIGTERM",
-            )
-            revoke_sent = True
-        except Exception:
-            current_app.logger.exception("撤销视频转码任务 %s 失败", task_id)
+    revoke_sent = revoke_video_processing_task(task_id)
 
     _record_audit(
         "VIDEO_CANCEL",

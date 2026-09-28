@@ -1,4 +1,6 @@
 import shutil
+import time
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,7 +27,17 @@ ALLOWED_HOMEWORK_EXTENSIONS = {
 }
 
 
-def save_original_video(file: FileStorage, target_dir: Path) -> tuple[Path, str]:
+class UploadCancelledError(ValueError):
+    pass
+
+
+def save_original_video(
+    file: FileStorage,
+    target_dir: Path,
+    *,
+    storage_stem: str | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[Path, str]:
     original_name = Path(str(file.filename or "").replace("\\", "/")).name.strip()
     suffix = Path(original_name).suffix.lower()
     if not original_name or suffix not in ALLOWED_VIDEO_EXTENSIONS:
@@ -34,15 +46,55 @@ def save_original_video(file: FileStorage, target_dir: Path) -> tuple[Path, str]
         raise ValueError("视频文件名不能超过255位")
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{uuid4().hex}{suffix}"
+    target = target_dir / f"{storage_stem or uuid4().hex}{suffix}"
     try:
-        file.save(target)
-        if target.stat().st_size == 0:
+        size = 0
+        with target.open("xb") as output:
+            while chunk := file.stream.read(1024 * 1024):
+                if cancel_check is not None and cancel_check():
+                    raise UploadCancelledError("视频上传已取消")
+                output.write(chunk)
+                size += len(chunk)
+        if cancel_check is not None and cancel_check():
+            raise UploadCancelledError("视频上传已取消")
+        if size == 0:
             raise ValueError("视频文件不能为空")
     except Exception:
         remove_file(target)
         raise
     return target, original_name
+
+
+def mark_video_upload_cancelled(media_root: Path, upload_token: str) -> None:
+    marker = _video_upload_cancel_marker(media_root, upload_token)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch(exist_ok=True)
+
+
+def is_video_upload_cancelled(media_root: Path, upload_token: str | None) -> bool:
+    return bool(upload_token and _video_upload_cancel_marker(media_root, upload_token).is_file())
+
+
+def clear_video_upload_cancel_marker(media_root: Path, upload_token: str | None) -> None:
+    if upload_token:
+        remove_file(_video_upload_cancel_marker(media_root, upload_token))
+
+
+def cleanup_stale_video_upload_markers(media_root: Path, max_age_seconds: int = 86400) -> None:
+    marker_dir = media_root / "videos" / "upload_control"
+    if not marker_dir.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    for marker in marker_dir.glob("*.cancel"):
+        try:
+            if marker.stat().st_mtime < cutoff:
+                marker.unlink()
+        except FileNotFoundError:
+            continue
+
+
+def _video_upload_cancel_marker(media_root: Path, upload_token: str) -> Path:
+    return media_root / "videos" / "upload_control" / f"{upload_token}.cancel"
 
 
 def remove_file(path: Path) -> None:
@@ -153,17 +205,48 @@ def remove_media_file(media_root: Path, relative_path: str | None) -> None:
     remove_file(target)
 
 
-def clear_generated_video_files(media_root: Path, video_id: int) -> None:
-    for directory in (
-        media_root / "videos" / "processed" / str(video_id),
-        media_root / "videos" / "hls" / str(video_id),
-    ):
-        _remove_tree_within(directory, media_root)
-    remove_file(media_root / "videos" / "covers" / f"{video_id}.jpg")
+def clear_generated_video_files(
+    media_root: Path,
+    video_id: int,
+    *,
+    retry_timeout: float = 0,
+    retry_interval: float = 0.1,
+) -> None:
+    """Remove generated media, briefly waiting for a cancelled FFmpeg process.
+
+    Windows does not allow deleting ``video.mp4`` while FFmpeg still has the
+    file open.  Cancellation is database-backed and the worker checks it at
+    sub-second intervals, so lifecycle actions may opt into a short retry
+    window instead of leaking a raw ``WinError 32`` response.
+    """
+    deadline = time.monotonic() + max(0, retry_timeout)
+    while True:
+        try:
+            for directory in (
+                media_root / "videos" / "processed" / str(video_id),
+                media_root / "videos" / "hls" / str(video_id),
+            ):
+                _remove_tree_within(directory, media_root)
+            remove_file(media_root / "videos" / "covers" / f"{video_id}.jpg")
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(max(0.01, retry_interval))
 
 
-def remove_all_video_files(media_root: Path, video_id: int, original_file: str | None) -> None:
-    clear_generated_video_files(media_root, video_id)
+def remove_all_video_files(
+    media_root: Path,
+    video_id: int,
+    original_file: str | None,
+    *,
+    retry_timeout: float = 0,
+) -> None:
+    clear_generated_video_files(
+        media_root,
+        video_id,
+        retry_timeout=retry_timeout,
+    )
     if not original_file:
         return
     original_path = (media_root / original_file).resolve()

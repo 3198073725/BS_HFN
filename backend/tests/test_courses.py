@@ -270,7 +270,12 @@ def test_deleting_chapter_cleans_video_files(app, client):
     )
 
     assert deleted.status_code == 200
-    assert revoked == [("chapter-delete-task", {"terminate": True, "signal": "SIGTERM"})]
+    assert revoked == [("chapter-delete-task", {
+        "terminate": True,
+        "signal": "SIGTERM",
+        "reply": False,
+        "timeout": 1,
+    })]
     with app.app_context():
         assert db.session.get(Video, video_id) is None
     assert not original.exists()

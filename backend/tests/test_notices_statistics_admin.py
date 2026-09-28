@@ -463,7 +463,12 @@ def test_admin_can_manage_video_operations_courses_classes_and_categories(app, c
     assert cancelled_data["process_step"] == "CANCELLED"
     assert cancelled_data["cancellable"] is False
     assert cancelled_data["retryable"] is True
-    assert revoked == [(queued_task_id, {"terminate": True, "signal": "SIGTERM"})]
+    assert revoked == [(queued_task_id, {
+        "terminate": True,
+        "signal": "SIGTERM",
+        "reply": False,
+        "timeout": 1,
+    })]
     assert client.post(
         f"/api/admin/videos/{failed_video_id}/cancel",
         headers=bearer(admin),

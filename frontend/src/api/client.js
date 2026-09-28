@@ -44,6 +44,9 @@ async function refreshAccessToken() {
 api.interceptors.response.use(
   (response) => response.data,
   async (error) => {
+    if (axios.isCancel(error) || error.code === 'ERR_CANCELED') {
+      return Promise.reject({ code: 'ERR_CANCELED', canceled: true, message: '上传已取消' })
+    }
     const original = error.config
     const isAuthEndpoint = ['/auth/login', '/auth/register', '/auth/refresh'].some((path) =>
       String(original?.url || '').includes(path),

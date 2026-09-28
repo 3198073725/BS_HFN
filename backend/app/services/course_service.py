@@ -144,7 +144,7 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
         .where(Chapter.course_id == course.id)
     ).all()
     video_files = [(video.id, video.original_file) for video in videos]
-    _stop_deleted_video_tasks(videos)
+    task_ids = _stop_deleted_video_tasks(videos)
     homework_ids = db.session.scalars(
         db.select(Homework.id).where(Homework.course_id == course.id)
     ).all()
@@ -155,6 +155,8 @@ def delete_draft_course(course_id: int, teacher_id: int) -> None:
     cover_file = course.cover
     db.session.delete(course)
     db.session.commit()
+    for task_id in task_ids:
+        revoke_video_processing_task(task_id)
     _cleanup_deleted_video_files(video_files)
     _cleanup_deleted_homework_files(homework_ids)
     for attachment in exam_attachments:
@@ -237,9 +239,11 @@ def delete_chapter(course_id: int, chapter_id: int, teacher_id: int) -> None:
         raise CourseNotFound("章节不存在")
     videos = db.session.scalars(db.select(Video).where(Video.chapter_id == chapter.id)).all()
     video_files = [(video.id, video.original_file) for video in videos]
-    _stop_deleted_video_tasks(videos)
+    task_ids = _stop_deleted_video_tasks(videos)
     db.session.delete(chapter)
     db.session.commit()
+    for task_id in task_ids:
+        revoke_video_processing_task(task_id)
     _cleanup_deleted_video_files(video_files)
 
 
@@ -321,12 +325,17 @@ def _cleanup_deleted_video_files(video_files) -> None:
     media_root = Path(current_app.config["MEDIA_ROOT"])
     for video_id, original_file in video_files:
         try:
-            remove_all_video_files(media_root, video_id, original_file)
+            remove_all_video_files(
+                media_root,
+                video_id,
+                original_file,
+                retry_timeout=5,
+            )
         except (OSError, ValueError):
             current_app.logger.exception("视频 %s 的媒体文件清理失败", video_id)
 
 
-def _stop_deleted_video_tasks(videos: list[Video]) -> None:
+def _stop_deleted_video_tasks(videos: list[Video]) -> list[str]:
     active_statuses = {
         VideoStatus.UPLOADING.value,
         VideoStatus.PENDING.value,
@@ -348,8 +357,7 @@ def _stop_deleted_video_tasks(videos: list[Video]) -> None:
         # Publish cancellation before the cascade delete so active workers fail
         # their next ownership/status checkpoint even if broker revoke is delayed.
         db.session.commit()
-    for task_id in task_ids:
-        revoke_video_processing_task(task_id)
+    return task_ids
 
 
 def _cleanup_deleted_homework_files(homework_ids) -> None:

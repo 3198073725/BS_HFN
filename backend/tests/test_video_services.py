@@ -25,8 +25,8 @@ from app.models import (
 )
 from app.services import generate_cover, generate_hls, probe_video, transcode_video
 from app.services.ffmpeg_service import _run_command
-from app.services.file_service import save_original_video
-from app.services.video_processing_service import process_video_sync
+from app.services.file_service import UploadCancelledError, clear_generated_video_files, save_original_video
+from app.services.video_processing_service import _processing_state, process_video_sync
 
 
 def create_sample_video(path, ffmpeg):
@@ -228,6 +228,144 @@ def test_async_upload_commits_before_enqueuing(app, client, monkeypatch):
     assert queued_ids == [video["id"]]
 
 
+def test_teacher_can_cancel_upload_before_server_persists_video(app, client):
+    app.config["VIDEO_PROCESSING_ASYNC"] = True
+    with app.app_context():
+        teacher = User(
+            username="cancel_upload_teacher",
+            password_hash=generate_password_hash("Teach123!"),
+            real_name="取消上传教师",
+            teacher_no="TCANCELUP",
+            role=UserRole.TEACHER.value,
+        )
+        category = CourseCategory(name="取消上传课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="取消上传测试",
+            status=CourseStatus.PUBLISHED.value,
+        )
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="取消上传章节")
+        db.session.add(chapter)
+        db.session.commit()
+        chapter_id = chapter.id
+
+    token = client.post(
+        "/api/auth/login",
+        json={"account": "cancel_upload_teacher", "password": "Teach123!"},
+    ).get_json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    upload_token = "11111111-1111-4111-8111-111111111111"
+
+    cancelled = client.post(
+        f"/api/videos/uploads/{upload_token}/cancel",
+        headers=headers,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.get_json()["data"]["removed"] is False
+
+    uploaded = client.post(
+        "/api/videos/upload",
+        headers=headers,
+        data={
+            "chapter_id": str(chapter_id),
+            "title": "不应保存的视频",
+            "upload_token": upload_token,
+            "video_file": (io.BytesIO(b"cancelled-video"), "cancelled.mp4"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert uploaded.status_code == 409
+    assert uploaded.get_json()["message"] == "视频上传已取消"
+    with app.app_context():
+        assert db.session.scalar(db.select(db.func.count(Video.id))) == 0
+        assert not (
+            Path(app.config["MEDIA_ROOT"])
+            / "videos"
+            / "original"
+            / f"{upload_token}.mp4"
+        ).exists()
+
+
+def test_teacher_cancel_upload_removes_queued_video_and_source(app, client, monkeypatch):
+    app.config["VIDEO_PROCESSING_ASYNC"] = True
+    with app.app_context():
+        teacher = User(
+            username="cancel_queued_teacher",
+            password_hash=generate_password_hash("Teach123!"),
+            real_name="队列取消教师",
+            teacher_no="TCANCELQ",
+            role=UserRole.TEACHER.value,
+        )
+        category = CourseCategory(name="队列取消课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(
+            teacher_id=teacher.id,
+            category_id=category.id,
+            name="队列取消测试",
+            status=CourseStatus.PUBLISHED.value,
+        )
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="队列取消章节")
+        db.session.add(chapter)
+        db.session.commit()
+        chapter_id = chapter.id
+
+    queued = []
+    monkeypatch.setattr(
+        "app.tasks.video_tasks.process_video",
+        SimpleNamespace(apply_async=lambda *, args, task_id: queued.append((args, task_id))),
+    )
+    access_token = client.post(
+        "/api/auth/login",
+        json={"account": "cancel_queued_teacher", "password": "Teach123!"},
+    ).get_json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {access_token}"}
+    upload_token = "22222222-2222-4222-8222-222222222222"
+    uploaded = client.post(
+        "/api/videos/upload",
+        headers=headers,
+        data={
+            "chapter_id": str(chapter_id),
+            "title": "进入队列后取消",
+            "upload_token": upload_token,
+            "video_file": (io.BytesIO(b"queued-video"), "queued.mp4"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert uploaded.status_code == 202
+    video_id = uploaded.get_json()["data"]["id"]
+    task_id = queued[0][1]
+
+    revoked = []
+    app.extensions["celery"] = type("FakeCelery", (), {
+        "control": type("FakeControl", (), {
+            "revoke": staticmethod(lambda current_task_id, **kwargs: revoked.append((current_task_id, kwargs))),
+        })(),
+    })()
+    cancelled = client.post(
+        f"/api/videos/uploads/{upload_token}/cancel",
+        headers=headers,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.get_json()["data"]["removed"] is True
+    assert revoked[0][0] == task_id
+    with app.app_context():
+        assert db.session.get(Video, video_id) is None
+        assert not (
+            Path(app.config["MEDIA_ROOT"])
+            / "videos"
+            / "original"
+            / f"{upload_token}.mp4"
+        ).exists()
+
+
 def test_async_enqueue_failure_is_persisted(app, client, monkeypatch):
     app.config["VIDEO_PROCESSING_ASYNC"] = True
     with app.app_context():
@@ -292,6 +430,28 @@ def test_video_file_validation_preserves_chinese_name_and_rejects_empty(tmp_path
         )
 
 
+def test_video_file_save_removes_partial_file_when_upload_is_cancelled(tmp_path):
+    checks = 0
+
+    def cancelled_during_copy():
+        nonlocal checks
+        checks += 1
+        return checks >= 2
+
+    upload_token = "33333333-3333-4333-8333-333333333333"
+    with pytest.raises(UploadCancelledError, match="已取消"):
+        save_original_video(
+            FileStorage(
+                stream=io.BytesIO(b"x" * (2 * 1024 * 1024 + 1)),
+                filename="large.mp4",
+            ),
+            tmp_path,
+            storage_stem=upload_token,
+            cancel_check=cancelled_during_copy,
+        )
+    assert not (tmp_path / f"{upload_token}.mp4").exists()
+
+
 def test_ffmpeg_runner_terminates_child_when_cancelled():
     checks = 0
 
@@ -309,6 +469,102 @@ def test_ffmpeg_runner_terminates_child_when_cancelled():
             cancel_check=cancel_after_first_poll,
         )
     assert time.monotonic() - started_at < 5
+
+
+def test_processing_cancel_poll_uses_independent_database_connection(app, monkeypatch):
+    with app.app_context():
+        teacher = User(username="poll_teacher", password_hash="hash", real_name="轮询教师", teacher_no="TPOLL", role=UserRole.TEACHER.value)
+        category = CourseCategory(name="轮询课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="轮询检查")
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="轮询章节")
+        db.session.add(chapter)
+        db.session.flush()
+        video = Video(
+            chapter_id=chapter.id,
+            title="轮询视频",
+            status=VideoStatus.CANCELLED.value,
+            task_id=None,
+        )
+        db.session.add(video)
+        db.session.commit()
+        video_id = video.id
+
+        monkeypatch.setattr(
+            db.session,
+            "execute",
+            lambda *_args, **_kwargs: pytest.fail("取消轮询不应复用 Celery ORM 会话"),
+        )
+        assert _processing_state(video_id) == (VideoStatus.CANCELLED.value, None)
+
+
+def test_generated_video_cleanup_retries_windows_file_lock(tmp_path, monkeypatch):
+    from app.services import file_service
+
+    attempts = 0
+    original_remove = file_service._remove_tree_within
+
+    def temporarily_locked(path, root):
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 2:
+            raise PermissionError(32, "file is in use")
+        return original_remove(path, root)
+
+    processed = tmp_path / "videos" / "processed" / "9"
+    processed.mkdir(parents=True)
+    (processed / "video.mp4").write_bytes(b"partial")
+    monkeypatch.setattr(file_service, "_remove_tree_within", temporarily_locked)
+
+    clear_generated_video_files(
+        tmp_path,
+        9,
+        retry_timeout=0.2,
+        retry_interval=0.001,
+    )
+    assert attempts >= 3
+    assert not processed.exists()
+
+
+def test_admin_retry_reports_locked_output_as_conflict(app, monkeypatch):
+    from app.services import admin_service
+
+    with app.app_context():
+        teacher = User(username="retry_lock_teacher", password_hash="hash", real_name="重试教师", teacher_no="TRLOCK", role=UserRole.TEACHER.value)
+        category = CourseCategory(name="重试锁课程")
+        db.session.add_all([teacher, category])
+        db.session.flush()
+        course = Course(teacher_id=teacher.id, category_id=category.id, name="重试文件锁")
+        db.session.add(course)
+        db.session.flush()
+        chapter = Chapter(course_id=course.id, title="重试章节")
+        db.session.add(chapter)
+        db.session.flush()
+        original_relative = "videos/original/retry-locked.mp4"
+        original = Path(app.config["MEDIA_ROOT"]) / original_relative
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(b"source")
+        video = Video(
+            chapter_id=chapter.id,
+            title="等待进程退出",
+            original_file=original_relative,
+            status=VideoStatus.CANCELLED.value,
+            process_step="CANCELLED",
+        )
+        db.session.add(video)
+        db.session.commit()
+
+        monkeypatch.setattr(
+            admin_service,
+            "clear_generated_video_files",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError(32, "file is in use")),
+        )
+        with pytest.raises(admin_service.AdminConflict, match="尚未完全退出"):
+            admin_service.prepare_video_retry(video.id)
+        assert db.session.get(Video, video.id).status == VideoStatus.CANCELLED.value
 
 
 def test_video_upload_rejects_unsupported_file_as_bad_request(app, client):
@@ -548,6 +804,7 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
 
         files = {
             "published": "videos/original/published.mp4",
+            "published_processing": "videos/original/published-processing.mp4",
             "failed": "videos/original/failed.mp4",
             "replace": "videos/original/replace.mp4",
             "other": "videos/original/other.mp4",
@@ -560,6 +817,14 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
             title="发布视频",
             original_file=files["published"],
             status="READY",
+        )
+        published_processing_video = Video(
+            chapter_id=published_chapter.id,
+            title="发布课程中正在转码的视频",
+            original_file=files["published_processing"],
+            status=VideoStatus.PROCESSING.value,
+            process_step="TRANSCODING",
+            task_id="published-processing-task",
         )
         failed_video = Video(
             chapter_id=offline_chapter.id,
@@ -581,7 +846,13 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
             original_file=files["other"],
             status="READY",
         )
-        db.session.add_all([published_video, failed_video, replace_target, other_video])
+        db.session.add_all([
+            published_video,
+            published_processing_video,
+            failed_video,
+            replace_target,
+            other_video,
+        ])
         db.session.flush()
         db.session.add_all(
             [
@@ -609,6 +880,7 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
         db.session.commit()
         ids = {
             "published": published_video.id,
+            "published_processing": published_processing_video.id,
             "failed": failed_video.id,
             "replace": replace_target.id,
             "other": other_video.id,
@@ -655,11 +927,31 @@ def test_teacher_can_manage_individual_video_lifecycle(app, client, monkeypatch)
             "revoke": staticmethod(lambda task_id, **kwargs: revoked.append((task_id, kwargs))),
         })(),
     })()
+    deleted_published_processing = client.delete(
+        f"/api/videos/{ids['published_processing']}",
+        headers=headers,
+    )
+    assert deleted_published_processing.status_code == 200
+    assert deleted_published_processing.get_json()["message"] == "转码任务已终止，视频及相关学习数据已删除"
     deleted_pending = client.delete(f"/api/videos/{ids['failed']}", headers=headers)
     assert deleted_pending.status_code == 200
     assert deleted_pending.get_json()["message"] == "转码任务已终止，视频及相关学习数据已删除"
-    assert revoked == [(pending_task_id, {"terminate": True, "signal": "SIGTERM"})]
+    assert revoked == [
+        ("published-processing-task", {
+            "terminate": True,
+            "signal": "SIGTERM",
+            "reply": False,
+            "timeout": 1,
+        }),
+        (pending_task_id, {
+            "terminate": True,
+            "signal": "SIGTERM",
+            "reply": False,
+            "timeout": 1,
+        }),
+    ]
     with app.app_context():
+        assert db.session.get(Video, ids["published_processing"]) is None
         assert db.session.get(Video, ids["failed"]) is None
     assert client.post(
         f"/api/videos/{ids['published']}/retry",

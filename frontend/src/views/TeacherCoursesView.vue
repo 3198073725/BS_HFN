@@ -37,6 +37,10 @@ const existingCourseCover = ref('')
 const removeExistingCover = ref(false)
 const courseCoverInputKey = ref(0)
 const uploading = ref(false)
+const uploadProgress = ref(0)
+const cancellingUpload = ref(false)
+let uploadController = null
+let activeUploadToken = null
 const savingCourse = ref(false)
 const savingChapter = ref(false)
 const processingVideoId = ref(null)
@@ -372,8 +376,9 @@ function canChangeVideoContent(course, video) {
     && !['PENDING', 'PROCESSING'].includes(video.status)
 }
 
-function canDeleteVideo(course) {
+function canDeleteVideo(course, video) {
   return ['DRAFT', 'OFFLINE'].includes(course.status)
+    || ['UPLOADING', 'PENDING', 'PROCESSING', 'FAILED', 'CANCELLED'].includes(video.status)
 }
 
 function isVideoProcessing(video) {
@@ -407,6 +412,27 @@ async function closeVideoEditor() {
 
 function selectVideoFile(event) {
   videoFile.value = event.target.files?.[0] || null
+}
+
+async function cancelVideoUpload() {
+  if (!uploading.value || !activeUploadToken || cancellingUpload.value) return
+  cancellingUpload.value = true
+  const token = activeUploadToken
+  uploadController?.abort()
+  try {
+    const response = await api.post(`/videos/uploads/${token}/cancel`)
+    ElMessage.success(response.message || '视频上传已取消')
+  } catch (error) {
+    ElMessage.error(error.message || '取消上传失败，请稍后检查视频列表')
+  } finally {
+    videoFile.value = null
+    videoInputKey.value += 1
+    uploadProgress.value = 0
+    uploading.value = false
+    cancellingUpload.value = false
+    uploadController = null
+    activeUploadToken = null
+  }
 }
 
 async function saveVideo() {
@@ -460,12 +486,27 @@ async function saveVideo() {
   data.append('description', videoForm.description)
   data.append('sort_order', videoForm.sort_order)
   data.append('video_file', videoFile.value)
+  const cancellableUpload = videoDialogMode.value === 'upload'
+  if (cancellableUpload) {
+    activeUploadToken = window.crypto.randomUUID()
+    uploadController = new AbortController()
+    data.append('upload_token', activeUploadToken)
+    uploadProgress.value = 0
+  }
   uploading.value = true
   try {
     const endpoint = videoDialogMode.value === 'replace'
       ? `/videos/${selectedVideo.value.id}/replace`
       : '/videos/upload'
-    const response = await api.post(endpoint, data, { timeout: 0 })
+    const response = await api.post(endpoint, data, {
+      timeout: 0,
+      signal: uploadController?.signal,
+      onUploadProgress: cancellableUpload
+        ? (event) => {
+            if (event.total) uploadProgress.value = Math.min(99, Math.round((event.loaded / event.total) * 100))
+          }
+        : undefined,
+    })
     if (disposed) return
     if (response.data.status === 'READY') {
       ElMessage.success(videoDialogMode.value === 'replace' ? '视频替换完成' : '视频处理完成')
@@ -482,9 +523,16 @@ async function saveVideo() {
     uploading.value = false
     await closeVideoEditor()
   } catch (error) {
-    if (!disposed) ElMessage.error(error.message || (videoDialogMode.value === 'replace' ? '视频替换失败' : '视频上传失败'))
+    if (!disposed && !error?.canceled && !cancellingUpload.value) {
+      ElMessage.error(error.message || (videoDialogMode.value === 'replace' ? '视频替换失败' : '视频上传失败'))
+    }
   } finally {
     uploading.value = false
+    if (!cancellingUpload.value) {
+      uploadProgress.value = 0
+      uploadController = null
+      activeUploadToken = null
+    }
   }
 }
 
@@ -648,6 +696,11 @@ async function removeChapter(course, chapter) {
 onMounted(load)
 onBeforeUnmount(() => {
   disposed = true
+  if (uploading.value && activeUploadToken) {
+    const token = activeUploadToken
+    uploadController?.abort()
+    void api.post(`/videos/uploads/${token}/cancel`).catch(() => {})
+  }
   activeVideoMonitors.clear()
   releaseCourseCoverPreview()
 })
@@ -878,7 +931,7 @@ onBeforeUnmount(() => {
               <el-button :disabled="chapterBusy || videoDialog" @click="openVideoEdit(selectedCourse, selectedChapter, video)">编辑视频</el-button>
               <el-button v-if="['FAILED', 'CANCELLED'].includes(video.status)" :disabled="chapterBusy || videoDialog" @click="retryVideo(video)">重新处理</el-button>
               <el-button v-if="canChangeVideoContent(selectedCourse, video)" :disabled="chapterBusy || videoDialog" @click="openVideoReplace(selectedCourse, selectedChapter, video)">替换文件</el-button>
-              <el-button v-if="canDeleteVideo(selectedCourse)" :disabled="chapterBusy || videoDialog" @click="removeVideo(selectedCourse, video)">{{ isVideoProcessing(video) ? '终止并删除' : '删除视频' }}</el-button>
+              <el-button v-if="canDeleteVideo(selectedCourse, video)" :disabled="chapterBusy || videoDialog" @click="removeVideo(selectedCourse, video)">{{ isVideoProcessing(video) ? '终止并删除' : '删除视频' }}</el-button>
             </div>
           </article>
           <el-empty v-if="!selectedChapter?.videos?.length" description="本章节还没有视频" :image-size="48" />
@@ -915,12 +968,18 @@ onBeforeUnmount(() => {
       <p v-if="videoDialogMode === 'upload'" class="dialog-tip">
         支持 MP4、MOV、MKV、AVI、WebM；大视频将在后台处理，完成后会提示结果。
       </p>
+      <el-progress v-if="uploading && videoDialogMode === 'upload'" :percentage="uploadProgress" :stroke-width="8" />
       <p v-else-if="videoDialogMode === 'replace'" class="dialog-tip video-destructive-tip">
         替换仅允许草稿或已下线课程。系统会创建新视频并清除原视频对应的学习进度、笔记和答疑。
       </p>
       <p v-else class="dialog-tip">修改标题、描述和排序不会影响学生已有学习记录。</p>
       <div class="chapter-video-form-actions">
         <el-button :disabled="chapterBusy" @click="closeVideoEditor">取消视频编辑</el-button>
+        <el-button
+          v-if="uploading && videoDialogMode === 'upload'"
+          :loading="cancellingUpload"
+          @click="cancelVideoUpload"
+        >取消上传</el-button>
         <el-button type="primary" :loading="uploading" @click="saveVideo">
           {{ videoDialogMode === 'edit' ? '保存修改' : (videoDialogMode === 'replace' ? '替换并处理' : '上传并处理') }}
         </el-button>

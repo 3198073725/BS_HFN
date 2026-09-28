@@ -12,7 +12,12 @@ from app.models import Chapter, Video
 from .ffmpeg_service import generate_cover, generate_hls, transcode_video
 from .ffprobe_service import probe_video
 from .file_service import (
+    ALLOWED_VIDEO_EXTENSIONS,
+    UploadCancelledError,
     clear_generated_video_files,
+    cleanup_stale_video_upload_markers,
+    is_video_upload_cancelled,
+    mark_video_upload_cancelled,
     remove_all_video_files,
     remove_file,
     save_original_video,
@@ -43,6 +48,10 @@ class VideoStateError(ValueError):
     pass
 
 
+class VideoUploadCancelled(ValueError):
+    pass
+
+
 def create_video(file, teacher_id: int, data: dict) -> Video:
     chapter = db.session.scalar(
         db.select(Chapter).options(joinedload(Chapter.course)).where(Chapter.id == data["chapter_id"])
@@ -55,11 +64,22 @@ def create_video(file, teacher_id: int, data: dict) -> Video:
         raise ValueError("课程状态异常，暂时不能上传视频")
 
     media_root = Path(current_app.config["MEDIA_ROOT"])
+    upload_token = data.get("upload_token")
+    cleanup_stale_video_upload_markers(media_root)
+    if is_video_upload_cancelled(media_root, upload_token):
+        raise VideoUploadCancelled("视频上传已取消")
     try:
         original_path, original_name = save_original_video(
             file,
             media_root / "videos" / "original",
+            storage_stem=upload_token,
+            cancel_check=(
+                lambda: is_video_upload_cancelled(media_root, upload_token)
+                if upload_token else None
+            ),
         )
+    except UploadCancelledError as exc:
+        raise VideoUploadCancelled(str(exc)) from exc
     except ValueError as exc:
         raise VideoFileValidationError(str(exc)) from exc
     video = Video(
@@ -79,7 +99,33 @@ def create_video(file, teacher_id: int, data: dict) -> Video:
         db.session.rollback()
         remove_file(original_path)
         raise
+    if is_video_upload_cancelled(media_root, upload_token):
+        db.session.delete(video)
+        db.session.commit()
+        remove_file(original_path)
+        raise VideoUploadCancelled("视频上传已取消")
     return video
+
+
+def cancel_pending_video_upload(upload_token: str, teacher_id: int) -> bool:
+    """Cancel a browser upload before or after its Video row is committed."""
+    media_root = Path(current_app.config["MEDIA_ROOT"])
+    mark_video_upload_cancelled(media_root, upload_token)
+    possible_files = [
+        f"videos/original/{upload_token}{suffix}"
+        for suffix in ALLOWED_VIDEO_EXTENSIONS
+    ]
+    video = db.session.scalar(
+        db.select(Video)
+        .options(joinedload(Video.chapter).joinedload(Chapter.course))
+        .where(Video.original_file.in_(possible_files))
+    )
+    if video is None:
+        return False
+    if video.chapter.course.teacher_id != teacher_id:
+        raise VideoPermissionDenied("不能取消其他教师的视频上传")
+    delete_teacher_video(video.id, teacher_id)
+    return True
 
 
 def create_and_process_video(file, teacher_id: int, data: dict) -> Video:
@@ -87,16 +133,39 @@ def create_and_process_video(file, teacher_id: int, data: dict) -> Video:
     return process_video_sync(video.id)
 
 
-def enqueue_video_processing(video_id: int) -> Video:
+def enqueue_video_processing(video_id: int, upload_token: str | None = None) -> Video:
+    media_root = Path(current_app.config["MEDIA_ROOT"])
+    if is_video_upload_cancelled(media_root, upload_token):
+        video = db.session.get(Video, video_id)
+        if video is not None:
+            original_file = video.original_file
+            db.session.delete(video)
+            db.session.commit()
+            remove_all_video_files(media_root, video_id, original_file)
+        raise VideoUploadCancelled("视频上传已取消")
+
+    task_id = uuid.uuid4().hex
+    updated = db.session.execute(
+        db.update(Video)
+        .where(
+            Video.id == video_id,
+            Video.status == VideoStatus.PENDING.value,
+            Video.task_id.is_(None),
+        )
+        .values(task_id=task_id, process_step="QUEUED")
+    )
+    db.session.commit()
+    if updated.rowcount != 1:
+        if is_video_upload_cancelled(media_root, upload_token):
+            raise VideoUploadCancelled("视频上传已取消")
+        status, _current_task_id = _processing_state(video_id)
+        if status is None:
+            raise VideoNotFound("视频不存在")
+        raise VideoStateError("只有尚未投递的等待视频可以加入转码队列")
+    db.session.expire_all()
     video = db.session.get(Video, video_id)
     if video is None:
-        raise VideoNotFound("视频不存在")
-    if video.status != VideoStatus.PENDING.value:
-        raise VideoStateError("只有等待处理的视频可以加入转码队列")
-    task_id = uuid.uuid4().hex
-    video.task_id = task_id
-    video.process_step = "QUEUED"
-    db.session.commit()
+        raise VideoUploadCancelled("视频上传已取消")
 
     from app.tasks.video_tasks import process_video
 
@@ -267,7 +336,14 @@ def prepare_teacher_retry(video_id: int, teacher_id: int) -> Video:
     original_path = _original_path(video)
     if original_path is None or not original_path.is_file():
         raise VideoStateError("原始视频文件已丢失，无法重新转码")
-    clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
+    try:
+        clear_generated_video_files(
+            Path(current_app.config["MEDIA_ROOT"]),
+            video.id,
+            retry_timeout=3,
+        )
+    except PermissionError as exc:
+        raise VideoStateError("旧转码进程尚未完全退出，请稍后再试") from exc
     video.status = VideoStatus.PENDING.value
     video.process_step = "QUEUED"
     video.task_id = None
@@ -281,12 +357,21 @@ def prepare_teacher_retry(video_id: int, teacher_id: int) -> Video:
 
 def delete_teacher_video(video_id: int, teacher_id: int) -> bool:
     video = _owned_video(video_id, teacher_id)
-    _ensure_course_content_change_allowed(video)
     was_processing = video.status in {
         VideoStatus.UPLOADING.value,
         VideoStatus.PENDING.value,
         VideoStatus.PROCESSING.value,
     }
+    # Published courses may accept newly uploaded videos, but an unfinished
+    # video is never visible to students.  Its owner must therefore still be
+    # able to cancel/remove it without taking the whole course offline.  READY
+    # content remains protected by the normal offline-first rule.
+    removable_while_published = was_processing or video.status in {
+        VideoStatus.FAILED.value,
+        VideoStatus.CANCELLED.value,
+    }
+    if not removable_while_published:
+        _ensure_course_content_change_allowed(video)
     task_id = video.task_id if was_processing else None
     if was_processing:
         # Commit the terminal state before revoking/deleting so a worker that is
@@ -296,15 +381,20 @@ def delete_teacher_video(video_id: int, teacher_id: int) -> bool:
         video.task_id = None
         video.error_message = "教师删除视频并终止转码任务"
         db.session.commit()
-        revoke_video_processing_task(task_id)
     original_file = video.original_file
     db.session.delete(video)
     db.session.commit()
+    # The row deletion itself is also a worker-visible terminal signal.  Do
+    # this before the best-effort broker command so a temporarily unavailable
+    # broker cannot leave a deleted video visible forever.
+    if was_processing:
+        revoke_video_processing_task(task_id)
     try:
         remove_all_video_files(
             Path(current_app.config["MEDIA_ROOT"]),
             video_id,
             original_file,
+            retry_timeout=5 if was_processing else 0,
         )
     except (OSError, ValueError):
         current_app.logger.exception("教师删除视频 %s 后清理媒体文件失败", video_id)
@@ -367,8 +457,13 @@ def _assert_processing_current(video_id: int, expected_task_id: str | None = Non
 
 
 def _processing_state(video_id: int) -> tuple[str | None, str | None]:
-    with db.session.no_autoflush:
-        state = db.session.execute(
+    # Do not reuse the long-lived ORM session owned by the Celery task here.
+    # MySQL's default REPEATABLE READ isolation can otherwise keep returning
+    # the snapshot from before an administrator/teacher cancelled the task.
+    # A short independent transaction observes the latest committed state on
+    # every FFmpeg polling checkpoint.
+    with db.engine.connect() as connection:
+        state = connection.execute(
             db.select(Video.status, Video.task_id).where(Video.id == video_id)
         ).one_or_none()
     if state is None:
@@ -411,7 +506,13 @@ def revoke_video_processing_task(task_id: str | None) -> bool:
     if celery is None:
         return False
     try:
-        celery.control.revoke(task_id, terminate=True, signal="SIGTERM")
+        celery.control.revoke(
+            task_id,
+            terminate=True,
+            signal="SIGTERM",
+            reply=False,
+            timeout=1,
+        )
     except Exception:
         current_app.logger.exception("撤销视频转码任务 %s 失败", task_id)
         return False

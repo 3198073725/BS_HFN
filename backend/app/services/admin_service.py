@@ -155,7 +155,14 @@ def prepare_video_retry(video_id: int) -> Video:
     original_path = _video_original_path(video)
     if original_path is None or not original_path.is_file():
         raise AdminConflict("原始视频文件已丢失，无法重新转码")
-    clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
+    try:
+        clear_generated_video_files(
+            Path(current_app.config["MEDIA_ROOT"]),
+            video.id,
+            retry_timeout=3,
+        )
+    except PermissionError as exc:
+        raise AdminConflict("旧转码进程尚未完全退出，请稍后再试") from exc
     video.status = VideoStatus.PENDING.value
     video.process_step = "QUEUED"
     video.task_id = None
@@ -185,7 +192,11 @@ def cancel_video_processing(video_id: int) -> tuple[Video, str | None]:
     video.cover = None
     db.session.commit()
     try:
-        clear_generated_video_files(Path(current_app.config["MEDIA_ROOT"]), video.id)
+        clear_generated_video_files(
+            Path(current_app.config["MEDIA_ROOT"]),
+            video.id,
+            retry_timeout=5,
+        )
     except (OSError, ValueError):
         current_app.logger.exception("终止视频 %s 后清理转码产物失败", video.id)
     return video, task_id
@@ -203,6 +214,7 @@ def delete_failed_video(video_id: int) -> None:
             Path(current_app.config["MEDIA_ROOT"]),
             video_id,
             original_file,
+            retry_timeout=3,
         )
     except (OSError, ValueError):
         current_app.logger.exception("管理员清理视频 %s 的媒体文件失败", video_id)

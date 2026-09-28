@@ -1,3 +1,6 @@
+from uuid import UUID
+
+
 class ValidationError(ValueError):
     pass
 
@@ -18,12 +21,16 @@ def validate_upload(form) -> dict:
         raise ValidationError("视频标题不能为空且不能超过150位")
     if description and len(description) > 500:
         raise ValidationError("视频描述不能超过500位")
-    return {
+    result = {
         "chapter_id": chapter_id,
         "title": title,
         "description": description,
         "sort_order": sort_order,
     }
+    upload_token = validate_upload_token(form.get("upload_token"))
+    if upload_token:
+        result["upload_token"] = upload_token
+    return result
 
 
 def validate_update(payload) -> dict:
@@ -58,3 +65,15 @@ def validate_replacement(form) -> dict:
     result.setdefault("description", None)
     result.setdefault("sort_order", 0)
     return result
+
+
+def validate_upload_token(value, *, required: bool = False) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        if required:
+            raise ValidationError("缺少上传任务标识")
+        return None
+    try:
+        return str(UUID(raw))
+    except (ValueError, AttributeError) as exc:
+        raise ValidationError("上传任务标识不正确") from exc
