@@ -1,0 +1,4 @@
+-r requirements.txt
+faster-whisper>=1.1,<2
+# PyAV 19 移除了 faster-whisper 1.x 仍调用的 metadata_errors 参数。
+av>=11,<17

@@ -10,8 +10,8 @@ set "CELERY_EXE=%PROJECT_ROOT%.venv\Scripts\celery.exe"
 set "ENV_FILE=%BACKEND_DIR%\.env"
 set "FFMPEG_EXE=%PROJECT_ROOT%tools\ffmpeg\bin\ffmpeg.exe"
 set "FFPROBE_EXE=%PROJECT_ROOT%tools\ffmpeg\bin\ffprobe.exe"
-set "EXPECTED_REVISION=a7d9e2c4f6b8"
-set "EXPECTED_TABLES=26"
+set "EXPECTED_REVISION=30cc40dd50ee"
+set "EXPECTED_TABLES=29"
 set /a PASS_COUNT=0
 set /a WARN_COUNT=0
 set /a FAIL_COUNT=0
@@ -168,7 +168,7 @@ if "!PYTHON_OK!"=="1" if "!ENV_OK!"=="1" (
     if errorlevel 1 (
         call :fail "MySQL 连接失败，或数据库迁移版本/业务表数量不匹配"
     ) else (
-        call :pass "MySQL 连接、迁移版本和 26 张业务表检查"
+        call :pass "MySQL 连接、迁移版本和 29 张业务表检查"
     )
     "%PYTHON_EXE%" -c "from app import create_app; a=create_app(); raise SystemExit(0 if a.extensions['redis'].ping() else 1)" >nul 2>&1
     if errorlevel 1 (

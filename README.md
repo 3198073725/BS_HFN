@@ -4,10 +4,13 @@
 
 ## 技术栈
 
+2026-11-19 更新：新增按视频生成的字幕与 DeepSeek AI 总结，学生端支持 Markdown 排版。项目现状和本次验收见 [项目总结与更新记录](docs/PROJECT_STATUS_2026-11-19.md)；另一台已部署电脑更新见 [本次更新操作指南](docs/UPDATE_2026-11-19.md)，可运行根目录 `update-project.bat`。
+
 - 前端：Vue 3、Vite、Vue Router、Pinia、Axios、Element Plus、ECharts 6、hls.js、Playwright
 - 后端：Python、Flask、Flask-SQLAlchemy、Flask-Migrate、Flask-JWT-Extended
 - 数据与任务：MySQL 8、Redis、Celery
 - 视频处理：FFmpeg、ffprobe、HLS
+- 视频字幕及 AI：FFmpeg 提取音频、faster-whisper 本地识别、DeepSeek API；字幕及总结按视频独立生成，教师审核发布。
 
 ## 项目内 FFmpeg
 
@@ -96,9 +99,9 @@ cd E:\BS_HFN\backend
 ..\.venv\Scripts\python.exe -m scripts.verify_async_video
 ```
 
-统计页面已使用 ECharts 6.1.0 按需加载的 SVG 柱状图，并保留数值卡片和表格：学生查看学习进度、得分率与累计记录，教师对比课程表现和发布状态，管理员展开“查看数据图表”查看角色与视频状态分布。图表直接使用现有统计接口，不生成虚构趋势；课程对比每页最多6项，支持完整数值表和容器尺寸变化。数据库当前有26张业务表（不含 Alembic 迁移版本表），论文实现口径见 [论文实现说明](docs/THESIS_IMPLEMENTATION.md)。
+统计页面已使用 ECharts 6.1.0 按需加载的 SVG 柱状图，并保留数值卡片和表格：学生查看学习进度、得分率与累计记录，教师对比课程表现和发布状态，管理员展开“查看数据图表”查看角色与视频状态分布。图表直接使用现有统计接口，不生成虚构趋势；课程对比每页最多6项，支持完整数值表和容器尺寸变化。数据库当前有29张业务表（不含 Alembic 迁移版本表），新增视频字幕、历史课程总结与访问策略、视频总结三张表；当前口径见 [项目总结](docs/PROJECT_STATUS_2026-11-19.md)。
 
-接口清单见 `docs/API.md`，后续顺序见 `docs/DEVELOPMENT_PLAN.md`。
+接口清单见 [API 清单](docs/API.md)，后续工作及功能边界见 [项目总结](docs/PROJECT_STATUS_2026-11-19.md)。
 
 ## 答辩演示数据
 

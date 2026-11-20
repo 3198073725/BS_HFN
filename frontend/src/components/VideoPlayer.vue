@@ -1,16 +1,32 @@
 <script setup>
 import Hls from 'hls.js/light'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import api from '../api/client'
 
 
 const props = defineProps({
   source: { type: String, required: true },
   startTime: { type: Number, default: 0 },
+  videoId: { type: Number, default: null },
 })
 const emit = defineEmits(['timeupdate', 'checkpoint'])
 
 const videoElement = ref(null)
 const playbackError = ref('')
+const subtitleUrl = ref('')
+let subtitleSequence = 0
+
+async function loadSubtitle() {
+  const requestId = ++subtitleSequence
+  if (subtitleUrl.value) URL.revokeObjectURL(subtitleUrl.value)
+  subtitleUrl.value = ''
+  if (!props.videoId || !localStorage.getItem('access_token')) return
+  try {
+    const text = await api.get(`/videos/${props.videoId}/subtitle`, { responseType: 'text' })
+    if (requestId !== subtitleSequence || !String(text).startsWith('WEBVTT')) return
+    subtitleUrl.value = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
+  } catch { /* 尚未生成字幕时保持正常播放。 */ }
+}
 let hls = null
 let mediaRecoveryAttempts = 0
 
@@ -73,14 +89,20 @@ function checkpoint() {
   emit('checkpoint', videoElement.value?.currentTime || 0)
 }
 
-onMounted(loadSource)
+onMounted(() => { loadSource(); void loadSubtitle() })
+watch(() => props.videoId, loadSubtitle)
 watch(() => props.source, loadSource)
 watch(() => props.startTime, (value) => {
   if (value > 0 && (videoElement.value?.currentTime || 0) < 2) applyStartTime()
 })
-onBeforeUnmount(() => hls?.destroy())
+onBeforeUnmount(() => {
+  ++subtitleSequence
+  hls?.destroy()
+  if (subtitleUrl.value) URL.revokeObjectURL(subtitleUrl.value)
+})
 
 defineExpose({
+  refreshSubtitle: loadSubtitle,
   getCurrentTime: () => videoElement.value?.currentTime || 0,
   seekTo: (seconds) => {
     if (!videoElement.value) return
@@ -105,7 +127,9 @@ defineExpose({
       @timeupdate="reportTime"
       @pause="checkpoint"
       @ended="checkpoint"
-    />
+    >
+      <track v-if="subtitleUrl" :key="subtitleUrl" kind="subtitles" :src="subtitleUrl" label="自动字幕" srclang="zh" default />
+    </video>
     <div v-if="playbackError" class="video-player-error" role="alert">
       <span aria-hidden="true">!</span>
       <strong>{{ playbackError }}</strong>

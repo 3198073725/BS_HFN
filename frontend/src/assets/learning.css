@@ -234,6 +234,10 @@
   gap: 24px;
 }
 
+.study-tab-content.study-summary-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .study-composer {
   display: grid;
   padding: 22px;

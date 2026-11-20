@@ -17,6 +17,8 @@ from .videos import videos_bp
 
 
 def register_blueprints(app: Flask) -> None:
+    from .video_ai import ai_bp
+    app.register_blueprint(ai_bp, url_prefix='/api')
     app.register_blueprint(system_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(users_bp, url_prefix="/api/users")

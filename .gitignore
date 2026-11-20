@@ -12,6 +12,7 @@ dist/
 playwright-report/
 test-results/
 tools/ffmpeg/
+tools/whisper-*/
 backend/.e2e-media/
 
 # Environment and local runtime data
@@ -39,5 +40,6 @@ tmp/
 # Editors / OS
 .idea/
 .vscode/
+.workbuddy/
 .DS_Store
 Thumbs.db

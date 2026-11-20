@@ -86,6 +86,12 @@ class BaseConfig:
     )
     VIDEO_PROCESSING_ASYNC = _env_bool("VIDEO_PROCESSING_ASYNC")
     JSON_AS_ASCII = False
+    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+    DEEPSEEK_BASE_URL = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
+    DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+    WHISPER_MODEL = _command_path('WHISPER_MODEL', 'small')
+    WHISPER_DEVICE = os.getenv('WHISPER_DEVICE', 'cpu')
+    WHISPER_COMPUTE_TYPE = os.getenv('WHISPER_COMPUTE_TYPE', 'int8')
 
 
 class DevelopmentConfig(BaseConfig):

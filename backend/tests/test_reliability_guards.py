@@ -288,6 +288,11 @@ def test_receipt_migration_preserves_legacy_progress(tmp_path, monkeypatch):
         # the equivalent previous metadata on SQLite rather than testing those.
         db.create_all()
         LearningProgressReceipt.__table__.drop(db.engine)
+        # 恢复到该历史版本的表集合，随后让迁移创建新功能表。
+        from app.models import CourseAISummary, VideoSubtitle, VideoAISummary
+        VideoAISummary.__table__.drop(db.engine)
+        CourseAISummary.__table__.drop(db.engine)
+        VideoSubtitle.__table__.drop(db.engine)
         stamp(directory=directory, revision='e5f6a7b8c9d0')
     context = create_learning_context(application)
     with application.app_context():

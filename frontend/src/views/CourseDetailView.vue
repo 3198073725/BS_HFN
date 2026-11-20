@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 
 import api from '../api/client'
 import VideoPlayer from '../components/VideoPlayer.vue'
+import CourseAISummary from '../components/CourseAISummary.vue'
 import { useDialogFocus } from '../utils/dialogFocus'
 import { useAuthStore } from '../stores/auth'
 import { appendProgress, flushProgress, readProgressQueue as readStoredProgressQueue } from '../utils/progressQueue'
@@ -568,6 +569,7 @@ onBeforeUnmount(() => {
             ref="videoPlayer"
             :key="selectedVideo.id"
             :source="selectedVideo.hls_url"
+            :video-id="selectedVideo.id"
             :start-time="startTime"
             @timeupdate="handleTimeUpdate"
             @checkpoint="handleCheckpoint"
@@ -621,18 +623,22 @@ onBeforeUnmount(() => {
         </aside>
       </div>
 
-      <section v-if="isStudent && learningState.joined && selectedVideo" class="study-workspace">
+      <section v-if="auth.user && selectedVideo" class="study-workspace">
         <div class="study-tabs" role="tablist" aria-label="学习工具">
-          <button :class="{ active: studyTab === 'notes' }" type="button" @click="studyTab = 'notes'">
+          <button v-if="isStudent && learningState.joined" :class="{ active: studyTab === 'notes' }" type="button" @click="studyTab = 'notes'">
             视频笔记 <span>{{ notes.length }}</span>
           </button>
-          <button :class="{ active: studyTab === 'questions' }" type="button" @click="studyTab = 'questions'">
+          <button v-if="isStudent && learningState.joined" :class="{ active: studyTab === 'questions' }" type="button" @click="studyTab = 'questions'">
             我的提问 <span>{{ questions.length }}</span>
           </button>
+          <button :class="{ active: studyTab === 'summary' || !isStudent || !learningState.joined }" type="button" @click="studyTab = 'summary'">AI 总结</button>
           <p v-if="progress">已学到 {{ formatTime(progress.current_time) }} · {{ progress.progress }}%</p>
         </div>
 
-        <div v-if="studyTab === 'notes'" class="study-tab-content">
+        <div v-if="studyTab === 'summary' || !isStudent || !learningState.joined" class="study-tab-content study-summary-content">
+          <CourseAISummary :key="selectedVideo.id" :video-id="selectedVideo.id" @subtitle-ready="videoPlayer?.refreshSubtitle()" />
+        </div>
+        <div v-else-if="studyTab === 'notes'" class="study-tab-content">
           <div class="study-composer">
             <div>
               <p class="eyebrow">学习笔记</p>

@@ -18,6 +18,7 @@ from .teaching_class import (
 )
 from .user import User
 from .video import Video
+from .course_ai import CourseAISummary, VideoSubtitle, VideoAISummary
 
 
 __all__ = [
